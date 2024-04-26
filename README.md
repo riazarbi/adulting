@@ -8,7 +8,7 @@ You can put any or all the scripts in a directory that is in your system's execu
 
 So - 
 
-```
+```zsh
 cd ~
 mkdir bin
 cd bin
@@ -17,7 +17,7 @@ git clone git@github.com:riazarbi/adulting.git
 
 Then add...
 
-```
+```zsh
 export PATH=/Users/riaz/bin/adulting:$PATH
 ```
 
@@ -31,7 +31,7 @@ Helps you keep track of interactions with people in your network. Reminds you wh
 
 If it's in your `PATH`, call it by typing `networker` in your terminal. This will present you with a menu like so:
 
-```
+```zsh
 No overdue interactions found.
 
 Hit [ENTER] to log an interaction or select from the options below:
@@ -60,7 +60,13 @@ Want to delete a contact? Just set their time bucket to `adhoc`.
 
 Data is stored in csv format in the `.adulting` hidden directory. You can use these files for data analysis if you want to get elaborate.
 
+## summary
 
+A utility to print a summary of your various adulting utilities.
+
+If it's in your `PATH`, call it by typing `summary` in your terminal.
+
+If you want to print a summary every time you open a terminal, add `summary` to the bottom of your `.bashrc` or `.zshrc` file.
 
 
 # Design goals

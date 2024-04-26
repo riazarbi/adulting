@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+
+import csv
+from datetime import datetime, timedelta
+from pathlib import Path
+import sys
+import os
+
+# Constants
+CONTACTS_FILE = 'network_data.csv'
+INTERACTIONS_FILE = 'network_interactions.csv'
+TIME_BUCKETS = ['year', 'bi-annual', 'quarter', 'month', 'week', 'adhoc']
+# Define time bucket intervals
+TIME_BUCKET_INTERVALS = {
+    'year': 365,
+    'bi-annual': 182,
+    'quarter': 91,
+    'month': 30,
+    'week': 7,
+    'adhoc': 0  # Assuming adhoc means no specific interval
+}
+
+
+# Function to initialize the data directory
+def initialize_data_directory():
+    # Get the user's home directory
+    user_home = os.path.expanduser("~")
+    # Define the path to the data directory
+    data_dir = os.path.join(user_home, ".adulting")
+    # Check if the data directory exists
+    if not os.path.exists(data_dir):
+        # If it doesn't exist, create it
+        os.makedirs(data_dir)
+    return data_dir
+
+
+# Initialize the data directory
+data_directory = initialize_data_directory()
+
+
+# Now you can specify the paths to your data files relative to the data directory
+contacts_file = os.path.join(data_directory, CONTACTS_FILE)
+interactions_file = os.path.join(data_directory, INTERACTIONS_FILE)
+
+# Data store initialization
+data = []
+interactions = []
+
+# Load existing data from CSV
+def load_data():
+    global data, interactions
+    if Path(contacts_file).exists():
+        with open(contacts_file, newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            data = list(reader)
+    if Path(interactions_file).exists():
+        with open(interactions_file, newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            interactions = list(reader)
+
+# Save data to CSV
+def save_data():
+    with open(contacts_file, 'w', newline='') as csvfile:
+        fieldnames = ['name', 'time_bucket', 'date_added']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in data:
+            writer.writerow(entry)
+    with open(interactions_file, 'w', newline='') as csvfile:
+        fieldnames = ['name', 'date', 'channel', 'notes']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for interaction in interactions:
+            writer.writerow(interaction)
+
+
+# Function for case-insensitive auto-completion
+def autocomplete(text, options):
+    text_lower = text.lower()
+    return [option for option in options if option.lower().startswith(text_lower)]
+
+# Function to get input with auto-completion (case insensitive)
+def input_with_autocomplete(prompt, options):
+    while True:
+        text = input(prompt)
+        if text in options:
+            return text
+        matches = autocomplete(text, options)
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            print("Multiple matches found:")
+            for match in matches:
+                print(match)
+        else:
+            print("No matches found.")
+
+
+# Function to list all contacts
+def list_all_contacts():
+    if not data:
+        print("No contacts found.")
+        return
+
+    sorted_data = sorted(data, key=lambda x: x['name'])
+
+    # Determine the maximum width of each column for alignment
+    max_name_width = max(len(person['name']) for person in sorted_data)
+    max_bucket_width = max(len(person['time_bucket']) for person in sorted_data)
+    max_date_added_width = max(len(person['date_added']) for person in sorted_data)
+
+    # Determine the width of the "Overdue Days" header
+    max_date_added_header_width = max(len("Overdue Days"), max_date_added_width)
+    max_bucket_header_width =max(len("Overdue Days"), max_bucket_width)
+
+    # Print headers with aligned columns
+    print("All Contacts:")
+    print(f"{'Name':<{max_name_width}} {'Time Bucket':<{max_bucket_header_width}} {'Date Added':<{max_date_added_header_width}}")
+    
+    # Print as aligned values
+    for person in sorted_data:
+        print(f"{person['name']:<{max_name_width}} {person['time_bucket']:<{max_bucket_header_width}} {person['date_added']:<{max_date_added_header_width}}")
+
+
+
+# Name Completer for search
+def get_name_completer():
+    names = [entry['name'] for entry in data]
+    return WordCompleter(names, ignore_case=True)
+
+
+# Search and display entry
+def search_entry(search_name = None):
+    if search_name is None:
+        search_name = input_with_autocomplete("Enter the name to search: ", [entry['name'] for entry in data])
+
+    
+    found = False
+    # Display person information
+        
+    for entry in data:
+        if entry['name'].lower() == search_name.lower():
+            print(f"Name: {entry['name']}, Time Bucket: {entry['time_bucket']}, Date Added: {entry['date_added']}")
+            found = True
+            break
+
+    if not found:
+        print("No entry found for that name.")
+        return
+
+    # Fetch and display last 10 interactions
+    person_interactions = [interaction for interaction in interactions if interaction['name'].lower() == search_name.lower()]
+    # Ensure datetime format matches 'YYYY-MM-DD HH:MM'
+    person_interactions.sort(key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d %H:%M'), reverse=True)
+    print("\nLast 10 Interactions:")
+    if not person_interactions:
+        print("No interactions found for this person.")
+    else:
+        for interaction in person_interactions[:10]:  # Safely returns up to 10 or fewer interactions
+            print(f"{interaction['date']} | {interaction['channel']} | {interaction['notes']}")
+
+
+
+
+# Add a new person
+def add_person():
+    name = input("Enter the person's name: ")
+    # Check for duplicates
+    if any(entry['name'].lower() == name.lower() for entry in data):
+        print("An entry with that name already exists. Duplicate entries are not allowed.")
+        return
+    for index, bucket in enumerate(TIME_BUCKETS, 1):
+        print(f"{index}. {bucket}")
+    choice = int(input("Choose the time bucket (enter a number): ")) - 1
+    if 0 <= choice < len(TIME_BUCKETS):
+        time_bucket = TIME_BUCKETS[choice]
+    else:
+        print("Invalid choice. Please try again.")
+        return
+    date_added = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    new_entry = {
+        'name': name,
+        'time_bucket': time_bucket,
+        'date_added': date_added
+    }
+    data.append(new_entry)
+    save_data()
+    print("Person added successfully.")
+
+
+# Update an entry
+def update_entry():
+    update_name = input_with_autocomplete("Enter the name to search: ", [entry['name'] for entry in data])    
+    
+    entries = [entry for entry in data if entry['name'].lower() == update_name.lower()]
+    if entries:
+        entry = entries[0]  # Automatically select the first entry since names are unique
+        print(f"Name: {entry['name']}, Time Bucket: {entry['time_bucket']}, Date Added: {entry['date_added']}")
+        
+        print(f"Current Time Bucket: {entry['time_bucket']}")
+        for index, bucket in enumerate(TIME_BUCKETS, 1):
+            print(f"{index}. {bucket}")
+        choice = int(input("Enter new time bucket (enter a number): ")) - 1
+        if 0 <= choice < len(TIME_BUCKETS):
+            entry['time_bucket'] = TIME_BUCKETS[choice]
+            save_data()
+            print("Entry updated successfully.")
+        else:
+            print("Invalid time bucket choice. Please try again.")
+    else:
+        print("No entries found with that name.")
+
+
+# Log Interaction
+def log_interaction():
+    search_name = input_with_autocomplete("Enter the name of the contact: ", [entry['name'] for entry in data])
+    found = False
+    
+    # Display person information
+    for entry in data:
+        if entry['name'].lower() == search_name.lower():
+            found = True
+            break
+
+    if not found:
+        print("No entry found for that name.")
+        return
+    
+    print(f"\n")
+    search_entry(search_name.lower())
+    
+    # Prompt for date and time or use current
+    date_input = input(f"\n\nDate and time (YYYY-MM-DD HH:MM) or press enter for now: ")
+    if not date_input:
+        date = datetime.now().strftime('%Y-%m-%d %H:%M')
+    else:
+        try:
+            # Validate and use the user input
+            date = datetime.strptime(date_input, '%Y-%m-%d %H:%M').strftime('%Y-%m-%d %H:%M')
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD HH:MM format.")
+            return
+    channel = input("Channel of interaction (e.g., email, phone, meeting, message): ")
+    if not channel:
+        channel = "unknown"
+    notes = input("Notes (up to 100 words): ")
+    if not notes:
+        notes = "None."
+
+    channel = ' '.join(channel.split()[:10])  # Limit to 100 words
+    notes = ' '.join(notes.split()[:100])  # Limit to 100 words
+
+    new_interaction = {
+        'name': search_name,
+        'date': date,
+        'channel': channel,
+        'notes': notes
+    }
+    interactions.append(new_interaction)
+    save_data()
+    print("Interaction logged successfully.")
+
+
+# Function to find overdue interactions
+def find_overdue_interactions():
+    today = datetime.now()
+    overdue_persons = []
+    for person in data:
+        time_bucket = person['time_bucket']
+        if time_bucket == 'adhoc':
+            # Skip persons with adhoc time bucket
+            continue
+
+        # Find the date of the last interaction for each person
+        interactions_list = [inter for inter in interactions if inter['name'].lower() == person['name'].lower()]
+        if interactions_list:
+            last_interaction_date = max(datetime.strptime(inter['date'], '%Y-%m-%d %H:%M') for inter in interactions_list)
+            interval = TIME_BUCKET_INTERVALS[time_bucket]
+            due_date = last_interaction_date + timedelta(days=interval)
+        else:
+            # If no interactions logged, consider the person overdue by default
+            due_date = today
+
+        # Check if today's date is past the due date
+        if today >= due_date:
+            overdue_days = (today - due_date).days
+            overdue_persons.append({'name': person['name'], 'overdue_days': overdue_days, 'time_bucket': time_bucket})
+
+    if overdue_persons:
+        # Sort overdue persons by descending order of overdue days
+        overdue_persons.sort(key=lambda x: x['overdue_days'], reverse=True)
+
+        # Determine the maximum width of each column for alignment
+        max_name_width = max(len(person['name']) for person in overdue_persons)
+        max_days_width = len(str(max(person['overdue_days'] for person in overdue_persons)))
+        max_bucket_width = max(len(person['time_bucket']) for person in overdue_persons)
+
+        # Determine the width of the "Overdue Days" header
+        max_days_header_width = max(len("Overdue Days"), max_days_width)
+        max_bucket_header_width =max(len("Overdue Days"), max_bucket_width)
+
+        # Print headers with aligned columns
+        print("Overdue Interactions:\n")
+        print(f"{'Name':<{max_name_width}} {'Overdue Days':>{max_days_header_width}} {'Time Bucket':>{max_bucket_header_width}}")
+        
+        # Print as aligned values
+        for person in overdue_persons:
+            print(f"{person['name']:<{max_name_width}} {person['overdue_days']:>{max_days_header_width}} {person['time_bucket']:>{max_bucket_header_width}}")
+    else:
+        print("No overdue interactions found.")
+
+
+# Define menu options
+menu_options = {
+    '1': add_person,
+    '2': update_entry,
+    '3': search_entry,
+    '4': find_overdue_interactions,
+    '5': list_all_contacts,
+    '6': log_interaction
+}
+
+
+# Main function
+def main():
+    load_data()
+    if len(sys.argv) > 1:
+        # If a command-line argument is provided, execute the corresponding action
+        selected_option = sys.argv[1]
+        if selected_option in menu_options:
+            menu_options[selected_option]()
+        else:
+            print("Invalid option.")
+    else:
+        # If no command-line argument is provided, proceed with the interactive menu
+        interactive_menu()
+
+# Main menu
+def interactive_menu():
+    find_overdue_interactions()
+    while True:
+        print("\nHit [ENTER] to log an interaction or select from the options below:")
+        print("1.      Add Contact")
+        print("2.      Update Time Bucket")
+        print("3.      View Contact")
+        print("4.      Overdue Interactions")
+        print("5.      List All Contacts")
+        print("6.      Log Interaction")
+        print("7.      Exit")
+        choice = input("Selection: ").strip()
+        if not choice:
+            log_interaction()
+        elif choice == '1':
+            add_person()
+        elif choice == '2':
+            update_entry()
+        elif choice == '3':
+            search_entry()
+        elif choice == '4':
+            find_overdue_interactions()
+        elif choice == '5':
+            list_all_contacts()
+        elif choice == '6':
+            log_interaction()        
+        elif choice == '7':
+            print("Exiting...")
+            break
+        else:
+            print("Invalid choice. Please enter a number from 1 to 6 or press Enter to exit.")
+
+
+if __name__ == '__main__':
+    main()

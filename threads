@@ -85,7 +85,6 @@ if [[ "$1" == "--tail" ]]; then
         continue
       fi
       tail -n 1 "$f" | column -t -s '|'
-      echo "-----------------------------------------------------"
     done
   exit 0
 fi

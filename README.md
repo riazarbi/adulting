@@ -60,6 +60,58 @@ Want to delete a contact? Just set their time bucket to `adhoc`.
 
 Data is stored in csv format in the `.adulting` hidden directory. You can use these files for data analysis if you want to get elaborate.
 
+
+## threads
+
+I often struggle to keep track of all the projects I am involved in. Sometimes I'll forget that I've started something and only rediscover it when I get an angry email from someone who was waiting for the finished product! This utility helps me keep a record of all my open threads, and helps refresh my memory on the status of each thread. 
+
+What is a thread? Anything, really. 'Beetle Restoration', 'JIRA-1234', 'PTA Bake Sale' or whatever else you care about. Each thread is saved in its own file in `.adulting/threads/`. 
+
+If this file is in your `PATH`, call it by typing `threads` in your terminal.
+
+When you invoke `threads`, it will read in the data from the various threads files and work through each thread one after the other. For each thread, you'll get a printout of the last few logs that you made against that thread, and you will be provided with a prompt to add a new log. You can also just hit [Enter] to skip or type CLOSED to remove the thread from your regular review cycle. I try to run threads once a day, at the end of the day. The main review cycle looks something like this:
+
+```zsh
+###================ THREAD LOGGER ================###
+
+These are the current threads ==>
+PTA Bake Sale
+
+Working through threads...
+
+-----------------------------------------------------
+
+THREAD  ===>  PTA  BAKE  SALE
+
+2024-04-26    test
+
+Enter a new log:
+  press [Enter] to skip...
+  type CLOSED to close the thread...
+
+Skipping...
+
+=====================================================
+
+Would you like to create a new thread [y/N]? 
+```
+
+There are also several reports you can generate:
+
+- `threads --report` summarises all the activity by thread for the last week.  
+- `threads --daily YYYY-MM-DD` gives you the activities you completed on a particular day. This is good for time tracking!
+- `threads --tail` gives you the last reported activity for each open thread. This is nice for a concise overview of where you are with everything going on in your life.
+
+```zsh
+riaz@Riazs-MacBook-Pro % threads --tail
+THREAD  ===>  PTA  BAKE  SALE
+2024-04-26    test
+-----------------------------------------------------
+THREAD  ===>  SGB
+2024-04-26    Still waiting for my email address.
+-----------------------------------------------------
+```
+
 ## summary
 
 A utility to print a summary of your various adulting utilities.

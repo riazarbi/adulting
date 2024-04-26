@@ -1,0 +1,166 @@
+#!/bin/bash
+
+THREADS_DIR="$HOME/.adulting/threads"
+THREADS="$THREADS_DIR"/*
+
+# Check if the directory exists, if not, create it
+if [ ! -d "$THREADS_DIR" ]; then
+    mkdir -p "$THREADS_DIR"
+fi
+
+# Get the current date
+dt=$(date '+%Y-%m-%d')
+
+# Get the lag for reporting
+LAG=7
+
+# Get the date 7 days ago
+if [[ $(uname) == "Linux" ]]; then
+    last_week=$(date -d "$dt - $LAG days" '+%Y-%m-%d')
+elif [[ $(uname) == "Darwin" ]]; then
+    last_week=$(date -v -${LAG}d '+%Y-%m-%d')
+else
+    echo "Unsupported operating system"
+    exit 1
+fi
+
+# Get tomorrow
+if [[ $(uname) == "Linux" ]]; then
+    tomorrow=$(date -d "$dt + 1 days" '+%Y-%m-%d')
+elif [[ $(uname) == "Darwin" ]]; then
+    tomorrow=$(date -v +1d '+%Y-%m-%d')
+else
+    echo "Unsupported operating system"
+    exit 1
+fi
+
+
+#######################################################
+# Reporter
+if [[ "$1" == "--report" ]]; then
+  echo
+  echo "###================ THREAD REPORT $last_week TO $dt ================###"
+  for f in $THREADS
+    do
+      lag_date=$last_week
+      printf '%s\n' "THREAD ===> $(basename "$f") : $lag_date to $dt"
+      while [[ $lag_date != $tomorrow ]]
+      do
+        thread_name=$(basename "$f")
+          if [[ $(grep $lag_date "$f") ]]; then
+            grep $lag_date "$f"
+          fi
+        lag_date=$(date -jf "%Y-%m-%d" -v +1d "$lag_date" '+%Y-%m-%d')
+      done
+      echo
+    done
+  exit 0
+fi
+
+#####################################################
+# Daily reporter
+if [[ "$1" == "--daily" ]]; then
+  echo
+  echo "###================ THREAD REPORT $2 ================###"
+  for f in $THREADS
+    do
+      lag_date="$2"
+      thread_name=$(basename "$f")
+        if [[ $(grep $lag_date "$f") ]]; then
+            grep $lag_date "$f"
+        fi
+    done
+  exit 0
+fi
+
+#######################################################
+# Tail Reporter
+if [[ "$1" == "--tail" ]]; then
+  for f in $THREADS
+    do
+      printf '%s\n' "THREAD ===> $(basename "$f")" | column -t  | awk '{ print toupper($0) }'
+      status=$(tail -n 1 "$f" | column -t -s '|' | awk '{ print $2 }')
+      if [ $status == "CLOSED" ]
+      then
+        continue
+      fi
+      tail -n 1 "$f" | column -t -s '|'
+      echo "-----------------------------------------------------"
+    done
+  exit 0
+fi
+
+
+######################################################
+# Logger
+echo
+echo "###================ THREAD LOGGER ================###"
+# Work through existing threads, prompting for new logs
+if [ "$(ls $THREADS_DIR)" ]; then
+  echo
+  echo "These are the current threads ==>"
+  ls $THREADS_DIR
+  echo
+  echo "Working through threads..."
+  echo
+  for f in $THREADS
+    do
+      echo "-----------------------------------------------------"
+      echo
+      printf '%s\n' "THREAD ===> $(basename "$f")" | column -t  | awk '{ print toupper($0) }'
+      status=$(tail -n 1 "$f" | column -t -s '|' | awk '{ print $2 }')
+      if [ $status == "CLOSED" ]
+      then
+        echo $(basename "$f") "is CLOSED"
+        continue
+      fi
+      echo
+      # take action on each file. "$f" store current file name
+      tail -n 5 "$f" | column -t -s '|'
+      echo
+      echo "Enter a new log:"
+      echo "  press [Enter] to skip..."
+      echo "  type CLOSED to close the thread..."
+      read log_entry
+      if [ -z "$log_entry" ]
+      then
+        echo "Skipping..."
+        echo
+      else
+        echo "Committing log entry..."
+        log_entry="$dt | $log_entry"
+        echo $log_entry >> "$f"
+        echo "Done!"
+        echo
+      fi
+    done
+  echo "====================================================="
+else
+    echo "$THREADS_DIR is empty."
+    echo
+    echo "====================================================="
+fi
+
+# Ask if you want to make a new thread
+echo
+while true;
+do
+    read -r -p "Would you like to create a new thread [y/N]? " response
+    if [[ $response =~ ^([yY][eE][sS]|[yY])$ ]]
+    then
+        echo "Enter name of new thread. Make it filename compatible. "
+        read -r thread
+        echo "New thread created..."
+        echo "Enter the first log entry for $thread "
+        read log_entry
+        log_entry="$dt | $log_entry"
+        echo "First entry committed!"
+        echo "$log_entry" >> "$THREADS_DIR/$thread"
+        echo
+        echo "--------------------------------------------------"
+    else
+        exit 0
+    fi
+done
+
+echo "Exiting."

@@ -9,7 +9,10 @@ cyan='\e[1;36m%s\e[0m\n'
 gray='\e[1;30m%s\e[0m\n'
 
 printf "$green" "adulting summary"
+printf "$gray" "-----------------------------------------------------"
 networker 4
-
+printf "$gray" "-----------------------------------------------------"
+threads --tail
+printf "$gray" "-----------------------------------------------------"
 printf "\n"
 

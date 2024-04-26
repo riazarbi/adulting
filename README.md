@@ -18,7 +18,7 @@ git clone git@github.com:riazarbi/adulting.git
 Then add...
 
 ```
-export PATH=/Users/riaz/bin:$PATH
+export PATH=/Users/riaz/bin/adulting:$PATH
 ```
 
 ...to the bottom of your `.zshrc` or `.bashrc` file.

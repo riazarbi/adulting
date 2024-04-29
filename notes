@@ -1,0 +1,229 @@
+#!/bin/bash
+
+NOTES_DIR="$HOME/.adulting/notes"
+THREAD_DIR="$HOME/.adulting/threads"
+# Check if the directory exists, if not, create it
+if [ ! -d "$NOTES_DIR" ]; then
+    mkdir -p "$NOTES_DIR"
+fi
+
+# Define a function to edit a note based on the operating system
+edit_note() {
+    # Check the operating system
+    if [[ $(uname) == "Linux" ]]; then
+        nano -"$@" note
+    elif [[ $(uname) == "Darwin" ]]; then
+        nano "$@" note
+    else
+        # If it's neither Linux nor macOS, print an error message
+        echo "Unsupported operating system"
+    fi
+}
+
+if [[ $1 = "--new" ]] || [ -z "$1" ]; then
+	# Determine timestamp
+	dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	# Set note filename
+	mkdir -p "$NOTES_DIR"
+	note="$NOTES_DIR/$dt.md"
+
+	# Determine note type
+	# Feel free to edit these options
+	PS3="What type of note is this? : "
+	select type in meeting workshop report correspondence blog study writing log deskwork
+	do
+    		echo ""
+    		break
+	done
+
+        # Determine the thread
+        THREADS="$THREAD_DIR/*"
+        # Set IFS to only newline character
+        IFS=$'\n'
+        PS3="What thread does this relate to? : "
+        select thread in "uncategorized" $(ls "$THREAD_DIR")
+        do
+                echo ""
+                break
+        done
+        unset IFS
+
+	# Determine the topic
+	echo "Enter the topic of this $type note:"
+	read topic
+        echo
+	# Write metadata
+cat > "$note" << EOM
+# Topic:		$topic  
+> Type:			$type  
+> Thread:		$thread  
+EOM
+
+	# Get additional data if it's a meeting
+	if [[ $type = "meeting" ]]
+	then
+    		echo "Enter the counterparty:"
+    		read counterparty
+    		echo
+    		echo "Enter the location:"
+    		read location
+    		echo
+    		echo "Enter attendees, separated by semicolon (eg Riaz Arbi; John Smith etc)"
+    		read attendees
+    		echo
+cat >> "$note" << EOM
+> Counterparty:		$counterparty  
+> Location:		$location  
+> Attendees:		$attendees  
+EOM
+	# Get additional data if it's correspondence
+	elif [[ $type = "correspondence" ]]
+	then
+    		echo "Enter the participants:"
+    		read participants
+    		echo
+cat >> "$note" << EOM
+> Participants:       $participants  
+EOM
+	fi
+
+	# Separate the metadata from the actual note
+cat >> "$note" << EOM
+> Timestamp:            $dt  
+
+--------------------------------------------------------------------
+
+# Content
+
+--------------------------------------------------------------------
+
+# Questions
+
+--------------------------------------------------------------------
+
+# Actions
+
+-------------------------------------------------------------------
+
+# Timesheet
+
+EOM
+        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+
+        edit_note $note
+
+        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+else
+
+# Rebuild directory listing
+for f in $NOTES_DIR/*
+        do
+                filenum=$((filenum+1))
+                note_info=$filenum
+                note_info+="|"
+                note_info+=$(basename $f)
+                note_info+="|"
+                note_info+=$(basename $f | cut -c 1-10)  
+                note_info+="|"
+                note_info+=$(grep "> Thread:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+                note_info+="|"
+                note_info+=$(grep "> Type:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+                note_info+="|"
+                note_info+=$(grep "# Topic:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+                notes_unfiltered="${notes_unfiltered}"$'\n'"${note_info}"
+        done
+
+# Remove the first newline
+notes_unfiltered=${notes_unfiltered:1}
+
+if [ ! -z "$2" ]; then
+  notes_all=$(echo "$notes_unfiltered" | grep "$2" | awk -F  "/" '/1/ {print $NF}')
+else
+  notes_all="$notes_unfiltered"
+fi
+
+# Process according to flags
+if [[ $1 = "--last" ]]; then
+        last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
+        note="$NOTES_DIR/$last_note"
+        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+        edit_note $note
+        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+
+elif [[ $1 = "--read" ]]; then
+        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+        echo "Which note do you want to read?"
+        read note_number
+        note_number="$note_number"p
+        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+        echo $selected_note
+        note="$NOTES_DIR/$selected_note" 
+        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note" 
+        /usr/bin/pandoc -s -f gfm -t html $note -c syncthing/scripts/pandoc.css > /tmp/tempfile.html 
+	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
+        firefox /tmp/tempfile.html &
+
+elif [[ $1 = "--delete" ]]; then
+        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+        echo "Which note do you want to delete?"
+        read note_number
+        note_number="$note_number"p
+        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+        echo $selected_note
+        note="$NOTES_DIR/$selected_note"
+        rm $note
+
+elif [[ $1 = "--edit" ]]; then
+        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+        echo "Which note do you want to edit?"
+        read note_number
+        note_number="$note_number"p
+        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+        echo $selected_note
+	note="$NOTES_DIR/$selected_note"
+        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+        edit_note $note
+        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+
+elif [[ $1 = "--actions" ]]; then
+        rm -f $NOTES_DIR/action_items.md
+        filenum=0
+        find $NOTES_DIR -name '*.md' \
+            -execdir grep -r -i -Hn "\- \[ \]" \{} + |  \
+             #sed 's/^..//' | \
+             sed s/./'|'/23 | \
+             sed 's/\(.*\)[:]/\1|/' | \
+             awk 'BEGIN {FS="|"; OFS="\t"} {print $1, $2, $3}' | \
+             awk 'BEGIN {FS="\t"; OFS="\t"} {gsub(/\:|\"|\047/,"",$3)}1' | \
+             sort -k1  >> $NOTES_DIR/action_items.md
+        edit_note $NOTES_DIR/action_items.md
+
+        # Replace the placeholder YOUR_FILE.txt with your actual file name containing the entries
+        input_file=$NOTES_DIR/action_items.md
+
+        # Reading each line from the file
+        while IFS= read -r line; do
+
+            rel_file_path=$(echo "$line" | awk -F'\t' '{print $1}')
+            line_number=$(echo "$line" | awk -F'\t' '{print $2}')
+            new_content=$(echo "$line" | awk -F'\t' '{$1=$2=""; print substr($0, 3)}')
+
+            file_path=$NOTES_DIR/$rel_file_path
+
+            # Check if the file exists before attempting to edit
+            if [ -f "$file_path" ]; then
+                # Use awk to replace the line and output to a temporary file
+                awk -v line_num="$line_number" -v new_line="$new_content" 'NR == line_num {$0=new_line} {print}' "$file_path" > temp_file.md
+                # Move the temporary file to original file
+                mv temp_file.md "$file_path"
+            else
+                echo "File not found: $file_path"
+            fi
+        done < "$input_file"
+
+        rm -f $NOTES_DIR/action_items.md
+
+else
+       echo "Please use a flag. Either --read, --edit, --delete, --last, --new or --actions."
+fi
+fi

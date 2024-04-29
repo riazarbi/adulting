@@ -112,11 +112,24 @@ THREAD  ===>  SGB
 -----------------------------------------------------
 ```
 
+## notes
+
+This is my really simple note taker. It's just a single bash script, and it saves all notes to `~/.adulting/notes`. If it's in your `PATH`, call it by typing `notes` in your terminal. It relies on `nano` as the text editor, but there's no reason you can't swap it out for something else. 
+
+There are six basic operations:
+
+1. `--new` will take you through a dialog to create a new note. It'sll ask you what type of note it is, what thread it relates to (see `threads` above), the topic of the note etc. Then it'll open up a prepopulated note in your text editor, which you can fill out, and save. 
+2. `--edit` will present you with a list of all your notes, ordered by time, and ask you which one you want to edit, and then open it up for you.
+3. `--delete` will present you with a list fo notes and ask you which one you want to delete and then delete it.
+4. `--last` will open the last note.
+5. `--read` will open a note in read mode in a pretty format. [actually this is currently broken]
+6. `--actions` will scan all your notes for markdown-formatted task list items that are open (`- [ ] ...`) and present them in a single text editor panel. You can edit them (mark them closed etc) and, when you save and close the editor, all the action items will be changed in the source notes files.
+
+If you just type `notes`, with no argument, you'll automatically be sent through the `--new` workflow.
+
 ## summary
 
-A utility to print a summary of your various adulting utilities.
-
-If it's in your `PATH`, call it by typing `summary` in your terminal.
+A utility to print a summary of your various adulting utilities. If it's in your `PATH`, call it by typing `summary` in your terminal.
 
 If you want to print a summary every time you open a terminal, add `summary` to the bottom of your `.bashrc` or `.zshrc` file.
 

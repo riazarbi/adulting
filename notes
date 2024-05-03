@@ -195,7 +195,7 @@ elif [[ $1 = "--actions" ]]; then
              sed 's/\(.*\)[:]/\1|/' | \
              awk 'BEGIN {FS="|"; OFS="\t"} {print $1, $2, $3}' | \
              awk 'BEGIN {FS="\t"; OFS="\t"} {gsub(/\:|\"|\047/,"",$3)}1' | \
-             sort -k1  >> $NOTES_DIR/action_items.md
+             sort -k3  >> $NOTES_DIR/action_items.md
         edit_note $NOTES_DIR/action_items.md
 
         # Replace the placeholder YOUR_FILE.txt with your actual file name containing the entries

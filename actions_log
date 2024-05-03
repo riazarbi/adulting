@@ -1,7 +1,7 @@
 import os
 import csv
 from datetime import datetime
-import argparse
+
 
 def parse_markdown(file_path):
     data = {

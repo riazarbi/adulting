@@ -1,0 +1,79 @@
+import os
+import csv
+from datetime import datetime
+import argparse
+
+def parse_markdown(file_path):
+    data = {
+        'Topic': None,
+        'Timestamp': None,
+        'Actions': []
+    }
+    with open(file_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            if line.startswith('# Topic:'):
+                data['Topic'] = line.split(':')[-1].strip()
+            elif line.startswith('> Timestamp:'):
+                data['Timestamp'] = line.split(':')[-1].strip()
+            elif line.strip().startswith('- ['):
+                status = 'DONE' if 'x]' in line else 'OPEN'
+                task = line.split(']')[-1].strip()
+                data['Actions'].append((task, status))
+    return data
+
+def read_existing_csv(filename):
+    entries = {}
+    try:
+        with open(filename, mode='r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                key = (row['Action Item Text'], row['Timestamp'])
+                entries[key] = row
+    except FileNotFoundError:
+        pass
+    return entries
+
+def write_to_csv(entries, filename):
+    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+        fieldnames = ['Filename', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in entries.values():
+            writer.writerow(entry)
+
+def process_folder(folder_path, output_csv):
+    entries = read_existing_csv(output_csv)
+
+    for filename in os.listdir(folder_path):
+        if filename.endswith('.md'):
+            file_path = os.path.join(folder_path, filename)
+            markdown_data = parse_markdown(file_path)
+
+            for action, status in markdown_data['Actions']:
+                key = (action, markdown_data['Timestamp'])
+                current_time = datetime.now()
+                timestamp_datetime = datetime.strptime(markdown_data['Timestamp'], '%Y-%m-%d-%H-%M-%S')
+                days_interval = (current_time - timestamp_datetime).days
+
+                if key in entries:
+                    if entries[key]['Action Item Status'] == 'DONE':
+                        continue  # Skip updating DONE items
+                    entries[key]['Action Item Status'] = status
+                else:
+                    entries[key] = {
+                        'Filename': os.path.basename(file_path),
+                        'Topic': markdown_data['Topic'],
+                        'Timestamp': markdown_data['Timestamp'],
+                        'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'Action Item Text': action,
+                        'Action Item Status': status,
+                        'Days Interval': days_interval
+                    }
+
+    write_to_csv(entries, output_csv)
+
+# Usage
+home_path = os.path.expanduser('~')
+folder_path = os.path.join(home_path, '.adulting', 'notes')
+output_csv = os.path.join(home_path, '.adulting', 'actions_log.csv')
+process_folder(folder_path, output_csv)

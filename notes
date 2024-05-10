@@ -2,6 +2,7 @@
 
 NOTES_DIR="$HOME/.adulting/notes"
 THREAD_DIR="$HOME/.adulting/threads"
+CSS_LOCATION="$HOME/.adulting/pandoc.css"
 # Check if the directory exists, if not, create it
 if [ ! -d "$NOTES_DIR" ]; then
     mkdir -p "$NOTES_DIR"
@@ -159,9 +160,11 @@ elif [[ $1 = "--read" ]]; then
         echo $selected_note
         note="$NOTES_DIR/$selected_note" 
         echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note" 
-        /usr/bin/pandoc -s -f gfm -t html $note -c syncthing/scripts/pandoc.css > /tmp/tempfile.html 
+        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
+        #pandoc $note -s -o /tmp/tempfile.pdf
 	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
-        firefox /tmp/tempfile.html &
+        #open -g /tmp/tempfile.pdf &
+        open -g $note &
 
 elif [[ $1 = "--delete" ]]; then
         echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
@@ -194,8 +197,44 @@ elif [[ $1 = "--actions" ]]; then
              sed s/./'|'/23 | \
              sed 's/\(.*\)[:]/\1|/' | \
              awk 'BEGIN {FS="|"; OFS="\t"} {print $1, $2, $3}' | \
-             awk 'BEGIN {FS="\t"; OFS="\t"} {gsub(/\:|\"|\047/,"",$3)}1' | \
-             sort -k3  >> $NOTES_DIR/action_items.md
+             #awk 'BEGIN {FS="\t"; OFS="\t"} {gsub(/\:|\"|\047/,"",$3)}1' | \
+
+             awk 'BEGIN {FS="\t"; OFS="\t"; srand()}
+                {
+                    # Strip unwanted characters
+                    gsub(/\:|\"|\047/,"",$3);
+                
+                    # Check for the pattern followed by a 5-character key containing at least one digit
+                    if ($3 ~ /- \[ \] .*[0-9].*/) {
+                        print $1, $2, $3;
+                    } else {
+                        # Generate a random 5-character alphanumeric key ensuring at least one character is a digit
+                        new_key = "";
+                        digit_placed = 0;  # Flag to ensure at least one digit is included
+                
+                        for (i=1; i<=5; i++) {
+                            if (i == 5 && digit_placed == 0) {
+                                # Ensure last character is a digit if none have been placed
+                                new_key = new_key substr("0123456789", int(rand() * 10) + 1, 1);
+                            } else {
+                                # Randomly choose between a digit and a letter
+                                if (int(rand() * 2)) {
+                                    # Append a digit
+                                    new_key = new_key substr("0123456789", int(rand() * 10) + 1, 1);
+                                    digit_placed = 1;
+                                } else {
+                                    # Append a letter
+                                    new_key = new_key substr("ABCDEFGHIJKLMNOPQRSTUVWXYZ", int(rand() * 26) + 1, 1);
+                                }
+                            }
+                        }
+                        # Insert the new key right after the "- [ ]"
+                        sub(/- \[ \]/, "& " new_key, $3);
+                        print $1, $2, $3;
+                    }
+                }' |
+                sort -k3 >> $NOTES_DIR/action_items.md
+
         edit_note $NOTES_DIR/action_items.md
 
         # Replace the placeholder YOUR_FILE.txt with your actual file name containing the entries
@@ -222,6 +261,7 @@ elif [[ $1 = "--actions" ]]; then
         done < "$input_file"
 
         rm -f $NOTES_DIR/action_items.md
+        actions --update 
 
 else
        echo "Please use a flag. Either --read, --edit, --delete, --last, --new or --actions."

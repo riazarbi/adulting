@@ -1,18 +1,24 @@
+#!/usr/bin/env python3
+
 import os
 import csv
 from datetime import datetime
 import argparse
+import subprocess
 
 def parse_markdown(file_path):
     data = {
         'Topic': None,
         'Timestamp': None,
+        'Thread': None,
         'Actions': []
     }
     with open(file_path, 'r', encoding='utf-8') as file:
         for line in file:
             if line.startswith('# Topic:'):
                 data['Topic'] = line.split(':')[-1].strip()
+            elif line.startswith('> Thread:'):  # Parsing thread line
+                data['Thread'] = line.split(':')[-1].strip()
             elif line.startswith('> Timestamp:'):
                 data['Timestamp'] = line.split(':')[-1].strip()
             elif line.strip().startswith('- ['):
@@ -35,7 +41,7 @@ def read_existing_csv(filename):
 
 def write_to_csv(entries, filename):
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
-        fieldnames = ['Filename', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
+        fieldnames = ['Filename', 'Thread', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         for entry in entries.values():
@@ -46,7 +52,7 @@ def query_csv(query, filename):
     results = []
     
     for key, entry in entries.items():
-        if query.lower() in entry['Action Item Text'].lower():
+        if query.lower() in entry['Thread'].lower():
             # Reformat the timestamp to show only the date
             timestamp_date = datetime.strptime(entry['Timestamp'], '%Y-%m-%d-%H-%M-%S').strftime('%Y-%m-%d')
             
@@ -62,14 +68,14 @@ def query_csv(query, filename):
     results.sort(key=lambda x: (-ord(x['Status'][0]), x['Action Item']))
 
     # Define column widths
-    timestamp_width = 6
+    timestamp_width = 10
     status_width = 5
     days_interval_width = 5
     topic_width = 30
     action_text_width = 50
 
     # Print headers with alignment
-    print(f"{'Timestamp':<{timestamp_width}}\t{'Status':<{status_width}}\t{'Age':<{days_interval_width}}\t{'Topic':<{topic_width}}\t{'Action Item':<{action_text_width}}")
+    print(f"{'Opened':<{timestamp_width}}\t{'Status':<{status_width}}\t{'Age':<{days_interval_width}}\t{'Topic':<{topic_width}}\t{'Action Item':<{action_text_width}}")
 
     # Print results
     for result in results:
@@ -112,6 +118,7 @@ def process_folder(folder_path, output_csv):
                         'Topic': markdown_data['Topic'],
                         'Timestamp': markdown_data['Timestamp'],
                         'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'Thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
                         'Action Item Text': action,
                         'Action Item Status': status,
                         'Days Interval': days_interval
@@ -122,6 +129,7 @@ def process_folder(folder_path, output_csv):
 def main():
     parser = argparse.ArgumentParser(description="Process markdown files or query actions.")
     parser.add_argument("--query", type=str, help="Query action items by text.")
+    parser.add_argument("--update", action='store_true', help="Update the actions log.")
     args = parser.parse_args()
 
     home_path = os.path.expanduser('~')
@@ -130,8 +138,11 @@ def main():
 
     if args.query:
         query_csv(args.query, output_csv)
-    else:
+    elif args.update:
         process_folder(folder_path, output_csv)
+        print('Actions log updated.')
+    else:
+        subprocess.run(["notes", "--actions"], check=True)
 
 if __name__ == "__main__":
     main()

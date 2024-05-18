@@ -3,6 +3,8 @@
 NOTES_DIR="$HOME/.adulting/notes"
 THREAD_DIR="$HOME/.adulting/threads"
 CSS_LOCATION="$HOME/.adulting/pandoc.css"
+DOWNLOADS_DIR="$HOME/Downloads"
+
 # Check if the directory exists, if not, create it
 if [ ! -d "$NOTES_DIR" ]; then
     mkdir -p "$NOTES_DIR"
@@ -31,7 +33,7 @@ if [[ $1 = "--new" ]] || [ -z "$1" ]; then
 	# Determine note type
 	# Feel free to edit these options
 	PS3="What type of note is this? : "
-	select type in meeting workshop report correspondence blog study writing log deskwork
+	select type in Meeting Workshop Report Correspondence Blog Study Writing Log Deskwork
 	do
     		echo ""
     		break
@@ -56,12 +58,12 @@ if [[ $1 = "--new" ]] || [ -z "$1" ]; then
 	# Write metadata
 cat > "$note" << EOM
 # Topic:		$topic  
-> Type:			$type  
-> Thread:		$thread  
+**Type**:		$type  
+**Thread**:		$thread  
 EOM
 
 	# Get additional data if it's a meeting
-	if [[ $type = "meeting" ]]
+	if [[ $type = "Meeting" ]]
 	then
     		echo "Enter the counterparty:"
     		read counterparty
@@ -73,36 +75,28 @@ EOM
     		read attendees
     		echo
 cat >> "$note" << EOM
-> Counterparty:		$counterparty  
-> Location:		$location  
-> Attendees:		$attendees  
+**Counterparty**:	$counterparty  
+**Location**:		$location  
+**Attendees**:		$attendees   
 EOM
 	# Get additional data if it's correspondence
-	elif [[ $type = "correspondence" ]]
+	elif [[ $type = "Correspondence" ]]
 	then
     		echo "Enter the participants:"
     		read participants
     		echo
 cat >> "$note" << EOM
-> Participants:       $participants  
+**Participants**:   $participants  
 EOM
 	fi
 
 	# Separate the metadata from the actual note
 cat >> "$note" << EOM
-> Timestamp:            $dt  
+**Timestamp**:            $dt  
 
 --------------------------------------------------------------------
 
 # Content
-
---------------------------------------------------------------------
-
-# Questions
-
---------------------------------------------------------------------
-
-# Actions
 
 -------------------------------------------------------------------
 
@@ -126,9 +120,9 @@ for f in $NOTES_DIR/*
                 note_info+="|"
                 note_info+=$(basename $f | cut -c 1-10)  
                 note_info+="|"
-                note_info+=$(grep "> Thread:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+                note_info+=$(grep "\*\*Thread\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
                 note_info+="|"
-                note_info+=$(grep "> Type:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+                note_info+=$(grep "\*\*Type\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
                 note_info+="|"
                 note_info+=$(grep "# Topic:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
                 notes_unfiltered="${notes_unfiltered}"$'\n'"${note_info}"
@@ -152,6 +146,7 @@ if [[ $1 = "--last" ]]; then
         echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
 elif [[ $1 = "--read" ]]; then
+        # Find out which file to read
         echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
         echo "Which note do you want to read?"
         read note_number
@@ -159,12 +154,166 @@ elif [[ $1 = "--read" ]]; then
         selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
         echo $selected_note
         note="$NOTES_DIR/$selected_note" 
-        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note" 
+        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note" 
+
+        # Temporary files for different tasks
+        metadata_file=$(mktemp)
+        temp_file="clean_output.md"
+        temp_summary="temp_summary.md"
+        agreed_lines="agreed_lines.txt"
+        action_lines="action_lines.txt"
+        final_file="$DOWNLOADS_DIR/$selected_note"
+        file_path=$note
+
+        # Extract file metadata
+        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
+        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+
+
+# Write the metadata to the temporary file
+cat <<EOF > "$metadata_file"
+---
+title: $title
+date: $(echo "$timestamp" | cut -c 1-10) 
+toc: true
+toc-depth: 2
+mainfont: Arial
+header-includes:
+  - \usepackage{geometry}
+geometry:
+- top=30mm
+- left=20mm
+- heightrounded
+---
+
+\newpage
+
+# $type Details
+
+EOF
+
+# Add location if it's not empty
+if [ -n "$location" ]; then
+    echo "**Location**: $location  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+
+fi
+
+# Add attendees if it's not empty
+if [ -n "$attendees" ]; then
+    echo "**Attendees**:  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+    echo "$attendees" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+fi
+
+# Add participants if it's not empty
+if [ -n "$participants" ]; then
+    echo "**Participants**:  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+    echo "$participants" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+fi
+
+
+# Check if # Summary section exists, and add it if not
+if ! grep -q '# Summary' "$file_path"; then
+    awk '
+    /# Content/ {
+        print "# Summary\n\n## Agreed\n\n--------------------------------------------------------------------\n\n## Actions\n\n--------------------------------------------------------------------\n\n\\newpage\n\n";
+        print;
+        next;
+    }
+    { print }
+    ' "$file_path" > "$temp_summary"
+else
+    cp $file_path $temp_summary
+fi
+
+
+# Remove the metadata content
+# Remove the content between # Agreed and the line with dashes
+# Remove the content between # Actions and the line with dashes
+awk '
+BEGIN { print_lines = 1 }
+index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
+/# Agreed/ {
+    print;
+    print_lines = 0;
+    next;
+}
+/--{10,}/ && print_lines == 0 { print_lines = 1; }
+/# Actions/ {
+    print;
+    print_lines = 0;
+    next;
+}
+/--{10,}/ && print_lines == 0 { print_lines = 1; }
+/# Timesheet/ { exit }
+print_lines { print }
+' "$temp_summary" > "$temp_file"
+
+# Re-add metadata in pandoc compatible structure
+cat "$metadata_file" "$temp_file" > "$temp_file.tmp"
+# Rename the temporary file to the original file
+mv "$temp_file.tmp" "$temp_file"
+# Remove the temporary metadata file
+rm "$metadata_file"
+
+
+
+
+        # Grep for AGREED lines and sort and deduplicate them
+        echo "" > "$agreed_lines"
+	    grep 'AGREED:' "$temp_file" | sed 's/AGREED: //'  | uniq >> "$agreed_lines"
+        echo "" >> "$agreed_lines"
+
+        # Grep for task lines - [ ] and - [x]
+        echo "" > "$action_lines"
+	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq >> "$action_lines"
+        echo "" >> "$action_lines"
+
+        # Insert the AGREED lines right after the # Agreed header
+        awk -v file="$agreed_lines" '
+        BEGIN { print_lines = 1 }
+        /# Agreed/ {
+            print;  # Print the # Agreed line
+            while ((getline line < file) > 0) {
+                print line;  # Print each AGREED line
+            }
+            close(file);
+            print_lines = 0;  # Stop printing until after the dashes
+            next;
+        }
+        /# Actions/ {
+            print;  # Print the # Actions line
+            while ((getline line < "action_lines.txt") > 0) {
+                print line;  # Print each action line
+            }
+            close("action_lines.txt");
+            print_lines = 0;  # Stop printing until after the dashes
+            next;
+        }
+        /--{10,}/ && print_lines == 0 { print_lines = 1 }  # Resume printing after the dashes
+        print_lines { print }
+        ' "$temp_file" > "$final_file"
+
+        
+        # Clean up
+        rm "$temp_file" "$agreed_lines" "$action_lines"
+
+        #cat "$final_file"
+
         #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
-        #pandoc $note -s -o /tmp/tempfile.pdf
+        pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
+		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
+		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
 	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
         #open -g /tmp/tempfile.pdf &
-        open -g $note &
+        open -g $final_file &
+        open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
 
 elif [[ $1 = "--delete" ]]; then
         echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
@@ -184,9 +333,9 @@ elif [[ $1 = "--edit" ]]; then
         selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
         echo $selected_note
 	note="$NOTES_DIR/$selected_note"
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
         edit_note $note
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 elif [[ $1 = "--actions" ]]; then
         rm -f $NOTES_DIR/action_items.md

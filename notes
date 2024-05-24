@@ -14,9 +14,11 @@ fi
 edit_note() {
     # Check the operating system
     if [[ $(uname) == "Linux" ]]; then
-        nano -"$@" note
+        #nano -"$@" note
+        open -g $note
     elif [[ $(uname) == "Darwin" ]]; then
-        nano "$@" note
+        #nano "$@" note
+        open -g $note
     else
         # If it's neither Linux nor macOS, print an error message
         echo "Unsupported operating system"
@@ -160,6 +162,7 @@ elif [[ $1 = "--read" ]]; then
         metadata_file=$(mktemp)
         temp_file="clean_output.md"
         temp_summary="temp_summary.md"
+        resolved_lines="resolved_lines.txt"
         agreed_lines="agreed_lines.txt"
         action_lines="action_lines.txt"
         final_file="$DOWNLOADS_DIR/$selected_note"
@@ -222,7 +225,7 @@ fi
 if ! grep -q '# Summary' "$file_path"; then
     awk '
     /# Content/ {
-        print "# Summary\n\n## Agreed\n\n--------------------------------------------------------------------\n\n## Actions\n\n--------------------------------------------------------------------\n\n\\newpage\n\n";
+        print "# Summary\n\n## Minuted Agreements\n\n--------------------------------------------------------------------\n\n## Resolutions\n\n--------------------------------------------------------------------\n\n\\newpage\n## Action Items\n\n--------------------------------------------------------------------\n\n\\newpage\n\n";
         print;
         next;
     }
@@ -239,13 +242,19 @@ fi
 awk '
 BEGIN { print_lines = 1 }
 index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
-/# Agreed/ {
+/# Minuted Agreements/ {
     print;
     print_lines = 0;
     next;
 }
 /--{10,}/ && print_lines == 0 { print_lines = 1; }
-/# Actions/ {
+/# Resolutions/ {
+    print;
+    print_lines = 0;
+    next;
+}
+/--{10,}/ && print_lines == 0 { print_lines = 1; }
+/# Action Items/ {
     print;
     print_lines = 0;
     next;
@@ -271,14 +280,23 @@ rm "$metadata_file"
         echo "" >> "$agreed_lines"
 
         # Grep for task lines - [ ] and - [x]
+        echo "" > "$resolved_lines"
+	    grep 'RESOLVED:' "$temp_file" | sed 's/RESOLVED: //'  | uniq >> "$resolved_lines"
+        echo "" >> "$resolved_lines"
+
+
+        # Grep for task lines - [ ] and - [x]
         echo "" > "$action_lines"
-	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq >> "$action_lines"
+        echo '| Status | Assignee | Task |'  >> "$action_lines"
+        echo '|--------|----------|--------------------------------------------------|'  >> "$action_lines"
+	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq | sed -E 's/- \[([ x]*)\] +\(([^)]+)\) +(.*)/| \1 | \2 | \3 |/' >> "$action_lines"
         echo "" >> "$action_lines"
+
 
         # Insert the AGREED lines right after the # Agreed header
         awk -v file="$agreed_lines" '
         BEGIN { print_lines = 1 }
-        /# Agreed/ {
+        /# Minuted Agreements/ {
             print;  # Print the # Agreed line
             while ((getline line < file) > 0) {
                 print line;  # Print each AGREED line
@@ -287,7 +305,16 @@ rm "$metadata_file"
             print_lines = 0;  # Stop printing until after the dashes
             next;
         }
-        /# Actions/ {
+        /# Resolutions/ {
+            print;  # Print the # Actions line
+            while ((getline line < "resolved_lines.txt") > 0) {
+                print line;  # Print each action line
+            }
+            close("resolved_lines.txt");
+            print_lines = 0;  # Stop printing until after the dashes
+            next;
+        }
+        /# Action Items/ {
             print;  # Print the # Actions line
             while ((getline line < "action_lines.txt") > 0) {
                 print line;  # Print each action line
@@ -302,7 +329,7 @@ rm "$metadata_file"
 
         
         # Clean up
-        rm "$temp_file" "$agreed_lines" "$action_lines"
+        rm "$temp_file" "$agreed_lines" "$action_lines" "$resolved_lines" "$temp_summary"
 
         #cat "$final_file"
 
@@ -332,10 +359,54 @@ elif [[ $1 = "--edit" ]]; then
         note_number="$note_number"p
         selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
         echo $selected_note
-	note="$NOTES_DIR/$selected_note"
+	    note="$NOTES_DIR/$selected_note"
         echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
         edit_note $note
         echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
+
+elif [[ $1 = "--copy" ]]; then
+        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+        echo "Which note do you want to edit?"
+        read note_number
+        note_number="$note_number"p
+        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+        echo $selected_note
+	    note="$NOTES_DIR/$selected_note"
+	    # Determine timestamp
+	    dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	    new_note="$NOTES_DIR/$dt.md"
+        cp $note $new_note
+        echo "Copied $selected_note to $dt.md"
+
+
+elif [[ $1 = "--strip" ]]; then
+        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+        echo "Which note do you want to edit?"
+        read note_number
+        note_number="$note_number"p
+        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+        echo $selected_note
+    	note="$NOTES_DIR/$selected_note"
+        tempfile=$(mktemp)
+
+        count=0
+
+        while IFS= read -r line; do
+            count=$((count + 1))
+            if [ "$count" -le 8 ]; then
+                echo "$line" >> "$tempfile"
+            else
+              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^----- ]]; then
+                    echo "" >> "$tempfile"  # Adding a newline for Markdown formatting
+                    echo "$line" >> "$tempfile"
+              elif [[ "$line" =~ ^"- [ ]" ]]; then
+                    echo "$line" >> "$tempfile"
+                fi
+            fi
+        done < "$note"
+
+        # Move the temporary file to replace the original file
+        mv "$tempfile" "$note"
 
 elif [[ $1 = "--actions" ]]; then
         rm -f $NOTES_DIR/action_items.md
@@ -384,7 +455,9 @@ elif [[ $1 = "--actions" ]]; then
                 }' |
                 sort -k3 >> $NOTES_DIR/action_items.md
 
-        edit_note $NOTES_DIR/action_items.md
+        
+        #edit_note $NOTES_DIR/action_items.md
+        nano "$@" $NOTES_DIR/action_items.md
 
         # Replace the placeholder YOUR_FILE.txt with your actual file name containing the entries
         input_file=$NOTES_DIR/action_items.md
@@ -410,9 +483,9 @@ elif [[ $1 = "--actions" ]]; then
         done < "$input_file"
 
         rm -f $NOTES_DIR/action_items.md
-        actions --update 
+        #actions --update 
 
 else
-       echo "Please use a flag. Either --read, --edit, --delete, --last, --new or --actions."
+       echo "Please use a flag. Either --read, --edit, --strip, --delete, --last, --new or --actions."
 fi
 fi

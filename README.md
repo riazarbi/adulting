@@ -122,8 +122,10 @@ There are six basic operations:
 2. `--edit` will present you with a list of all your notes, ordered by time, and ask you which one you want to edit, and then open it up for you.
 3. `--delete` will present you with a list fo notes and ask you which one you want to delete and then delete it.
 4. `--last` will open the last note.
-5. `--read` will open a note in read mode in a pretty format. [actually this is currently broken]
+5. `--read` will compile a note into a latex-prepped markdown file in your Downloads folder, render it to PDF, and open the PDF.
 6. `--actions` will scan all your notes for markdown-formatted task list items that are open (`- [ ] ...`) and present them in a single text editor panel. You can edit them (mark them closed etc) and, when you save and close the editor, all the action items will be changed in the source notes files.
+7. `--copy` will allow you to select a note, and them make a copy of it with today's date.
+8. `--strip` will remove all non-header, separator or open task text from a note.
 
 If you just type `notes`, with no argument, you'll automatically be sent through the `--new` workflow.
 

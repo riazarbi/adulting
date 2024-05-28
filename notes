@@ -5,17 +5,16 @@ THREAD_DIR="$HOME/.adulting/threads"
 CSS_LOCATION="$HOME/.adulting/pandoc.css"
 DOWNLOADS_DIR="$HOME/Downloads"
 
-# Export variables
-export NOTES_DIR
-export THREAD_DIR
-export CSS_LOCATION
-export DOWNLOADS_DIR
+
 
 # Check if the directory exists, if not, create it
 if [ ! -d "$NOTES_DIR" ]; then
     mkdir -p "$NOTES_DIR"
 fi
 
+
+# FUNCTIONS
+# Select note
 select_note() {
     echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
     echo "Which note do you want to select?"
@@ -25,7 +24,7 @@ select_note() {
     echo $selected_note
 }
 
-# Define a function to edit a note based on the operating system
+# Open  note
 open_note() {
     # Check the operating system
     if [[ $(uname) == "Linux" ]]; then
@@ -40,29 +39,41 @@ open_note() {
     fi
 }
 
+
+# EXPORTS
+# Export variables
+export NOTES_DIR
+export THREAD_DIR
+export CSS_LOCATION
+export DOWNLOADS_DIR
+
+# Export functions
 export -f open_note
 
+
+# NEW NOTE
 if [[ $1 = "--new" ]] || [ -z "$1" ]; then
     ./notes_new
 else
 
-# Rebuild directory listing
+
+# GET NOTES LIST
 for f in $NOTES_DIR/*
-        do
-                filenum=$((filenum+1))
-                note_info=$filenum
-                note_info+="|"
-                note_info+=$(basename $f)
-                note_info+="|"
-                note_info+=$(basename $f | cut -c 1-10)  
-                note_info+="|"
-                note_info+=$(grep "\*\*Thread\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
-                note_info+="|"
-                note_info+=$(grep "\*\*Type\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
-                note_info+="|"
-                note_info+=$(grep "# Topic:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
-                notes_unfiltered="${notes_unfiltered}"$'\n'"${note_info}"
-        done
+    do
+        filenum=$((filenum+1))
+        note_info=$filenum
+        note_info+="|"
+        note_info+=$(basename $f)
+        note_info+="|"
+        note_info+=$(basename $f | cut -c 1-10)  
+        note_info+="|"
+        note_info+=$(grep "\*\*Thread\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        note_info+="|"
+        note_info+=$(grep "\*\*Type\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        note_info+="|"
+        note_info+=$(grep "# Topic:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        notes_unfiltered="${notes_unfiltered}"$'\n'"${note_info}"
+    done
 
 # Remove the first newline
 notes_unfiltered=${notes_unfiltered:1}
@@ -73,61 +84,69 @@ else
   notes_all="$notes_unfiltered"
 fi
 
-# Process according to flags
+# OPEN LAST NOTE
 if [[ $1 = "--last" ]]; then
-        last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
-        note="$NOTES_DIR/$last_note"
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
-        open_note $note
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+    last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
+    note="$NOTES_DIR/$last_note"
+    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+    open_note $note
+    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
 
+# COMPILE AND RENDER READABLE NOTE
 elif [[ $1 = "--read" ]]; then
-        select_note
-        ./notes_read $selected_note
+    select_note
+    ./notes_read $selected_note
 
 
+# DELETE NOTE
 elif [[ $1 = "--delete" ]]; then
-        select_note
-        note="$NOTES_DIR/$selected_note"
-        rm $note
+    select_note
+    note="$NOTES_DIR/$selected_note"
+    rm $note
 
+
+# EDIT NOTE
 elif [[ $1 = "--edit" ]]; then
-        select_note
-        note="$NOTES_DIR/$selected_note"
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
-        open_note $note
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
+    select_note
+    note="$NOTES_DIR/$selected_note"
+    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
+    open_note $note
+    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 
+# COPY NOTE
 elif [[ $1 = "--copy" ]]; then
-        select_note
-        note="$NOTES_DIR/$selected_note"
-	    # Determine timestamp
-	    dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	    new_note="$NOTES_DIR/$dt.md"
-        cp $note $new_note
-        sed -i '' '1s/$/COPY/' $new_note
-        echo "Copied $selected_note to $dt.md"
+    select_note
+    note="$NOTES_DIR/$selected_note"
+	# Determine timestamp
+	dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	new_note="$NOTES_DIR/$dt.md"
+    cp $note $new_note
+    sed -i '' '1s/$/COPY/' $new_note
+    echo "Copied $selected_note to $dt.md"
 
 
+# COPY AND STRIP NOTE
 elif [[ $1 = "--strip" ]]; then
-        select_note
-        note="$NOTES_DIR/$selected_note"
-	    # Determine timestamp
-	    dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	    new_note="$NOTES_DIR/$dt.md"
-        cp $note $new_note
-        sed -i '' '1s/$/STRIPPED/' $new_note
-        echo "Copied $selected_note to $dt.md"
-        echo "Stripping $dt.md"
-        ./notes_strip $dt.md
+    select_note
+    note="$NOTES_DIR/$selected_note"
+	# Determine timestamp
+	dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	new_note="$NOTES_DIR/$dt.md"
+    cp $note $new_note
+    sed -i '' '1s/$/STRIPPED/' $new_note
+    echo "Copied $selected_note to $dt.md"
+    echo "Stripping $dt.md"
+    ./notes_strip $dt.md
 
+
+# DISPLAY OPEN ACTION ITEMS
 elif [[ $1 = "--actions" ]]; then
+    ./notes_actions 
 
-./notes_actions
-
+# FLAG ERROR CATCHALL
 else
-       echo "Please use a flag. Either --read, --edit, --strip, --delete, --last, --new or --actions."
+    echo "Please use a flag. Either --read, --edit, --strip, --delete, --last, --new or --actions."
 fi
 fi

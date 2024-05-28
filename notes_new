@@ -1,0 +1,86 @@
+#!/bin/bash
+
+	# Determine timestamp
+	dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	# Set note filename
+	mkdir -p "$NOTES_DIR"
+	note="$NOTES_DIR/$dt.md"
+
+	# Determine note type
+	# Feel free to edit these options
+	PS3="What type of note is this? : "
+	select type in Meeting Workshop Report Correspondence Blog Study Writing Log Deskwork
+	do
+    		echo ""
+    		break
+	done
+
+        # Determine the thread
+        THREADS="$THREAD_DIR/*"
+        # Set IFS to only newline character
+        IFS=$'\n'
+        PS3="What thread does this relate to? : "
+        select thread in "uncategorized" $(ls "$THREAD_DIR")
+        do
+                echo ""
+                break
+        done
+        unset IFS
+
+	# Determine the topic
+	echo "Enter the topic of this $type note:"
+	read topic
+        echo
+	# Write metadata
+cat > "$note" << EOM
+# Topic:			$topic  
+**Type**:			$type  
+**Thread**:			$thread  
+EOM
+
+	# Get additional data if it's a meeting
+	if [[ $type = "Meeting" ]]
+	then
+    		echo "Enter the counterparty:"
+    		read counterparty
+    		echo
+    		echo "Enter the location:"
+    		read location
+    		echo
+    		echo "Enter attendees, separated by semicolon (eg Riaz Arbi; John Smith etc)"
+    		read attendees
+    		echo
+cat >> "$note" << EOM
+**Counterparty**:	$counterparty  
+**Location**:		$location  
+**Attendees**:		$attendees   
+EOM
+	# Get additional data if it's correspondence
+	elif [[ $type = "Correspondence" ]]
+	then
+    		echo "Enter the participants:"
+    		read participants
+    		echo
+cat >> "$note" << EOM
+**Participants**:   $participants  
+EOM
+	fi
+
+	# Separate the metadata from the actual note
+cat >> "$note" << EOM
+**Timestamp**:		$dt  
+
+--------------------------------------------------------------------
+
+# Content
+
+-------------------------------------------------------------------
+
+# Timesheet
+
+EOM
+        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+
+        open_note $note
+
+        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"

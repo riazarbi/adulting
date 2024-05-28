@@ -5,13 +5,28 @@ THREAD_DIR="$HOME/.adulting/threads"
 CSS_LOCATION="$HOME/.adulting/pandoc.css"
 DOWNLOADS_DIR="$HOME/Downloads"
 
+# Export variables
+export NOTES_DIR
+export THREAD_DIR
+export CSS_LOCATION
+export DOWNLOADS_DIR
+
 # Check if the directory exists, if not, create it
 if [ ! -d "$NOTES_DIR" ]; then
     mkdir -p "$NOTES_DIR"
 fi
 
+select_note() {
+    echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
+    echo "Which note do you want to select?"
+    read note_number
+    note_number="$note_number"p
+    selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
+    echo $selected_note
+}
+
 # Define a function to edit a note based on the operating system
-edit_note() {
+open_note() {
     # Check the operating system
     if [[ $(uname) == "Linux" ]]; then
         #nano -"$@" note
@@ -25,91 +40,10 @@ edit_note() {
     fi
 }
 
+export -f open_note
+
 if [[ $1 = "--new" ]] || [ -z "$1" ]; then
-	# Determine timestamp
-	dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	# Set note filename
-	mkdir -p "$NOTES_DIR"
-	note="$NOTES_DIR/$dt.md"
-
-	# Determine note type
-	# Feel free to edit these options
-	PS3="What type of note is this? : "
-	select type in Meeting Workshop Report Correspondence Blog Study Writing Log Deskwork
-	do
-    		echo ""
-    		break
-	done
-
-        # Determine the thread
-        THREADS="$THREAD_DIR/*"
-        # Set IFS to only newline character
-        IFS=$'\n'
-        PS3="What thread does this relate to? : "
-        select thread in "uncategorized" $(ls "$THREAD_DIR")
-        do
-                echo ""
-                break
-        done
-        unset IFS
-
-	# Determine the topic
-	echo "Enter the topic of this $type note:"
-	read topic
-        echo
-	# Write metadata
-cat > "$note" << EOM
-# Topic:		$topic  
-**Type**:		$type  
-**Thread**:		$thread  
-EOM
-
-	# Get additional data if it's a meeting
-	if [[ $type = "Meeting" ]]
-	then
-    		echo "Enter the counterparty:"
-    		read counterparty
-    		echo
-    		echo "Enter the location:"
-    		read location
-    		echo
-    		echo "Enter attendees, separated by semicolon (eg Riaz Arbi; John Smith etc)"
-    		read attendees
-    		echo
-cat >> "$note" << EOM
-**Counterparty**:	$counterparty  
-**Location**:		$location  
-**Attendees**:		$attendees   
-EOM
-	# Get additional data if it's correspondence
-	elif [[ $type = "Correspondence" ]]
-	then
-    		echo "Enter the participants:"
-    		read participants
-    		echo
-cat >> "$note" << EOM
-**Participants**:   $participants  
-EOM
-	fi
-
-	# Separate the metadata from the actual note
-cat >> "$note" << EOM
-**Timestamp**:            $dt  
-
---------------------------------------------------------------------
-
-# Content
-
--------------------------------------------------------------------
-
-# Timesheet
-
-EOM
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
-
-        edit_note $note
-
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+    ./notes_new
 else
 
 # Rebuild directory listing
@@ -144,391 +78,54 @@ if [[ $1 = "--last" ]]; then
         last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
         note="$NOTES_DIR/$last_note"
         echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
-        edit_note $note
+        open_note $note
         echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
+
 elif [[ $1 = "--read" ]]; then
-        # Find out which file to read
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to read?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
-        note="$NOTES_DIR/$selected_note" 
-        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note" 
-
-        # Temporary files for different tasks
-        metadata_file=$(mktemp)
-        temp_file="clean_output.md"
-        temp_summary="temp_summary.md"
-        resolved_lines="resolved_lines.txt"
-        agreed_lines="agreed_lines.txt"
-        action_lines="action_lines.txt"
-        final_file="$DOWNLOADS_DIR/$selected_note"
-        file_path=$note
-
-        # Extract file metadata
-        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
-        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-
-
-# Write the metadata to the temporary file
-cat <<EOF > "$metadata_file"
----
-title: $title
-date: $(echo "$timestamp" | cut -c 1-10) 
-toc: true
-toc-depth: 2
-mainfont: Arial
-header-includes:
-  - \usepackage{geometry}
-geometry:
-- top=30mm
-- left=20mm
-- heightrounded
----
-
-\newpage
-
-# $type Details
-
-EOF
-
-# Add location if it's not empty
-if [ -n "$location" ]; then
-    echo "**Location**: $location  " >> "$metadata_file"
-    echo "" >> "$metadata_file"
-
-fi
-
-# Add attendees if it's not empty
-if [ -n "$attendees" ]; then
-    echo "**Attendees**:  " >> "$metadata_file"
-    echo "" >> "$metadata_file"
-    echo "$attendees" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
-fi
-
-# Add participants if it's not empty
-if [ -n "$participants" ]; then
-    echo "**Participants**:  " >> "$metadata_file"
-    echo "" >> "$metadata_file"
-    echo "$participants" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
-fi
-
-
-# Check if # Summary section exists, and add it if not
-if ! grep -q '# Summary' "$file_path"; then
-    awk '
-    /# Content/ {
-        print "# Summary\n\n## Minuted Agreements\n\n--------------------------------------------------------------------\n\n## Resolutions\n\n--------------------------------------------------------------------\n\n\\newpage\n## Action Items\n\n--------------------------------------------------------------------\n\n\\newpage\n\n";
-        print;
-        next;
-    }
-    { print }
-    ' "$file_path" > "$temp_summary"
-else
-    cp $file_path $temp_summary
-fi
-
-
-# Remove the metadata content
-# Remove the content between # Agreed and the line with dashes
-# Remove the content between # Actions and the line with dashes
-awk '
-BEGIN { print_lines = 1 }
-index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
-/# Minuted Agreements/ {
-    print;
-    print_lines = 0;
-    next;
-}
-/--{10,}/ && print_lines == 0 { print_lines = 1; }
-/# Resolutions/ {
-    print;
-    print_lines = 0;
-    next;
-}
-/--{10,}/ && print_lines == 0 { print_lines = 1; }
-/# Action Items/ {
-    print;
-    print_lines = 0;
-    next;
-}
-/--{10,}/ && print_lines == 0 { print_lines = 1; }
-/# Timesheet/ { exit }
-print_lines { print }
-' "$temp_summary" > "$temp_file"
-
-# Re-add metadata in pandoc compatible structure
-cat "$metadata_file" "$temp_file" > "$temp_file.tmp"
-# Rename the temporary file to the original file
-mv "$temp_file.tmp" "$temp_file"
-# Remove the temporary metadata file
-rm "$metadata_file"
-
-
-
-
-        # Grep for AGREED lines and sort and deduplicate them
-        echo "" > "$agreed_lines"
-	    grep 'AGREED:' "$temp_file" | sed 's/AGREED: //'  | uniq >> "$agreed_lines"
-        echo "" >> "$agreed_lines"
-
-        # Grep for task lines - [ ] and - [x]
-        echo "" > "$resolved_lines"
-	    grep 'RESOLVED:' "$temp_file" | sed 's/RESOLVED: //'  | uniq >> "$resolved_lines"
-        echo "" >> "$resolved_lines"
-
-
-        # Grep for task lines - [ ] and - [x]
-        echo "" > "$action_lines"
-        echo '| Status | Assignee | Task |'  >> "$action_lines"
-        echo '|--------|----------|--------------------------------------------------|'  >> "$action_lines"
-	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq | sed -E 's/- \[([ x]*)\] +\(([^)]+)\) +(.*)/| \1 | \2 | \3 |/' >> "$action_lines"
-        echo "" >> "$action_lines"
-
-
-        # Insert the AGREED lines right after the # Agreed header
-        awk -v file="$agreed_lines" '
-        BEGIN { print_lines = 1 }
-        /# Minuted Agreements/ {
-            print;  # Print the # Agreed line
-            while ((getline line < file) > 0) {
-                print line;  # Print each AGREED line
-            }
-            close(file);
-            print_lines = 0;  # Stop printing until after the dashes
-            next;
-        }
-        /# Resolutions/ {
-            print;  # Print the # Actions line
-            while ((getline line < "resolved_lines.txt") > 0) {
-                print line;  # Print each action line
-            }
-            close("resolved_lines.txt");
-            print_lines = 0;  # Stop printing until after the dashes
-            next;
-        }
-        /# Action Items/ {
-            print;  # Print the # Actions line
-            while ((getline line < "action_lines.txt") > 0) {
-                print line;  # Print each action line
-            }
-            close("action_lines.txt");
-            print_lines = 0;  # Stop printing until after the dashes
-            next;
-        }
-        /--{10,}/ && print_lines == 0 { print_lines = 1 }  # Resume printing after the dashes
-        print_lines { print }
-        ' "$temp_file" > "$final_file"
-
-        # Clean up
-        rm "$temp_file" "$agreed_lines" "$action_lines" "$resolved_lines" "$temp_summary"
-
-        #cat "$final_file"
-
-        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
-        pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
-		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
-		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
-	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
-        #open -g /tmp/tempfile.pdf &
-        open -g $final_file &
-        open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
+        select_note
+        ./notes_read $selected_note
 
 
 elif [[ $1 = "--delete" ]]; then
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to delete?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
+        select_note
         note="$NOTES_DIR/$selected_note"
         rm $note
 
-
-elif [[ $1 = "--prune" ]]; then
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to prune?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
-        note="$NOTES_DIR/$selected_note"
-        final_file="$DOWNLOADS_DIR/$selected_note"
-
-awk '
-  # Function to check if a line is a header
-  function is_header(line) {
-    return line ~ /^#+\s*$/;
-  }
-
-  # Function to check if a line is empty
-  function is_empty(line) {
-    return line ~ /^\s*$/;
-  }
-
-  {
-    # If the current line is a header
-    if (is_header($0)) {
-      header = $0;
-      getline;
-      # If the next line is empty or another header, skip both lines
-      if (is_empty($0) || is_header($0)) {
-        next;
-      } else {
-        # Print the header and the next line
-        print header;
-        print $0;
-      }
-    } else {
-      # Print the current line
-      print $0;
-    }
-  }
-' "$note" > "$final_file"
-        open -g $final_file
-
-
-
 elif [[ $1 = "--edit" ]]; then
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to edit?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
-	    note="$NOTES_DIR/$selected_note"
+        select_note
+        note="$NOTES_DIR/$selected_note"
         echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
-        edit_note $note
+        open_note $note
         echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
+
 elif [[ $1 = "--copy" ]]; then
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to edit?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
-	    note="$NOTES_DIR/$selected_note"
+        select_note
+        note="$NOTES_DIR/$selected_note"
 	    # Determine timestamp
 	    dt=$(date '+%Y-%m-%d-%H-%M-%S');
 	    new_note="$NOTES_DIR/$dt.md"
         cp $note $new_note
+        sed -i '' '1s/$/COPY/' $new_note
         echo "Copied $selected_note to $dt.md"
 
 
 elif [[ $1 = "--strip" ]]; then
-        echo "$notes_all" | awk 'BEGIN{FS="|"} {print $1, "|", $3, "|", $4, "|", $5, "|", $6}' | column -t -s "|"
-        echo "Which note do you want to edit?"
-        read note_number
-        note_number="$note_number"p
-        selected_note=$(echo $(echo "$notes_unfiltered" | sed -n "$note_number" | awk 'BEGIN{FS="|"} {print $2}'))
-        echo $selected_note
-    	note="$NOTES_DIR/$selected_note"
-        tempfile=$(mktemp)
-
-        count=0
-
-        while IFS= read -r line; do
-            count=$((count + 1))
-            if [ "$count" -le 8 ]; then
-                echo "$line" >> "$tempfile"
-            else
-              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^----- ]]; then
-                    echo "" >> "$tempfile"  # Adding a newline for Markdown formatting
-                    echo "$line" >> "$tempfile"
-              elif [[ "$line" =~ ^"- [ ]" ]]; then
-                    echo "$line" >> "$tempfile"
-                fi
-            fi
-        done < "$note"
-
-        # Move the temporary file to replace the original file
-        mv "$tempfile" "$note"
+        select_note
+        note="$NOTES_DIR/$selected_note"
+	    # Determine timestamp
+	    dt=$(date '+%Y-%m-%d-%H-%M-%S');
+	    new_note="$NOTES_DIR/$dt.md"
+        cp $note $new_note
+        sed -i '' '1s/$/STRIPPED/' $new_note
+        echo "Copied $selected_note to $dt.md"
+        echo "Stripping $dt.md"
+        ./notes_strip $dt.md
 
 elif [[ $1 = "--actions" ]]; then
-        rm -f $NOTES_DIR/action_items.md
-        filenum=0
-        find $NOTES_DIR -name '*.md' \
-            -execdir grep -r -i -Hn "\- \[ \]" \{} + |  \
-             #sed 's/^..//' | \
-             sed s/./'|'/23 | \
-             sed 's/\(.*\)[:]/\1|/' | \
-             awk 'BEGIN {FS="|"; OFS="\t"} {print $1, $2, $3}' | \
-             #awk 'BEGIN {FS="\t"; OFS="\t"} {gsub(/\:|\"|\047/,"",$3)}1' | \
 
-             awk 'BEGIN {FS="\t"; OFS="\t"; srand()}
-                {
-                    # Strip unwanted characters
-                    gsub(/\:|\"|\047/,"",$3);
-                
-                    # Check for the pattern followed by a 5-character key containing at least one digit
-                    if ($3 ~ /- \[ \] .*[0-9].*/) {
-                        print $1, $2, $3;
-                    } else {
-                        # Generate a random 5-character alphanumeric key ensuring at least one character is a digit
-                        new_key = "";
-                        digit_placed = 0;  # Flag to ensure at least one digit is included
-                
-                        for (i=1; i<=5; i++) {
-                            if (i == 5 && digit_placed == 0) {
-                                # Ensure last character is a digit if none have been placed
-                                new_key = new_key substr("0123456789", int(rand() * 10) + 1, 1);
-                            } else {
-                                # Randomly choose between a digit and a letter
-                                if (int(rand() * 2)) {
-                                    # Append a digit
-                                    new_key = new_key substr("0123456789", int(rand() * 10) + 1, 1);
-                                    digit_placed = 1;
-                                } else {
-                                    # Append a letter
-                                    new_key = new_key substr("ABCDEFGHIJKLMNOPQRSTUVWXYZ", int(rand() * 26) + 1, 1);
-                                }
-                            }
-                        }
-                        # Insert the new key right after the "- [ ]"
-                        sub(/- \[ \]/, "& " new_key, $3);
-                        print $1, $2, $3;
-                    }
-                }' |
-                sort -k3 >> $NOTES_DIR/action_items.md
-
-        
-        #edit_note $NOTES_DIR/action_items.md
-        nano "$@" $NOTES_DIR/action_items.md
-
-        # Replace the placeholder YOUR_FILE.txt with your actual file name containing the entries
-        input_file=$NOTES_DIR/action_items.md
-
-        # Reading each line from the file
-        while IFS= read -r line; do
-
-            rel_file_path=$(echo "$line" | awk -F'\t' '{print $1}')
-            line_number=$(echo "$line" | awk -F'\t' '{print $2}')
-            new_content=$(echo "$line" | awk -F'\t' '{$1=$2=""; print substr($0, 3)}')
-
-            file_path=$NOTES_DIR/$rel_file_path
-
-            # Check if the file exists before attempting to edit
-            if [ -f "$file_path" ]; then
-                # Use awk to replace the line and output to a temporary file
-                awk -v line_num="$line_number" -v new_line="$new_content" 'NR == line_num {$0=new_line} {print}' "$file_path" > temp_file.md
-                # Move the temporary file to original file
-                mv temp_file.md "$file_path"
-            else
-                echo "File not found: $file_path"
-            fi
-        done < "$input_file"
-
-        rm -f $NOTES_DIR/action_items.md
-        #actions --update 
+./notes_actions
 
 else
        echo "Please use a flag. Either --read, --edit, --strip, --delete, --last, --new or --actions."

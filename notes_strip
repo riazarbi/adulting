@@ -1,0 +1,24 @@
+#!/bin/bash
+
+selected_note=$1
+        note="$NOTES_DIR/$selected_note"
+        tempfile=$(mktemp)
+
+        count=0
+
+        while IFS= read -r line; do
+            count=$((count + 1))
+            if [ "$count" -le 8 ]; then
+                echo "$line" >> "$tempfile"
+            else
+              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^----- ]]; then
+                    echo "" >> "$tempfile"  # Adding a newline for Markdown formatting
+                    echo "$line" >> "$tempfile"
+              elif [[ "$line" =~ ^"- [ ]" ]]; then
+                    echo "$line" >> "$tempfile"
+                fi
+            fi
+        done < "$note"
+
+        # Move the temporary file to replace the original file
+        mv "$tempfile" "$note"

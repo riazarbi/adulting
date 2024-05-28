@@ -53,7 +53,7 @@ export -f open_note
 
 # NEW NOTE
 if [[ $1 = "--new" ]] || [ -z "$1" ]; then
-    ./notes_new
+    notes_new
 else
 
 
@@ -96,7 +96,7 @@ if [[ $1 = "--last" ]]; then
 # COMPILE AND RENDER READABLE NOTE
 elif [[ $1 = "--read" ]]; then
     select_note
-    ./notes_read $selected_note
+    notes_read $selected_note
 
 
 # DELETE NOTE
@@ -138,12 +138,12 @@ elif [[ $1 = "--strip" ]]; then
     sed -i '' '1s/$/STRIPPED/' $new_note
     echo "Copied $selected_note to $dt.md"
     echo "Stripping $dt.md"
-    ./notes_strip $dt.md
+    notes_strip $dt.md
 
 
 # DISPLAY OPEN ACTION ITEMS
 elif [[ $1 = "--actions" ]]; then
-    ./notes_actions 
+    notes_actions 
 
 # FLAG ERROR CATCHALL
 else

@@ -116,18 +116,8 @@ THREAD  ===>  SGB
 
 This is my really simple note taker. It's just a single bash script, and it saves all notes to `~/.adulting/notes`. If it's in your `PATH`, call it by typing `notes` in your terminal. It relies on `nano` as the text editor, but there's no reason you can't swap it out for something else. 
 
-There are six basic operations:
+Type `notes --help` to find out how it works.
 
-1. `--new` will take you through a dialog to create a new note. It'sll ask you what type of note it is, what thread it relates to (see `threads` above), the topic of the note etc. Then it'll open up a prepopulated note in your text editor, which you can fill out, and save. 
-2. `--edit` will present you with a list of all your notes, ordered by time, and ask you which one you want to edit, and then open it up for you.
-3. `--delete` will present you with a list fo notes and ask you which one you want to delete and then delete it.
-4. `--last` will open the last note.
-5. `--read` will compile a note into a latex-prepped markdown file in your Downloads folder, render it to PDF, and open the PDF.
-6. `--actions` will scan all your notes for markdown-formatted task list items that are open (`- [ ] ...`) and present them in a single text editor panel. You can edit them (mark them closed etc) and, when you save and close the editor, all the action items will be changed in the source notes files.
-7. `--copy` will allow you to select a note, and them make a copy of it with today's date.
-8. `--strip` will remove all non-header, separator or open task text from a note.
-
-If you just type `notes`, with no argument, you'll automatically be sent through the `--new` workflow.
 
 ## summary
 

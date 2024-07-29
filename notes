@@ -13,6 +13,60 @@ if [ ! -d "$NOTES_DIR" ]; then
 fi
 
 
+# Function to display help text
+display_help() {
+    cat << EOF
+
+Usage: $0 [option]
+Example: $0 --new
+
+
+CREATION:
+    --new       [DEFAULT] Create a new note and open for editing in default text editor.
+    --copy      Select and copy note contents to a new note with the current timestamp. Does not alter the timestamp in the note header - you need to do that manually
+    --strip     Select and copy note contents to a new note and remove anything that is not a header or an action item. Useful for using one note as a template for another note.
+
+
+MODIFICATION:
+    --edit      Select and open a note in default text editor.
+                    Special keywords you can use in your note for downstream processing:
+                        "AGREED:"   Indicates a statement that the meeting group formally agrees on.
+                        "RESOLVED:" Indicates a statement that a meeting group resolves.
+                        "- [ ]"     Will be tracked as an action item, and show up in notes --actions until closed with an '[x]'.
+    --last      Select and open the last created note in default text editor.
+    --actions   Display open actions across all notes in nano text editor. 
+                    You can edit the action status ("[ ]" vs "[x]") and content and it will update the status in the original note.
+
+
+DELETION - permanently removes data:
+    --delete    Select and permanently delete a note.
+
+
+RENDERING - does not alter original note contents. Rendered documents are saved to ~/Downloads:
+    --cat       Print the note content to the terminal. Useful for piping.
+
+    --pdf       Select, reformat and open a selected note as PDF and markdown. 
+                For --pdf, reformatting includes:
+                    - Creating a latex header from the note metadata.
+                    - Placing the location, attendees participants on the first page, if they exist.
+                    - Adds a Summary section above all content which contains:
+                        - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
+
+    --minutes   Select, reformat and open a selected note as Meeting Minutes in PDF and markdown. 
+                For --minutes, reformatting includes:
+                    - Creating a latex header from the note metadata.
+                    - Adding a table of contents, as indicated by markdown headers.
+                    - Placing the location, attendees participants on the first page, if they exist.
+                    - Adds a Summary section above all content which contains:
+                        - Minutes agreements, as indicaed by the "AGREED:" keyword.
+                        - Resolutions, as indicated by the "RESOLVED:" keyword.
+                        - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
+
+EOF
+}
+
+
+
 # FUNCTIONS
 # Select note
 select_note() {
@@ -93,10 +147,16 @@ if [[ $1 = "--last" ]]; then
     echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
 
-# COMPILE AND RENDER READABLE NOTE
-elif [[ $1 = "--read" ]]; then
+# COMPILE AND RENDER NOTE AS MEETING MINUTES
+elif [[ $1 = "--minutes" ]]; then
     select_note
-    notes_read $selected_note
+    notes_minutes $selected_note
+
+
+# COMPILE AND RENDER NOTE AS PDF
+elif [[ $1 = "--pdf" ]]; then
+    select_note
+    notes_pdf $selected_note
 
 
 # DELETE NOTE
@@ -115,6 +175,13 @@ elif [[ $1 = "--edit" ]]; then
     echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 
+# CAT NOTE
+elif [[ $1 = "--cat" ]]; then
+    select_note
+    note="$NOTES_DIR/$selected_note"
+    cat $note
+
+
 # COPY NOTE
 elif [[ $1 = "--copy" ]]; then
     select_note
@@ -123,7 +190,7 @@ elif [[ $1 = "--copy" ]]; then
 	dt=$(date '+%Y-%m-%d-%H-%M-%S');
 	new_note="$NOTES_DIR/$dt.md"
     cp $note $new_note
-    sed -i '' '1s/$/COPY/' $new_note
+    sed -i '' '1s/$/ COPY/' $new_note
     echo "Copied $selected_note to $dt.md"
 
 
@@ -135,7 +202,7 @@ elif [[ $1 = "--strip" ]]; then
 	dt=$(date '+%Y-%m-%d-%H-%M-%S');
 	new_note="$NOTES_DIR/$dt.md"
     cp $note $new_note
-    sed -i '' '1s/$/STRIPPED/' $new_note
+    sed -i '' '1s/$/ STRIPPED/' $new_note
     echo "Copied $selected_note to $dt.md"
     echo "Stripping $dt.md"
     notes_strip $dt.md
@@ -147,6 +214,6 @@ elif [[ $1 = "--actions" ]]; then
 
 # FLAG ERROR CATCHALL
 else
-    echo "Please use a flag. Either --read, --edit, --strip, --delete, --last, --new or --actions."
+    display_help
 fi
 fi

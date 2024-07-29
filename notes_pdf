@@ -1,0 +1,167 @@
+#!/bin/bash
+
+selected_note=$1
+
+        note="$NOTES_DIR/$selected_note"
+        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note" 
+
+        # Temporary files for different tasks
+        metadata_file=$(mktemp)
+        temp_file="clean_output.md"
+        temp_summary="temp_summary.md"
+        important_lines="important_lines.txt"
+        action_lines="action_lines.txt"
+        final_file="$DOWNLOADS_DIR/$selected_note"
+        file_path=$note
+
+        # Extract file metadata
+        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
+        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+
+
+# Write the metadata to the temporary file
+cat <<EOF > "$metadata_file"
+---
+title: $title
+date: $(echo "$timestamp" | cut -c 1-10) 
+toc: false
+mainfont: Arial
+header-includes:
+  - \usepackage{geometry}
+geometry:
+- top=30mm
+- left=20mm
+- heightrounded
+---
+
+\newpage
+
+# $type Details
+
+EOF
+
+# Add location if it's not empty
+if [ -n "$location" ]; then
+    echo "**Location**: $location  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+
+fi
+
+# Add attendees if it's not empty
+if [ -n "$attendees" ]; then
+    echo "**Attendees**:  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+    echo "$attendees" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+fi
+
+# Add participants if it's not empty
+if [ -n "$participants" ]; then
+    echo "**Participants**:  " >> "$metadata_file"
+    echo "" >> "$metadata_file"
+    echo "$participants" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+fi
+
+
+# Check if # Summary section exists, and add it if not
+if ! grep -q '# Summary' "$file_path"; then
+    awk '
+    /# Content/ {
+        print "# Summary\n\n## \n\n## Action Items\n\n--------------------------------------------------------------------\n\n\\newpage\n\n";
+        print;
+        next;
+    }
+    { print }
+    ' "$file_path" > "$temp_summary"
+else
+    cp $file_path $temp_summary
+fi
+
+
+# Remove the metadata content
+# Remove the content between # Agreed and the line with dashes
+# Remove the content between # Actions and the line with dashes
+awk '
+BEGIN { print_lines = 1 }
+index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
+/# Summary/ {
+    print;
+    print_lines = 0;
+    next;
+}
+/--{10,}/ && print_lines == 0 { print_lines = 1; }
+/# Action Items/ {
+    print;
+    print_lines = 0;
+    next;
+}
+/--{10,}/ && print_lines == 0 { print_lines = 1; }
+/# Timesheet/ { exit }
+print_lines { print }
+' "$temp_summary" > "$temp_file"
+
+# Re-add metadata in pandoc compatible structure
+cat "$metadata_file" "$temp_file" > "$temp_file.tmp"
+# Rename the temporary file to the original file
+mv "$temp_file.tmp" "$temp_file"
+# Remove the temporary metadata file
+rm "$metadata_file"
+
+
+
+
+        # Grep for AGREED lines and sort and deduplicate them
+        echo "" > "$important_lines"
+	    grep '\!:' "$temp_file" | sed 's/!: //'  | uniq >> "$important_lines"
+        echo "" >> "$important_lines"
+
+
+        # Grep for task lines - [ ] and - [x]
+        echo "" > "$action_lines"
+        echo '| Status | Assignee | Task |'  >> "$action_lines"
+        echo '|--------|----------|--------------------------------------------------|'  >> "$action_lines"
+	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq | sed -E 's/- \[([ x]*)\] +\(([^)]+)\) +(.*)/| \1 | \2 | \3 |/' >> "$action_lines"
+        echo "" >> "$action_lines"
+
+
+        # Insert the AGREED lines right after the # Agreed header
+        awk -v file="$agreed_lines" '
+        BEGIN { print_lines = 1 }
+        /# Summary/ {
+            print;  # Print the # Actions line
+            while ((getline line < "important_lines.txt") > 0) {
+                print line;  # Print each action line
+            }
+            close("important_lines.txt");
+            print_lines = 0;  # Stop printing until after the dashes
+            next;
+        }
+        /# Action Items/ {
+            print;  # Print the # Actions line
+            while ((getline line < "action_lines.txt") > 0) {
+                print line;  # Print each action line
+            }
+            close("action_lines.txt");
+            print_lines = 0;  # Stop printing until after the dashes
+            next;
+        }
+        /--{10,}/ && print_lines == 0 { print_lines = 1 }  # Resume printing after the dashes
+        print_lines { print }
+        ' "$temp_file" > "$final_file"
+
+        # Clean up
+        rm "$temp_file" "$important_lines" "$action_lines" "$temp_summary"
+
+        #cat "$final_file"
+
+        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
+        pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
+		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
+		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
+	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
+        #open -g /tmp/tempfile.pdf &
+        open -g $final_file &
+        open -g "$DOWNLOADS_DIR/$selected_note.pdf" &

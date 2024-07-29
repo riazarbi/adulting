@@ -16,7 +16,7 @@
                     gsub(/\:|\"|\047/,"",$3);
                 
                     # Check for the pattern followed by a 5-character key containing at least one digit
-                    if ($3 ~ /- \[ \] .*[0-9].*/) {
+                    if ($3 ~ /- \[ \] *[A-Z0-9].*/) {
                         print $1, $2, $3;
                     } else {
                         # Generate a random 5-character alphanumeric key ensuring at least one character is a digit

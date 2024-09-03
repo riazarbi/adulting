@@ -191,10 +191,10 @@ def report_actions(actions):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process markdown files or query actions.")
-    parser.add_argument("--query", action='store_true', help="Query action items by text. Example: actions --query --thread personal --status x")
+    parser = argparse.ArgumentParser(description="Log and query actions from markdown notes.")
+    parser.add_argument("--query", action='store_true', help="Query action items log. Returns full json records.  Example: actions --query --thread personal --status x")
+    parser.add_argument("--report", action='store_true', help="Query action items log. Returns a table. Example: actions --report --thread personal --status x")
     parser.add_argument("--update", action='store_true', help="Update the actions log.")
-    parser.add_argument("--report", action='store_true', help="Print tabular formatted actions to console. Example: actions --report --thread personal --status x")
     args, unknown = parser.parse_known_args()
 
     home_path = os.path.expanduser('~')

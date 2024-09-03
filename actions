@@ -5,6 +5,8 @@ import csv
 from datetime import datetime
 import argparse
 import subprocess
+import json
+import re
 
 def parse_markdown(file_path):
     data = {
@@ -17,15 +19,18 @@ def parse_markdown(file_path):
         for line in file:
             if line.startswith('# Topic:'):
                 data['Topic'] = line.split(':')[-1].strip()
-            elif line.startswith('> Thread:'):  # Parsing thread line
+            elif line.startswith('**Thread**:'):  # Parsing thread line
                 data['Thread'] = line.split(':')[-1].strip()
-            elif line.startswith('> Timestamp:'):
+            elif line.startswith('**Timestamp**:'):
                 data['Timestamp'] = line.split(':')[-1].strip()
             elif line.strip().startswith('- ['):
-                status = 'DONE' if 'x]' in line else 'OPEN'
+                status = 'x' if 'x]' in line else '-'
                 task = line.split(']')[-1].strip()
-                data['Actions'].append((task, status))
+                # Extract only the first word of the task
+                task_key = task.split()[0]  # This splits the task string into words and picks the first one
+                data['Actions'].append((task_key, task.replace(task_key, ""), status))
     return data
+
 
 def read_existing_csv(filename):
     entries = {}
@@ -33,7 +38,7 @@ def read_existing_csv(filename):
         with open(filename, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
-                key = (row['Action Item Text'], row['Timestamp'])
+                key = row['key']
                 entries[key] = row
     except FileNotFoundError:
         pass
@@ -41,7 +46,7 @@ def read_existing_csv(filename):
 
 def write_to_csv(entries, filename):
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
-        fieldnames = ['Filename', 'Thread', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
+        fieldnames = ['key', 'Filename', 'Thread', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         for entry in entries.values():
@@ -65,11 +70,11 @@ def query_csv(query, filename):
             })
 
     # Sort results by status
-    results.sort(key=lambda x: (-ord(x['Status'][0]), x['Action Item']))
+    results.sort(key=lambda x: (x['Status'][0], x['Action Item']))
 
     # Define column widths
     timestamp_width = 10
-    status_width = 5
+    status_width = 7
     days_interval_width = 5
     topic_width = 30
     action_text_width = 50
@@ -94,55 +99,162 @@ def query_csv(query, filename):
         print(formatted_output)
 
 
+def parse_markdown_folder(folder_path):
+    actions = []
+    for filename in os.listdir(folder_path):
+        if filename.endswith('.md'):
+            file_path = os.path.join(folder_path, filename)
+            
+            markdown_data = parse_markdown(file_path)
+
+            for task_key, task, status in markdown_data['Actions']:
+                current_time = datetime.now()
+                timestamp_datetime = datetime.strptime(markdown_data['Timestamp'], '%Y-%m-%d-%H-%M-%S')
+                days_interval = (current_time - timestamp_datetime).days
+
+                # Regular expression to find bracketed content
+                match = re.match(r'\s*\(([^)]+)\)', task)
+                if match:
+                    assignee = match.group(1)
+                    action_item_text = re.sub(r'\s*\([^)]+\)', '', task).strip()
+                else:
+                    assignee = ''
+                    action_item_text = task
+
+                action = {
+                        'key': task_key,
+                        'filename': os.path.basename(file_path),
+                        'topic': markdown_data['Topic'],
+                        'timestamp': timestamp_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+                        'current_time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
+                        'action_item_text': task,
+                        'assignee': assignee,
+                        'action_item': action_item_text,
+                        'action_item_status': status,
+                        'days_interval': days_interval
+                    }
+                actions.append(action)
+    return(actions)
+     
+      
+# Function to load JSON data from a file
+def load_json(filename):
+    with open(filename, 'r') as file:
+        return json.load(file)   
+     
+         
+def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
+    actions = parse_markdown_folder(folder_path)
+    
+    # Load actions_log_data if the file exists, otherwise use actions_new_data
+    if os.path.exists(actions_log_path):
+        actions_log_data = load_json(actions_log_path)
+    else:
+        actions_log_data = actions
+
+    # Create a dictionary to track records by key for actions_log_data
+    actions_log_dict = {record['key']: record for record in actions_log_data}    
+        
+    # Process new data
+    for new_record in actions:
+        key = new_record['key']
+        if key not in actions_log_dict:
+            print("Added:")
+            print(json.dumps(new_record, indent=4))
+            # Rule 1: Add record if key is not present in actions_log_data
+            actions_log_dict[key] = new_record
+        else:
+            # Rule 2: Update record if key is present and action_item_status is NOT "x"
+            if new_record['action_item_status'] != 'x':
+                actions_log_dict[key] = new_record
+
+    # Convert the dictionary back to a list
+    updated_actions_log_data = list(actions_log_dict.values())
+
+    # Writing the list of JSON records to a file
+    with open(new_actions_path, 'w') as file:
+        json.dump(actions, file, indent=4)
+
+    # Optionally, save the updated data back to the file
+    with open(actions_log_path, 'w') as file:
+        json.dump(updated_actions_log_data, file, indent=4)
+
+
+
 def process_folder(folder_path, output_csv):
     entries = read_existing_csv(output_csv)
 
     for filename in os.listdir(folder_path):
         if filename.endswith('.md'):
             file_path = os.path.join(folder_path, filename)
+            
             markdown_data = parse_markdown(file_path)
 
-            for action, status in markdown_data['Actions']:
-                key = (action, markdown_data['Timestamp'])
+
+            for task_key, task, status in markdown_data['Actions']:
+                key = task_key
                 current_time = datetime.now()
                 timestamp_datetime = datetime.strptime(markdown_data['Timestamp'], '%Y-%m-%d-%H-%M-%S')
                 days_interval = (current_time - timestamp_datetime).days
 
                 if key in entries:
-                    if entries[key]['Action Item Status'] == 'DONE':
+                    if entries[key]['Action Item Status'] == 'x':
                         continue  # Skip updating DONE items
-                    entries[key]['Action Item Status'] = status
+                    else: 
+                        entries[key] = {
+                            'key': task_key,
+                            'Filename': os.path.basename(file_path),
+                            'Topic': markdown_data['Topic'],
+                            'Timestamp': markdown_data['Timestamp'],
+                            'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'Thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
+                            'Action Item Text': task,
+                            'Action Item Status': status,
+                            'Days Interval': days_interval
+                    }
+
                 else:
                     entries[key] = {
+                        'key': task_key,
                         'Filename': os.path.basename(file_path),
                         'Topic': markdown_data['Topic'],
                         'Timestamp': markdown_data['Timestamp'],
                         'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
                         'Thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
-                        'Action Item Text': action,
+                        'Action Item Text': task,
                         'Action Item Status': status,
                         'Days Interval': days_interval
                     }
 
     write_to_csv(entries, output_csv)
 
+
 def main():
     parser = argparse.ArgumentParser(description="Process markdown files or query actions.")
     parser.add_argument("--query", type=str, help="Query action items by text.")
     parser.add_argument("--update", action='store_true', help="Update the actions log.")
+    parser.add_argument("--cat", action='store_true', help="Print actions to console")
     args = parser.parse_args()
 
     home_path = os.path.expanduser('~')
     folder_path = os.path.join(home_path, '.adulting', 'notes')
     output_csv = os.path.join(home_path, '.adulting', 'actions_log.csv')
+    actions_new_file = os.path.join(home_path, '.adulting', 'actions_current.json')
+    actions_log_file = os.path.join(home_path, '.adulting', 'actions_log.json')
 
     if args.query:
         query_csv(args.query, output_csv)
+    elif args.cat:
+        actions = parse_markdown_folder(folder_path)
+        print(json.dumps(actions, indent=4))
     elif args.update:
-        process_folder(folder_path, output_csv)
+        process_markdown_folder(folder_path, actions_new_file, actions_log_file)
         print('Actions log updated.')
     else:
         subprocess.run(["notes", "--actions"], check=True)
+        process_markdown_folder(folder_path, actions_new_file, actions_log_file)
+
 
 if __name__ == "__main__":
     main()

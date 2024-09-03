@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 import os
-import csv
 from datetime import datetime
 import argparse
 import subprocess
 import json
 import re
+import shutil
 
 def parse_markdown(file_path):
     data = {
@@ -64,8 +64,8 @@ def parse_markdown_folder(folder_path):
                         'thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
                         'action_item_text': task,
                         'assignee': assignee,
-                        'action_item': action_item_text,
-                        'action_item_status': status,
+                        'text': action_item_text,
+                        'status': status,
                         'days_interval': days_interval
                     }
                 actions.append(action)
@@ -99,8 +99,8 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
             # Rule 1: Add record if key is not present in actions_log_data
             actions_log_dict[key] = new_record
         else:
-            # Rule 2: Update record if key is present and action_item_status is NOT "x"
-            if new_record['action_item_status'] != 'x':
+            # Rule 2: Update record if key is present and status is NOT "x"
+            if new_record['status'] != 'x':
                 actions_log_dict[key] = new_record
 
     # Convert the dictionary back to a list
@@ -116,21 +116,101 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
 
 
 
+def load_action_log(actions_log_path):
+    
+    # Load actions_log_data if the file exists, otherwise use actions_new_data
+    if os.path.exists(actions_log_path):
+        actions = load_json(actions_log_path)
+        return(actions)
+    else:
+        print("No actions log path found.")
+        return
+
+def filter_data(data, filters):
+    filtered = []
+    for item in data:
+        match = True
+        for key, value in filters.items():
+            if key in item and value.lower() not in str(item[key]).lower():
+                match = False
+                break
+        if match:
+            filtered.append(item)
+    return filtered
+
+
+def query_actions(actions):
+    dynamic_parser = argparse.ArgumentParser(description="Query actions with dynamic filters")
+    keys = actions[0].keys()
+    # Add arguments dynamically based on the keys
+    for key in keys:
+        dynamic_parser.add_argument(f'--{key}', type=str, help=f'Filter by {key}')
+    dynamic_args, unknown = dynamic_parser.parse_known_args()
+    filters = {key: value for key, value in vars(dynamic_args).items() if value is not None}
+    filtered_results = filter_data(actions, filters)
+    return(filtered_results)
+
+def report_actions(actions):
+        sorted_results = sorted(actions, key=lambda x: (x['assignee'], x['status'], x['days_interval']))
+        # Get the terminal width
+        terminal_width = shutil.get_terminal_size().columns
+        # Define the minimum column widths
+        min_col_widths = {
+            "Thread": 15,
+            "Assignee": 15,
+            "Status": 10,
+            "Days": 10,
+            "Action Item": 100
+        }
+
+        # Calculate total width of fixed columns
+        fixed_width = sum(min_col_widths.values()) + len(min_col_widths) - 1  # Account for spacing
+        print(fixed_width)
+
+        # Calculate width for action_item column
+        action_item_width = max(0, terminal_width - fixed_width + 100)
+        print(action_item_width)
+        headers = ["Thread", "Assignee", "Status", "Days", "Action Item"]
+        
+        # Print the header row
+        #print(f"{headers[0]:<15} {headers[1]:<15} {headers[2]:<10} {headers[3]:<13} {headers[4]:<50}")
+        #print("-" * 100)
+
+        # Print the data rows
+        #for record in sorted_results:
+        #    print(f"{record['thread']:<15} {record['assignee']:<15} {record['status']:<10} {record['days_interval']:<13} {record['text']:<50}")
+
+        
+        # Print the header row
+        print(f"{headers[0]:<{min_col_widths['Thread']}} {headers[1]:<{min_col_widths['Assignee']}} {headers[2]:<{min_col_widths['Status']}} {headers[3]:<{min_col_widths['Days']}} {headers[4]:<{action_item_width}}")
+        print("-" * terminal_width)
+                    
+        # Print the sorted data rows
+        for record in sorted_results:
+            print(f"{record['thread']:<{min_col_widths['Thread']}} {record['assignee']:<{min_col_widths['Assignee']}} {record['status']:<{min_col_widths['Status']}} {record['days_interval']:<{min_col_widths['Days']}} {record['text'][:action_item_width]:<{action_item_width}}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Process markdown files or query actions.")
-    parser.add_argument("--query", type=str, help="Query action items by text.")
+    parser.add_argument("--query", action='store_true', help="Query action items by text.")
     parser.add_argument("--update", action='store_true', help="Update the actions log.")
     parser.add_argument("--cat", action='store_true', help="Print actions to console")
-    args = parser.parse_args()
+    parser.add_argument("--report", action='store_true', help="Print tabular formatted actions to console")
+    args, unknown = parser.parse_known_args()
 
     home_path = os.path.expanduser('~')
     folder_path = os.path.join(home_path, '.adulting', 'notes')
-    output_csv = os.path.join(home_path, '.adulting', 'actions_log.csv')
     actions_new_file = os.path.join(home_path, '.adulting', 'actions_current.json')
     actions_log_file = os.path.join(home_path, '.adulting', 'actions_log.json')
 
     if args.query:
-        query_csv(args.query, output_csv)
+        actions = load_action_log(actions_log_file)
+        filtered_results = query_actions(actions)
+        print(json.dumps(filtered_results, indent=4))
+    elif args.report:
+        actions = load_action_log(actions_log_file)
+        filtered_results = query_actions(actions)
+        report_actions(filtered_results)
     elif args.cat:
         actions = parse_markdown_folder(folder_path)
         print(json.dumps(actions, indent=4))

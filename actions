@@ -32,72 +32,6 @@ def parse_markdown(file_path):
     return data
 
 
-def read_existing_csv(filename):
-    entries = {}
-    try:
-        with open(filename, mode='r', newline='', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                key = row['key']
-                entries[key] = row
-    except FileNotFoundError:
-        pass
-    return entries
-
-def write_to_csv(entries, filename):
-    with open(filename, mode='w', newline='', encoding='utf-8') as file:
-        fieldnames = ['key', 'Filename', 'Thread', 'Topic', 'Timestamp', 'Current Time', 'Action Item Text', 'Action Item Status', 'Days Interval']
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for entry in entries.values():
-            writer.writerow(entry)
-
-def query_csv(query, filename):
-    entries = read_existing_csv(filename)
-    results = []
-    
-    for key, entry in entries.items():
-        if query.lower() in entry['Thread'].lower():
-            # Reformat the timestamp to show only the date
-            timestamp_date = datetime.strptime(entry['Timestamp'], '%Y-%m-%d-%H-%M-%S').strftime('%Y-%m-%d')
-            
-            results.append({
-                'Timestamp': timestamp_date,
-                'Status': entry['Action Item Status'],
-                'Duration': entry['Days Interval'],
-                'Topic': entry['Topic'],
-                'Action Item': entry['Action Item Text']
-            })
-
-    # Sort results by status
-    results.sort(key=lambda x: (x['Status'][0], x['Action Item']))
-
-    # Define column widths
-    timestamp_width = 10
-    status_width = 7
-    days_interval_width = 5
-    topic_width = 30
-    action_text_width = 50
-
-    # Print headers with alignment
-    print(f"{'Opened':<{timestamp_width}}\t{'Status':<{status_width}}\t{'Age':<{days_interval_width}}\t{'Topic':<{topic_width}}\t{'Action Item':<{action_text_width}}")
-
-    # Print results
-    for result in results:
-        formatted_output = "{:<{tsw}}\t{:<{sw}}\t{:<{diw}}\t{:<{tw}}\t{:<{atw}}".format(
-            result['Timestamp'],
-            result['Status'],
-            result['Duration'],
-            result['Topic'],
-            result['Action Item'],
-            tsw=timestamp_width,
-            sw=status_width,
-            diw=days_interval_width,
-            tw=topic_width,
-            atw=action_text_width
-        )
-        print(formatted_output)
-
 
 def parse_markdown_folder(folder_path):
     actions = []
@@ -180,54 +114,6 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
     with open(actions_log_path, 'w') as file:
         json.dump(updated_actions_log_data, file, indent=4)
 
-
-
-def process_folder(folder_path, output_csv):
-    entries = read_existing_csv(output_csv)
-
-    for filename in os.listdir(folder_path):
-        if filename.endswith('.md'):
-            file_path = os.path.join(folder_path, filename)
-            
-            markdown_data = parse_markdown(file_path)
-
-
-            for task_key, task, status in markdown_data['Actions']:
-                key = task_key
-                current_time = datetime.now()
-                timestamp_datetime = datetime.strptime(markdown_data['Timestamp'], '%Y-%m-%d-%H-%M-%S')
-                days_interval = (current_time - timestamp_datetime).days
-
-                if key in entries:
-                    if entries[key]['Action Item Status'] == 'x':
-                        continue  # Skip updating DONE items
-                    else: 
-                        entries[key] = {
-                            'key': task_key,
-                            'Filename': os.path.basename(file_path),
-                            'Topic': markdown_data['Topic'],
-                            'Timestamp': markdown_data['Timestamp'],
-                            'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
-                            'Thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
-                            'Action Item Text': task,
-                            'Action Item Status': status,
-                            'Days Interval': days_interval
-                    }
-
-                else:
-                    entries[key] = {
-                        'key': task_key,
-                        'Filename': os.path.basename(file_path),
-                        'Topic': markdown_data['Topic'],
-                        'Timestamp': markdown_data['Timestamp'],
-                        'Current Time': current_time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'Thread': markdown_data.get('Thread', 'N/A'),  # Add thread to CSV
-                        'Action Item Text': task,
-                        'Action Item Status': status,
-                        'Days Interval': days_interval
-                    }
-
-    write_to_csv(entries, output_csv)
 
 
 def main():

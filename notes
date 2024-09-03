@@ -62,6 +62,11 @@ RENDERING - does not alter original note contents. Rendered documents are saved 
                         - Resolutions, as indicated by the "RESOLVED:" keyword.
                         - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
 
+    --agenda   Select, reformat and open a selected note as Meeting Agenda in PDF and markdown. 
+                For --agenda, reformatting includes:
+                    - Creating a latex header from the note metadata.
+                    - Placing the location, attendees participants on the first page, if they exist.
+
 EOF
 }
 
@@ -151,6 +156,11 @@ if [[ $1 = "--last" ]]; then
 elif [[ $1 = "--minutes" ]]; then
     select_note
     notes_minutes $selected_note
+
+# COMPILE AND RENDER NOTE AS MEETING MINUTES
+elif [[ $1 = "--agenda" ]]; then
+    select_note
+    notes_agenda $selected_note
 
 
 # COMPILE AND RENDER NOTE AS PDF

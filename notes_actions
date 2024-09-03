@@ -44,7 +44,7 @@
                         print $1, $2, $3;
                     }
                 }' |
-                sort -k3 >> $NOTES_DIR/action_items.md
+                sort -k1 >> $NOTES_DIR/action_items.md
 
         
         #open_note $NOTES_DIR/action_items.md

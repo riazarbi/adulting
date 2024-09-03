@@ -185,5 +185,5 @@ rm "$metadata_file"
 		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
 	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
         #open -g /tmp/tempfile.pdf &
-        open -g $final_file &
+        #open -g $final_file &
         open -g "$DOWNLOADS_DIR/$selected_note.pdf" &

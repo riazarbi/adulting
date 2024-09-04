@@ -33,6 +33,7 @@ MODIFICATION:
                         "AGREED:"   Indicates a statement that the meeting group formally agrees on.
                         "RESOLVED:" Indicates a statement that a meeting group resolves.
                         "- [ ]"     Will be tracked as an action item, and show up in notes --actions until closed with an '[x]'.
+    --nano      Edit a note, but in the nano command line text editor.
     --last      Select and open the last created note in default text editor.
     --actions   Display open actions across all notes in nano text editor. 
                     You can edit the action status ("[ ]" vs "[x]") and content and it will update the status in the original note.
@@ -98,6 +99,20 @@ open_note() {
     fi
 }
 
+# Nano  note
+nano_note() {
+    # Check the operating system
+    if [[ $(uname) == "Linux" ]]; then
+        nano -"$@" note
+        #open -g $note
+    elif [[ $(uname) == "Darwin" ]]; then
+        nano "$@" note
+        #open -g $note
+    else
+        # If it's neither Linux nor macOS, print an error message
+        echo "Unsupported operating system"
+    fi
+}
 
 # EXPORTS
 # Export variables
@@ -182,6 +197,14 @@ elif [[ $1 = "--edit" ]]; then
     note="$NOTES_DIR/$selected_note"
     echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
     open_note $note
+    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
+
+# NANO NOTE
+elif [[ $1 = "--nano" ]]; then
+    select_note
+    note="$NOTES_DIR/$selected_note"
+    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
+    nano_note $note
     echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 

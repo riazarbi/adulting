@@ -100,7 +100,7 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
             actions_log_dict[key] = new_record
         else:
             # Rule 2: Update record if key is present and status is NOT "x"
-            if new_record['status'] != 'x':
+            if actions_log_dict[key]['status'] != 'x':
                 actions_log_dict[key] = new_record
 
     # Convert the dictionary back to a list

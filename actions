@@ -3,11 +3,88 @@
 import os
 from datetime import datetime
 import argparse
+import random
 import subprocess
 import json
 import re
 import shutil
 
+# ACTION IN-PLACE PROCESSING
+def generate_random_key():
+    """Generate a 5-character alphanumeric key with at least one digit."""
+    key = ""
+    digit_placed = False
+    for i in range(5):
+        if i == 4 and not digit_placed:
+            key += str(random.randint(0, 9))
+        else:
+            if random.choice([True, False]):
+                key += str(random.randint(0, 9))
+                digit_placed = True
+            else:
+                key += chr(random.randint(65, 90))  # A-Z
+    return key
+
+
+def find_action_items(folder_path):
+    """Find all action items in Markdown files."""
+    action_items = []
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(".md"):
+                file_path = os.path.join(root, file)
+                with open(file_path, "r") as f:
+                    for line_number, line in enumerate(f, start=1):
+                        if re.search(r"- \[ \]", line):
+                            action_items.append((file_path, line_number, line.strip()))
+    return action_items
+
+
+def process_action_items(action_items):
+    """Process action items, ensuring they contain a valid key."""
+    processed_items = []
+    for file_path, line_number, content in action_items:
+        match = re.match(r"(- \[ \] *)([A-Z0-9]{5}.*)", content)
+        if match:
+            processed_items.append((file_path, line_number, content))
+        else:
+            new_key = generate_random_key()
+            updated_content = re.sub(r"- \[ \]", f"- [ ] {new_key}", content, count=1)
+            processed_items.append((file_path, line_number, updated_content))
+    return processed_items
+
+
+def write_to_output_file(processed_items, folder_path, actions_working_file):
+    """Write processed action items to the output file."""
+    with open(actions_working_file, "w") as f:
+        for file_path, line_number, content in sorted(processed_items):
+            relative_path = os.path.relpath(file_path, folder_path)
+            f.write(f"{relative_path}\t{line_number}\t{content}\n")
+
+
+def update_original_files(folder_path, actions_working_file):
+    """Update the original files with edited content from the output file."""
+    with open(actions_working_file, "r") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) < 3:
+                continue
+            relative_path, line_number, content = parts[0], int(parts[1]), "\t".join(parts[2:])
+            file_path = os.path.join(folder_path, relative_path)
+            if os.path.exists(file_path):
+                temp_file = f"{file_path}.tmp"
+                with open(file_path, "r") as infile, open(temp_file, "w") as outfile:
+                    for i, original_line in enumerate(infile, start=1):
+                        if i == line_number:
+                            outfile.write(content + "\n")
+                        else:
+                            outfile.write(original_line)
+                shutil.move(temp_file, file_path)
+            else:
+                print(f"File not found: {file_path}")
+
+
+# ACTION LOGGING AND REPORTING
 def parse_markdown(file_path):
     data = {
         'Topic': None,
@@ -30,7 +107,6 @@ def parse_markdown(file_path):
                 task_key = task.split()[0]  # This splits the task string into words and picks the first one
                 data['Actions'].append((task_key, task.replace(task_key, ""), status))
     return data
-
 
 
 def parse_markdown_folder(folder_path):
@@ -115,9 +191,7 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
         json.dump(updated_actions_log_data, file, indent=4)
 
 
-
 def load_action_log(actions_log_path):
-    
     # Load actions_log_data if the file exists, otherwise use actions_new_data
     if os.path.exists(actions_log_path):
         actions = load_json(actions_log_path)
@@ -150,6 +224,7 @@ def query_actions(actions):
     filtered_results = filter_data(actions, filters)
     return(filtered_results)
 
+
 def report_actions(actions):
         sorted_results = sorted(actions, key=lambda x: (x['assignee'], x['status'], x['days_interval']))
         # Get the terminal width
@@ -171,16 +246,7 @@ def report_actions(actions):
         action_item_width = max(0, terminal_width - fixed_width + 100)
         print(action_item_width)
         headers = ["Thread", "Assignee", "Status", "Days", "Action Item"]
-        
-        # Print the header row
-        #print(f"{headers[0]:<15} {headers[1]:<15} {headers[2]:<10} {headers[3]:<13} {headers[4]:<50}")
-        #print("-" * 100)
-
-        # Print the data rows
-        #for record in sorted_results:
-        #    print(f"{record['thread']:<15} {record['assignee']:<15} {record['status']:<10} {record['days_interval']:<13} {record['text']:<50}")
-
-        
+                
         # Print the header row
         print(f"{headers[0]:<{min_col_widths['Thread']}} {headers[1]:<{min_col_widths['Assignee']}} {headers[2]:<{min_col_widths['Status']}} {headers[3]:<{min_col_widths['Days']}} {headers[4]:<{action_item_width}}")
         print("-" * terminal_width)
@@ -190,17 +256,38 @@ def report_actions(actions):
             print(f"{record['thread']:<{min_col_widths['Thread']}} {record['assignee']:<{min_col_widths['Assignee']}} {record['status']:<{min_col_widths['Status']}} {record['days_interval']:<{min_col_widths['Days']}} {record['text'][:action_item_width]:<{action_item_width}}")
 
 
+# MAIN FUNCTION
 def main():
-    parser = argparse.ArgumentParser(description="Log and query actions from markdown notes.")
+    parser = argparse.ArgumentParser(description="""Process and query actions from markdown notes. 
+                                     By default this command opens a list of all open action items found in all your notes in the nano text editor for modification.
+                                     Once you are done modifying, save and close the file and all of the notes will have your changes inserted in place.""")
+    parser.add_argument("--noninteractive", action="store_true", help="Update notes with new information and update the action log without opening the actions working file in nano.")
     parser.add_argument("--query", action='store_true', help="Query action items log. Returns full json records.  Example: actions --query --thread personal --status x")
     parser.add_argument("--report", action='store_true', help="Query action items log. Returns a table. Example: actions --report --thread personal --status x")
-    parser.add_argument("--update", action='store_true', help="Update the actions log.")
+    parser.add_argument("--delete", action='store_true', help="Open the action log to manually delete actions.")
+
     args, unknown = parser.parse_known_args()
 
     home_path = os.path.expanduser('~')
     folder_path = os.path.join(home_path, '.adulting', 'notes')
+    actions_working_file = os.path.join(folder_path, ".action_items.md")
+
     actions_new_file = os.path.join(home_path, '.adulting', 'actions_current.json')
     actions_log_file = os.path.join(home_path, '.adulting', 'actions_log.json')
+
+    if not os.path.exists(folder_path):
+        print(f"Notes directory does not exist: {folder_path}")
+        return
+
+    if os.path.exists(actions_working_file):
+        os.remove(actions_working_file)
+
+    # Update actions in markdown to ensure they have proper keys
+    action_items = find_action_items(folder_path)
+    processed_items = process_action_items(action_items)
+    write_to_output_file(processed_items, folder_path, actions_working_file)
+    update_original_files(folder_path, actions_working_file)
+    process_markdown_folder(folder_path, actions_new_file, actions_log_file)
 
     if args.query:
         actions = load_action_log(actions_log_file)
@@ -210,12 +297,19 @@ def main():
         actions = load_action_log(actions_log_file)
         filtered_results = query_actions(actions)
         report_actions(filtered_results)
-    elif args.update:
-        process_markdown_folder(folder_path, actions_new_file, actions_log_file)
-        print('Actions log updated.')
+    elif args.delete:
+        os.system(f"nano {actions_log_file}")
+    elif args.noninteractive:
+        with open(actions_working_file, "r") as f:
+            print(f.read())
     else:
-        subprocess.run(["notes", "--actions"], check=True)
+        os.system(f"nano {actions_working_file}")
+        update_original_files(folder_path, actions_working_file)
         process_markdown_folder(folder_path, actions_new_file, actions_log_file)
+    
+    os.remove(actions_working_file)
+    print('Actions log updated.')
+
 
 
 if __name__ == "__main__":

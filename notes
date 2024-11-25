@@ -243,7 +243,7 @@ elif [[ $1 = "--strip" ]]; then
 
 # DISPLAY OPEN ACTION ITEMS
 elif [[ $1 = "--actions" ]]; then
-    notes_actions 
+    actions 
 
 # FLAG ERROR CATCHALL
 else

@@ -11,12 +11,10 @@ selected_note=$1
             if [ "$count" -le 8 ]; then
                 echo "$line" >> "$tempfile"
             else
-              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^----- ]]; then
+              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^--- ]]; then
                     echo "" >> "$tempfile"  # Adding a newline for Markdown formatting
                     echo "$line" >> "$tempfile"
-              elif [[ "$line" =~ ^"- [ ]" ]]; then
-                    echo "$line" >> "$tempfile"
-                fi
+            fi
             fi
         done < "$note"
 

@@ -27,7 +27,8 @@ selected_note=$1
 # Write the metadata to the temporary file
 cat <<EOF > "$metadata_file"
 ---
-title: $title
+title: Minutes
+subtitle: $title
 date: $(echo "$timestamp" | cut -c 1-10) 
 toc: true
 toc-depth: 2

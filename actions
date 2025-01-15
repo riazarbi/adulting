@@ -154,7 +154,7 @@ def load_json(filename):
         return json.load(file)   
      
          
-def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
+def process_markdown_folder(folder_path, actions_log_path):
     actions = parse_markdown_folder(folder_path)
     
     # Load actions_log_data if the file exists, otherwise use actions_new_data
@@ -181,10 +181,6 @@ def process_markdown_folder(folder_path, new_actions_path, actions_log_path):
 
     # Convert the dictionary back to a list
     updated_actions_log_data = list(actions_log_dict.values())
-
-    # Writing the list of JSON records to a file
-    with open(new_actions_path, 'w') as file:
-        json.dump(actions, file, indent=4)
 
     # Optionally, save the updated data back to the file
     with open(actions_log_path, 'w') as file:
@@ -272,7 +268,6 @@ def main():
     folder_path = os.path.join(home_path, '.adulting', 'notes')
     actions_working_file = os.path.join(folder_path, ".action_items.md")
 
-    actions_new_file = os.path.join(home_path, '.adulting', 'actions_current.json')
     actions_log_file = os.path.join(home_path, '.adulting', 'actions_log.json')
 
     if not os.path.exists(folder_path):
@@ -287,7 +282,7 @@ def main():
     processed_items = process_action_items(action_items)
     write_to_output_file(processed_items, folder_path, actions_working_file)
     update_original_files(folder_path, actions_working_file)
-    process_markdown_folder(folder_path, actions_new_file, actions_log_file)
+    process_markdown_folder(folder_path, actions_log_file)
 
     if args.query:
         actions = load_action_log(actions_log_file)
@@ -305,10 +300,9 @@ def main():
     else:
         os.system(f"nano {actions_working_file}")
         update_original_files(folder_path, actions_working_file)
-        process_markdown_folder(folder_path, actions_new_file, actions_log_file)
+        process_markdown_folder(folder_path, actions_log_file)
     
     os.remove(actions_working_file)
-    print('Actions log updated.')
 
 
 

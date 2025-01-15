@@ -24,7 +24,7 @@ Example: $0 --new
 CREATION:
     --new       [DEFAULT] Create a new note and open for editing in default text editor.
     --copy      Select and copy note contents to a new note with the current timestamp. Does not alter the timestamp in the note header - you need to do that manually
-    --strip     Select and copy note contents to a new note and remove anything that is not a header or an action item. Useful for using one note as a template for another note.
+    --strip     Select and copy note contents to a new note and remove anything that is not a header. Useful for using one note as a template for another note.
 
 
 MODIFICATION:
@@ -54,6 +54,7 @@ RENDERING - does not alter original note contents. Rendered documents are saved 
                         - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
 
     --minutes   Select, reformat and open a selected note as Meeting Minutes in PDF and markdown. 
+                Saves to Downloads folder by default.
                 For --minutes, reformatting includes:
                     - Creating a latex header from the note metadata.
                     - Adding a table of contents, as indicated by markdown headers.
@@ -64,6 +65,7 @@ RENDERING - does not alter original note contents. Rendered documents are saved 
                         - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
 
     --agenda   Select, reformat and open a selected note as Meeting Agenda in PDF and markdown. 
+                Saves to Downloads folder by default.
                 For --agenda, reformatting includes:
                     - Creating a latex header from the note metadata.
                     - Placing the location, attendees participants on the first page, if they exist.

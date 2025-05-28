@@ -132,6 +132,7 @@ if [[ $1 = "--new" ]] || [ -z "$1" ]; then
     notes_new
 else
 
+actions --update
 
 # GET NOTES LIST
 for f in $NOTES_DIR/*
@@ -141,7 +142,7 @@ for f in $NOTES_DIR/*
         note_info+="|"
         note_info+=$(basename $f)
         note_info+="|"
-        note_info+=$(basename $f | cut -c 1-10)  
+        note_info+=$(grep "\*\*Timestamp\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//' | cut -c 1-10)  
         note_info+="|"
         note_info+=$(grep "\*\*Thread\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
         note_info+="|"
@@ -153,6 +154,12 @@ for f in $NOTES_DIR/*
 
 # Remove the first newline
 notes_unfiltered=${notes_unfiltered:1}
+
+# Sort notes by timestamp (column 3)
+notes_unfiltered=$(echo "$notes_unfiltered" | sort -t '|' -k3)
+
+# Renumber the first column after sorting
+notes_unfiltered=$(echo "$notes_unfiltered" | awk -F'|' '{$1=NR; print}' OFS='|')
 
 if [ ! -z "$2" ]; then
   notes_all=$(echo "$notes_unfiltered" | grep -i "$2" | awk -F  "/" 'tolower($0) ~ /1/ {print $NF}')

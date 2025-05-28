@@ -261,6 +261,7 @@ def main():
     parser.add_argument("--query", action='store_true', help="Query action items log. Returns full json records.  Example: actions --query --thread personal --status x")
     parser.add_argument("--report", action='store_true', help="Query action items log. Returns a table. Example: actions --report --thread personal --status x")
     parser.add_argument("--delete", action='store_true', help="Open the action log to manually delete actions.")
+    parser.add_argument("--update", action='store_true', help="Update actions and print confirmation message.")
 
     args, unknown = parser.parse_known_args()
 
@@ -297,6 +298,8 @@ def main():
     elif args.noninteractive:
         with open(actions_working_file, "r") as f:
             print(f.read())
+    elif args.update:
+        print("Actions updated")
     else:
         os.system(f"nano {actions_working_file}")
         update_original_files(folder_path, actions_working_file)

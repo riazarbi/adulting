@@ -125,11 +125,19 @@ rm "$metadata_file"
         # Grep for AGREED lines and sort and deduplicate them
         echo "" > "$agreed_lines"
 	    grep 'AGREED:' "$temp_file" | sed 's/AGREED: //'  | uniq >> "$agreed_lines"
+        # Check if file is empty and add "None" if so
+        if [ ! -s "$agreed_lines" ] || [ "$(grep -v '^$' "$agreed_lines" | wc -l)" -eq 0 ]; then
+            echo "No minutes agreements were made." > "$agreed_lines"
+        fi
         echo "" >> "$agreed_lines"
 
         # Grep for task lines - [ ] and - [x]
         echo "" > "$resolved_lines"
 	    grep 'RESOLVED:' "$temp_file" | sed 's/RESOLVED: //'  | uniq >> "$resolved_lines"
+        # Check if file is empty and add "None" if so
+        if [ ! -s "$resolved_lines" ] || [ "$(grep -v '^$' "$resolved_lines" | wc -l)" -eq 0 ]; then
+            echo "No Resolutions were passed." > "$resolved_lines"
+        fi
         echo "" >> "$resolved_lines"
 
 
@@ -138,6 +146,10 @@ rm "$metadata_file"
         echo '| Status | Assignee | Task |'  >> "$action_lines"
         echo '|--------|----------|--------------------------------------------------|'  >> "$action_lines"
 	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq | sed -E 's/- \[([ x]*)\] +\(([^)]+)\) +(.*)/| \1 | \2 | \3 |/' >> "$action_lines"
+        # Check if file only has headers and add "None" if so
+        if [ $(wc -l < "$action_lines") -eq 3 ]; then
+            echo '| None | None | None |' >> "$action_lines"
+        fi
         echo "" >> "$action_lines"
 
 

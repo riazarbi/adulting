@@ -46,6 +46,8 @@ DELETION - permanently removes data:
 RENDERING - does not alter original note contents. Rendered documents are saved to ~/Downloads:
     --cat       Print the note content to the terminal. Useful for piping.
 
+    --export    Select and copy a note file to the Downloads folder.
+
     --pdf       Select, reformat and open a selected note as PDF and markdown. 
                 For --pdf, reformatting includes:
                     - Creating a latex header from the note metadata.
@@ -171,9 +173,7 @@ fi
 if [[ $1 = "--last" ]]; then
     last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
     note="$NOTES_DIR/$last_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
     open_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
 
 # COMPILE AND RENDER NOTE AS MEETING MINUTES
@@ -204,17 +204,13 @@ elif [[ $1 = "--delete" ]]; then
 elif [[ $1 = "--edit" ]]; then
     select_note
     note="$NOTES_DIR/$selected_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
     open_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 # NANO NOTE
 elif [[ $1 = "--nano" ]]; then
     select_note
     note="$NOTES_DIR/$selected_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
     nano_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 
 # CAT NOTE
@@ -222,6 +218,14 @@ elif [[ $1 = "--cat" ]]; then
     select_note
     note="$NOTES_DIR/$selected_note"
     cat $note
+
+
+# EXPORT NOTE
+elif [[ $1 = "--export" ]]; then
+    select_note
+    note="$NOTES_DIR/$selected_note"
+    cp "$note" "$DOWNLOADS_DIR/"
+    echo "Exported $selected_note to Downloads folder"
 
 
 # COPY NOTE

@@ -79,8 +79,4 @@ cat >> "$note" << EOM
 # Timesheet
 
 EOM
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
-
         open_note $note
-
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"

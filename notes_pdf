@@ -2,8 +2,7 @@
 
 selected_note=$1
 
-        note="$NOTES_DIR/$selected_note"
-        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note" 
+        note="$NOTES_DIR/$selected_note" 
 
         # Temporary files for different tasks
         metadata_file=$(mktemp)

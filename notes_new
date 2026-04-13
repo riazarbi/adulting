@@ -41,9 +41,6 @@ EOM
 	# Get additional data if it's a meeting
 	if [[ $type = "Meeting" ]]
 	then
-    		echo "Enter the counterparty:"
-    		read counterparty
-    		echo
     		echo "Enter the location:"
     		read location
     		echo
@@ -51,8 +48,7 @@ EOM
     		read attendees
     		echo
 cat >> "$note" << EOM
-**Counterparty**:	$counterparty  
-**Location**:		$location  
+**Location**:		$location
 **Attendees**:		$attendees   
 EOM
 	# Get additional data if it's correspondence

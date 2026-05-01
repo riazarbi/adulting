@@ -90,15 +90,14 @@ select_note() {
 
 # Open  note
 open_note() {
-    # Check the operating system
+    local encoded_path
+    encoded_path=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$note")
+
     if [[ $(uname) == "Linux" ]]; then
-        #nano -"$@" note
-        open -g $note
+        xdg-open "obsidian://open?path=${encoded_path}"
     elif [[ $(uname) == "Darwin" ]]; then
-        #nano "$@" note
-        open -g $note
+        open -g "obsidian://open?path=${encoded_path}"
     else
-        # If it's neither Linux nor macOS, print an error message
         echo "Unsupported operating system"
     fi
 }

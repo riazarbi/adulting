@@ -3,7 +3,11 @@
 selected_note=$1
 
         note="$NOTES_DIR/$selected_note"
-        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note" 
+        echo -e Print:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'\t' >> "$note"
+
+        # Work in a temp directory so the relative awk file refs below don't pollute CWD
+        workdir=$(mktemp -d)
+        cd "$workdir"
 
         # Temporary files for different tasks
         metadata_file=$(mktemp)
@@ -101,7 +105,7 @@ rm "$metadata_file"
 
 
         # Insert the AGREED lines right after the # Agreed header
-        awk -v file="$agreed_lines" '
+        awk '
         BEGIN { print_lines = 1 }
         /# Summary/ {
             print;  # Print the # Actions line
@@ -134,7 +138,10 @@ rm "$metadata_file"
         pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
 		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
 		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
-	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
+	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html
         #open -g /tmp/tempfile.pdf &
         #open -g $final_file &
         open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
+
+        cd /
+        rm -rf "$workdir"

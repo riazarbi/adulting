@@ -32,7 +32,7 @@ The scripts lean on base system tools wherever possible. A few features need ext
 
 ## summary
 
-Prints a one-screen dashboard of your overdue contacts (from `networker`) and the latest log line on each open thread (from `threads`). Add `summary` to the bottom of `.zshrc`/`.bashrc` to see it on every new shell.
+Prints a one-screen dashboard of the latest log line on each open thread. Add `summary` to the bottom of `.zshrc`/`.bashrc` to see it on every new shell.
 
 ## notes
 
@@ -91,9 +91,28 @@ Available query fields: `key`, `filename`, `topic`, `timestamp`, `current_time`,
 
 ## threads
 
-Append-only logs for ongoing projects. Each thread is a file in `~/.adulting/threads/<thread name>` containing one log line per row, formatted `YYYY-MM-DD | <text>`.
+Append-only logs for ongoing projects. Each thread is a markdown file in `~/.adulting/threads/<thread name>.md` with YAML frontmatter and a chronological list of bullets:
 
-What's a thread? Anything you want to keep an eye on — `Beetle Restoration`, `JIRA-1234`, `PTA Bake Sale`. I run `threads` at the end of each day to walk through every open thread and add a log line. Hit Enter to skip; type `CLOSED` to retire one.
+```markdown
+---
+status: open                # open | paused | closed
+kind: process               # process (ongoing) | project (time-delimited)
+category: professional      # professional | personal | voluntary
+started: 2024-04-28
+---
+
+# <thread name>
+
+- 2024-04-28 — Started on the IB integration.
+    - Got the docker image working
+    - Hit auth wall, debugging tomorrow
+- 2024-05-17 — Made progress on rblncr.
+- 2024-06-01 — Vendor decision finalised [[2024-06-01-14-30-00]].
+```
+
+What's a thread? Anything you want to keep an eye on — `Beetle Restoration`, `JIRA-1234`, `PTA Bake Sale`. I run `threads` at the end of each day to walk through every open thread and add a log line. Hit Enter to skip; type `CLOSED` to flip the thread to `status: closed` (and set `ended:` to today).
+
+For an entry that warrants structure (multiple fields, action items, links), spawn a *note* and link to it from the thread bullet. Threads stay a cheap chronological log; notes are the home for typed records.
 
 | Command                       | What it does                                                  |
 |-------------------------------|---------------------------------------------------------------|
@@ -101,51 +120,63 @@ What's a thread? Anything you want to keep an eye on — `Beetle Restoration`, `
 | `threads --tail`              | Last log line for each open thread (status snapshot)          |
 | `threads --report`            | Every log entry from the last 7 days, grouped by thread       |
 | `threads --daily YYYY-MM-DD`  | Every log entry on that date — useful for time tracking       |
+| `threads --overdue`           | Cadences past due, sorted worst-first                         |
 
-## networker
+### Cadences and overdue tracking
 
-Tracks contacts and reminds you when you haven't reached out in a while. Each contact has a cadence (the `time_bucket`):
+A thread can declare any number of recurring obligations under `cadences:`:
 
-| Bucket      | Reminder cadence       |
-|-------------|------------------------|
-| `week`      | every 7 days           |
-| `month`     | every 30 days          |
-| `quarter`   | every 91 days          |
-| `bi-annual` | every 182 days         |
-| `year`      | every 365 days         |
-| `adhoc`     | never overdue (mute)   |
+```yaml
+cadences:
+  - key: tax_return
+    frequency: 31
+    description: Monthly tax return, file before 7th
+  - key: quarterly_review
+    frequency: 90
+    description: All-hands with trustees
+```
 
-State lives in two CSV files under `~/.adulting/`:
+A cadence is satisfied when a log entry is tagged with `#<key>`:
 
-- `network_data.csv` — name, time_bucket, date_added
-- `network_interactions.csv` — name, date, channel, notes
+```markdown
+- 2024-04-01 — #tax_return Filed for March
+```
 
-Run `networker` for the interactive menu, or jump straight to a menu option with the number, e.g. `networker 4` for overdue interactions:
+`threads --overdue` reports cadences whose most-recent matching entry is older than `frequency` days (or that have never been satisfied), sorted worst-first.
 
-| # | Action               |
-|---|----------------------|
-| 1 | Add Contact          |
-| 2 | Update Time Bucket   |
-| 3 | View Contact         |
-| 4 | Overdue Interactions |
-| 5 | List All Contacts    |
-| 6 | Log Interaction      |
-| 7 | Exit                 |
+### Relationships (people)
 
-Don't want to see someone in your overdue list anymore? Set their bucket to `adhoc` (this mutes — it doesn't delete; the history stays in the CSVs).
+Relationships are threads with `kind: relationship`, conventionally stored under `~/.adulting/threads/People/<Name>.md`. Each relationship typically has one cadence (`catch_up`) representing how often you want to be in touch. The same `threads --overdue` mechanism surfaces lapsed relationships alongside lapsed project obligations.
 
-## work
+```yaml
+---
+status: open
+kind: relationship
+category: personal
+started: 2024-04-26
+cadences:
+  - key: catch_up
+    frequency: 30
+    description: Catch up at least every month
+---
 
-Lightweight billable-time logger. Each entry records date, task type, status, duration in minutes, project, description, and rate. State lives under `~/.adulting/work/`:
+# Charlie
 
-- `projects.txt` — one project name per line (created on the fly when you log against a new project)
-- `rates.txt` — one hourly rate (integer) per line; **must be seeded before logging**
-- `work_log.txt` — semicolon-delimited log entries
+- 2024-04-26 — #catch_up phone: He's moving out of his place end of April.
+- 2024-05-08 — #catch_up message: Asked for guidance on rust.
+```
 
-| Command         | What it does                                                       |
-|-----------------|--------------------------------------------------------------------|
-| `work`          | Log a new entry interactively                                      |
-| `work --report` | Show the last 10 entries for a selected project (hours/rate/total) |
+## lint
+
+Validates everything in `~/.adulting/` against the schemas in `schemas/`. Reports violations as `path:line: message` and exits 1 if any. Designed to be reused — other tools (or a save hook) can shell out to `lint <file>` for pre-save validation.
+
+| Command          | What it does                                              |
+|------------------|-----------------------------------------------------------|
+| `lint`           | Walk the vault, validate every file, report violations    |
+| `lint <path>`    | Validate one file (good for CI / pre-save hooks)          |
+| `lint --quiet`   | Suppress per-violation output; just exit code             |
+
+Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `schemas/note_meeting.md` for the canonical shape; the format is simple enough to extend by hand.
 
 # Data store
 
@@ -155,12 +186,9 @@ Everything lives under `~/.adulting/`:
 ~/.adulting/
 ├── .obsidian/                  # Obsidian vault config (already set up)
 ├── notes/                      # markdown notes (one file per note)
-├── threads/                    # thread logs (one file per thread, no extension)
-├── work/                       # work logger state (projects, rates, log)
-├── network_data.csv            # contacts
-├── network_interactions.csv    # contact interactions
-├── actions_log.json            # full history of every action item ever seen
-└── pandoc.css                  # styling for HTML rendering (optional)
+├── threads/                    # thread logs (one .md file per thread)
+│   └── People/                 # relationship threads (kind: relationship)
+└── actions_log.json            # full history of every action item ever seen
 ```
 
 Files are plain text on purpose — back them up, version them, grep them, sync them across machines.
@@ -172,31 +200,28 @@ The `~/.adulting/` directory is set up as an Obsidian vault: `.obsidian/` alread
 ## What works today
 
 - `notes/` markdown files render and are fully searchable
+- All notes use YAML frontmatter, so Topic, Type, Thread, Timestamp, and meeting fields populate Obsidian's Properties panel and are queryable via Bases.
+- `threads/` files are now `.md` with YAML frontmatter (`status`, `kind`, `category`, `started`, `ended`) and bullet-list entries — fully browsable in Obsidian and queryable in Bases ("show me all `kind: project` threads with `status: open`").
 - Action checkboxes are picked up by Obsidian's task tracker
 - The Daily Notes plugin is enabled (no script integration yet)
 
-## Recent fixes for vault hygiene
+## Vault hygiene
 
-- `actions` no longer drops its `.action_items.md` working file inside `notes/` — it now lives in the system temp directory, so it doesn't show up as a stray note in the vault while you edit.
-- `notes --pdf` / `--minutes` / `--agenda` no longer scatter scratch files (`clean_output.md`, `agreed_lines.txt`, etc.) into your current directory — they now run inside a `mktemp -d` workdir.
+- `actions`'s working file lives in the system temp directory — never appears as a stray note in the vault.
+- `notes --pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD.
 
 ## Roadmap
 
 To make the vault first-class in Obsidian:
 
-1. **Migrate note headers from bold-markdown to YAML frontmatter.** Today's metadata (`**Type**: ...`) renders fine but doesn't populate Obsidian's Properties panel and can't be queried with Bases. Switching to a YAML block (`---\ntype: ...\nthread: ...\n---`) on new notes — and updating `notes_minutes`, `notes_agenda`, `notes_pdf`, and `actions` to read both formats — would unlock Properties, Bases queries, and templated dashboards. Existing notes can stay on the legacy format until backfilled.
-2. **Give thread files a `.md` extension and reformat as bullet lists.** Obsidian only indexes `.md` files, so `threads/` is invisible in the file explorer today. Renaming to `<thread>.md` and writing each entry as `- 2024-04-28 — note text` would make threads browsable, searchable, and linkable. The pipe-delimited parser in `threads --tail`/`--report`/`--daily` would need to match.
-3. **Use `[[wikilinks]]` between notes and threads.** Notes name their thread as a string today; turning it into `[[Threads/<thread name>]]` would surface backlinks and graph edges. Same for assignees in action items (`[[People/Riaz]]`).
-4. **Slug topics into note filenames.** `2024-04-29-09-03-15--sgb-onboarding.md` keeps the timestamp prefix (so existing parsing still works) but makes the file picker readable. Alternative: emit `aliases:` in the YAML frontmatter once that lands.
-5. **Render markdown mirrors of CSV/JSON state.** `networker` could keep `Network/_index.md` updated (overdue table + per-contact pages); `actions` could keep `Actions/_index.md`. The CSVs/JSON stay canonical; the markdown is a read-only view for browsing inside the vault.
-6. **Hook into the Daily Notes plugin.** `threads` could append your thread updates as bullets on today's daily note; `notes --new` could backlink the new note to the daily note. Closes the loop between journaling and project tracking.
+1. **Use `[[wikilinks]]` between notes and threads.** Notes name their thread as a string today; turning it into `[[Threads/<thread name>]]` would surface backlinks and graph edges. Same for assignees in action items (`[[People/Riaz]]`).
+2. **Slug topics into note filenames.** `2024-04-29-09-03-15--sgb-onboarding.md` keeps the timestamp prefix (so existing parsing still works) but makes the file picker readable. Alternative: emit `aliases:` in the YAML frontmatter.
+3. **Render markdown mirrors of remaining JSON state.** `actions` could keep `Actions/_index.md` updated (open items by thread/assignee); the JSON stays canonical, the markdown is a read-only view for browsing inside the vault.
 
 # Suggestions / known issues beyond Obsidian
 
 - `notes` portability: the `open -g` calls in `notes`, `notes_new`, and the renderers are macOS-only. README says the scripts run on Linux, but they currently won't open notes there. A `uname` switch to `xdg-open` would fix it.
-- `notes_*` helpers depend on env vars (`NOTES_DIR`, `THREAD_DIR`, `CSS_LOCATION`, `DOWNLOADS_DIR`) exported by `notes`. Calling them directly silently produces broken output. Adding a small "if unset, default and warn" block at the top of each helper would make them self-contained.
 - `actions` keeps a long-running JSON log (`actions_log.json`) but never garbage-collects entries for notes that were deleted. A `--prune` option that drops orphans would keep the log honest.
-- `work` records hours per project but has no reporting across projects (totals, monthly summaries). A `--summary` mode would round it out.
 
 # Design goals
 

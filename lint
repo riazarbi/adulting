@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Validate adulting files (notes, threads) against schemas in schemas/.
+
+Usage:
+    lint                        # walk ~/.adulting/ and validate everything
+    lint <path> [<path> ...]    # validate specific files
+
+Exit code 0 if clean, 1 if any violations. Errors print as
+<path>:<line>: <message>. Pass --quiet for exit-code-only.
+"""
+
+import argparse
+import os
+import re
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
+HOME = Path(os.path.expanduser('~/.adulting'))
+
+
+# ---------- frontmatter parsing ----------
+
+def parse_frontmatter(text):
+    """Flat key:value plus a single nested-list level (for `cadences:`).
+    Returns (dict, body_start_line_index)."""
+    lines = text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return {}, 0
+    fm = {}
+    i = 1
+    body_start = 0
+    while i < len(lines):
+        if lines[i].strip() == '---':
+            body_start = i + 1
+            break
+        m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', lines[i])
+        if not m:
+            i += 1
+            continue
+        key, val = m.group(1), m.group(2)
+        if val == '':
+            children = []
+            current = None
+            i += 1
+            while i < len(lines) and lines[i].strip() != '---':
+                child = lines[i]
+                if not child.strip():
+                    i += 1
+                    continue
+                if not (child.startswith(' ') or child.startswith('\t')):
+                    break
+                stripped = child.lstrip()
+                if stripped.startswith('- '):
+                    current = {}
+                    children.append(current)
+                    rest = stripped[2:].strip()
+                    if ':' in rest:
+                        ck, _, cv = rest.partition(':')
+                        current[ck.strip()] = cv.strip()
+                else:
+                    if current is not None and ':' in stripped:
+                        ck, _, cv = stripped.partition(':')
+                        current[ck.strip()] = cv.strip()
+                i += 1
+            fm[key] = children
+        else:
+            fm[key] = val
+            i += 1
+    return fm, body_start
+
+
+# ---------- schema loading ----------
+
+def parse_md_table(lines, start_idx):
+    """Read consecutive |-prefixed lines as a markdown table. Returns
+    (data_rows, end_idx). The header and separator rows are dropped."""
+    rows = []
+    i = start_idx
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line.startswith('|'):
+            break
+        if re.match(r'^\|[-: |]+\|$', line):
+            i += 1
+            continue
+        rows.append([c.strip() for c in line.strip('|').split('|')])
+        i += 1
+    return rows, i
+
+
+def parse_constraint(text):
+    """Parse a constraint cell. Multiple constraints separated by ';'.
+    Recognised forms: regex=..., min=N, must_contain_digit, comma-separated
+    bare values (treated as an enum)."""
+    out = {}
+    text = text.strip()
+    if not text:
+        return out
+    for part in (p.strip() for p in text.split(';')):
+        if not part:
+            continue
+        if part.startswith('regex='):
+            out['regex'] = part[len('regex='):].strip()
+        elif part.startswith('min='):
+            try:
+                out['min_length'] = int(part[len('min='):].strip())
+            except ValueError:
+                pass
+        elif part == 'must_contain_digit':
+            out.setdefault('flags', set()).add('must_contain_digit')
+        else:
+            values = [v.strip().strip('"\'') for v in part.split(',') if v.strip()]
+            if values:
+                out['enum'] = values
+    return out
+
+
+def parse_schema(path):
+    text = path.read_text(encoding='utf-8')
+    fm, body_start = parse_frontmatter(text)
+    schema = {
+        'name': fm.get('schema'),
+        'scope': fm.get('scope', 'file'),
+        'applies_when': fm.get('applies_when', ''),
+        'filename': fm.get('filename', ''),
+        'shape': fm.get('shape', ''),
+        'fields': {},
+        'path': str(path),
+    }
+    lines = text.split('\n')
+    i = body_start
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith('## ') and line[3:].strip().lower() == 'fields':
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith('|'):
+                if lines[j].strip().startswith('## '):
+                    break
+                j += 1
+            rows, end = parse_md_table(lines, j)
+            for row in rows[1:] if rows else []:
+                if len(row) < 4:
+                    continue
+                name, required, type_, constraint = row[:4]
+                schema['fields'][name] = {
+                    'required': required.lower() == 'yes',
+                    'type': (type_ or 'string').lower(),
+                    'constraint': parse_constraint(constraint),
+                }
+            i = end
+        else:
+            i += 1
+    return schema
+
+
+def load_schemas(schemas_dir):
+    schemas = {}
+    for f in sorted(schemas_dir.iterdir()):
+        if f.suffix == '.md':
+            s = parse_schema(f)
+            if s['name']:
+                schemas[s['name']] = s
+    return schemas
+
+
+# ---------- applies_when evaluation ----------
+
+def eval_when(expr, ctx):
+    """Evaluate an applies_when expression against a context dict.
+    Forms: '<var> == <value>', '<var> in [<v1>, <v2>, ...]', '<var> =~ <regex>'."""
+    expr = expr.strip()
+    if not expr:
+        return False
+    m = re.match(r'^(\w+)\s*==\s*(.+)$', expr)
+    if m:
+        return ctx.get(m.group(1)) == m.group(2).strip()
+    m = re.match(r'^(\w+)\s+in\s+\[(.+)\]$', expr)
+    if m:
+        values = [v.strip() for v in m.group(2).split(',')]
+        return ctx.get(m.group(1)) in values
+    m = re.match(r'^(\w+)\s*=~\s*(.+)$', expr)
+    if m:
+        text = ctx.get(m.group(1)) or ''
+        try:
+            return bool(re.search(m.group(2).strip(), text))
+        except re.error:
+            return False
+    return False
+
+
+# ---------- value validation ----------
+
+def validate_value(name, value, spec):
+    """Yield error strings for a single field value."""
+    if value is None or value == '' or isinstance(value, list):
+        return
+    constraint = spec.get('constraint', {})
+    enum = constraint.get('enum')
+    if enum and value not in enum:
+        yield f"{name}: value {value!r} not in {enum}"
+    regex = constraint.get('regex')
+    if regex and not re.match('^' + regex + '$', value):
+        yield f"{name}: value {value!r} does not match /{regex}/"
+    min_length = constraint.get('min_length')
+    if min_length is not None and len(value) < min_length:
+        yield f"{name}: value {value!r} shorter than min={min_length}"
+    if 'must_contain_digit' in constraint.get('flags', set()):
+        if not any(c.isdigit() for c in value):
+            yield f"{name}: value {value!r} must contain a digit"
+
+
+def validate_cadences(cadences):
+    if not isinstance(cadences, list):
+        return
+    seen = set()
+    for idx, cad in enumerate(cadences):
+        prefix = f"cadences[{idx}]"
+        for required in ('key', 'frequency', 'description'):
+            if not cad.get(required):
+                yield f"{prefix}: missing {required}"
+        key = cad.get('key', '')
+        if key:
+            if key in seen:
+                yield f"{prefix}: duplicate key {key!r}"
+            seen.add(key)
+            if not re.match(r'^[a-z_][a-z0-9_]*$', key):
+                yield f"{prefix}: key {key!r} must be lowercase_with_underscores"
+        freq = cad.get('frequency', '')
+        if freq:
+            try:
+                int(freq)
+            except (TypeError, ValueError):
+                yield f"{prefix}: frequency {freq!r} must be an integer"
+
+
+# ---------- file validation ----------
+
+def find_file_schema(filename, fm, schemas):
+    for s in schemas.values():
+        if s['scope'] != 'file':
+            continue
+        fpattern = s.get('filename')
+        if fpattern and not re.search(fpattern, filename):
+            continue
+        applies = s.get('applies_when')
+        if applies and not eval_when(applies, fm):
+            continue
+        return s
+    return None
+
+
+def validate_file(path, schemas):
+    """Yield (line_no, message) tuples. line_no=0 means file-level."""
+    path = Path(path)
+    if not path.exists():
+        yield (0, "file does not exist")
+        return
+    text = path.read_text(encoding='utf-8')
+    fm, body_start = parse_frontmatter(text)
+
+    schema = find_file_schema(path.name, fm, schemas)
+    if not schema:
+        yield (0, "no matching file schema")
+        return
+
+    # Required fields.
+    for fname, spec in schema['fields'].items():
+        if spec['required'] and not fm.get(fname):
+            yield (0, f"missing required field {fname!r} (per {schema['name']})")
+
+    # Field values.
+    for fname, value in fm.items():
+        spec = schema['fields'].get(fname)
+        if spec:
+            for err in validate_value(fname, value, spec):
+                yield (0, err)
+
+    # Conditional rules (small enough to inline; expand if more arise).
+    if schema['name'] == 'thread' and fm.get('status') == 'closed' and not fm.get('ended'):
+        yield (0, "ended is required when status is closed")
+
+    # Cadences (nested validation; not in field table).
+    if 'cadences' in fm:
+        for err in validate_cadences(fm['cadences']):
+            yield (0, err)
+
+    # Body lines: any line schema whose applies_when matches.
+    line_schemas = [s for s in schemas.values() if s['scope'] == 'line']
+    body_lines = text.split('\n')[body_start:]
+    for offset, line in enumerate(body_lines):
+        line_no = body_start + offset + 1
+        for ls in line_schemas:
+            if not eval_when(ls.get('applies_when', ''), {'line': line}):
+                continue
+            shape = ls.get('shape')
+            if not shape:
+                continue
+            m = re.match(shape, line)
+            if not m:
+                yield (line_no, f"line does not conform to {ls['name']} shape /{shape}/")
+                continue
+            for fname, spec in ls['fields'].items():
+                captured = m.groupdict().get(fname, '')
+                if spec['required'] and not captured:
+                    yield (line_no, f"{ls['name']}.{fname}: missing")
+                elif captured:
+                    for err in validate_value(f"{ls['name']}.{fname}", captured, spec):
+                        yield (line_no, err)
+
+
+# ---------- file discovery ----------
+
+def discover_files():
+    notes_dir = HOME / 'notes'
+    if notes_dir.is_dir():
+        for f in sorted(notes_dir.iterdir()):
+            if f.suffix == '.md' and not f.name.startswith('.'):
+                yield f
+    threads_dir = HOME / 'threads'
+    if threads_dir.is_dir():
+        for root, dirs, files in os.walk(threads_dir):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for f in sorted(files):
+                if f.startswith('.') or f.endswith('.bak'):
+                    continue
+                full = Path(root) / f
+                if full.suffix == '.md':
+                    yield full
+
+
+# ---------- main ----------
+
+def main():
+    parser = argparse.ArgumentParser(description="Validate adulting files against schemas.")
+    parser.add_argument('paths', nargs='*',
+                        help='Files to validate (default: walk ~/.adulting/).')
+    parser.add_argument('--schemas', default=str(SCHEMAS_DIR),
+                        help=f'Schemas directory (default: {SCHEMAS_DIR}).')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Suppress per-violation output.')
+    args = parser.parse_args()
+
+    schemas = load_schemas(Path(args.schemas))
+    if not schemas:
+        print(f"no schemas loaded from {args.schemas}", file=sys.stderr)
+        sys.exit(2)
+
+    files = [Path(p) for p in args.paths] if args.paths else list(discover_files())
+
+    total = 0
+    for f in files:
+        for line_no, msg in validate_file(f, schemas):
+            total += 1
+            if not args.quiet:
+                print(f"{f}:{line_no}: {msg}")
+
+    if not args.quiet:
+        print(f"\n{len(files)} file(s) checked. {total} violation(s).")
+    sys.exit(1 if total else 0)
+
+
+if __name__ == '__main__':
+    main()

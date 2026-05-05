@@ -1,5 +1,9 @@
 #!/bin/bash
 
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+: "${DOWNLOADS_DIR:?must be invoked via 'notes', not directly}"
+type extract_meta >/dev/null 2>&1 || { echo "$0: extract_meta function missing; must be invoked via 'notes'" >&2; exit 1; }
+
 selected_note=$1
 
         note="$NOTES_DIR/$selected_note"
@@ -19,13 +23,13 @@ selected_note=$1
         final_file="$DOWNLOADS_DIR/$selected_note"
         file_path=$note
 
-        # Extract file metadata
-        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
-        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        # Extract file metadata (YAML frontmatter or legacy bold-markdown)
+        title=$(extract_meta topic "$note")
+        type=$(extract_meta type "$note")
+        location=$(extract_meta location "$note")
+        attendees=$(extract_meta attendees "$note")
+        participants=$(extract_meta participants "$note")
+        timestamp=$(extract_meta timestamp "$note")
 
 
 # Write the metadata to the temporary file
@@ -90,8 +94,10 @@ fi
 # Remove the content between # Agreed and the line with dashes
 # Remove the content between # Actions and the line with dashes
 awk '
-BEGIN { print_lines = 1 }
-index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
+BEGIN { print_lines = 1; in_fm = 0 }
+NR == 1 && $0 == "---" { in_fm = 1; next }
+in_fm && $0 == "---" { in_fm = 0; next }
+in_fm { next }
 /# Minuted Agreements/ {
     print;
     print_lines = 0;
@@ -128,13 +134,9 @@ rm "$metadata_file"
 
         #cat "$final_file"
 
-        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
         pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
 		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
 		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
-	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html
-        #open -g /tmp/tempfile.pdf &
-        #open -g $final_file &
         open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
 
         cd /

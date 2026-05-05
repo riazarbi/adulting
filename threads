@@ -1,165 +1,397 @@
-#!/bin/bash
+#!/usr/bin/env python3
+"""Append-only logs for ongoing projects. Each thread is one .md file in
+~/.adulting/threads/ (or a subdirectory like People/). Frontmatter declares
+status / kind / category / started / ended / cadences; body is a list of
+top-level bullets `- YYYY-MM-DD — text` with optional indented sub-bullets.
+"""
 
-THREADS_DIR="$HOME/.adulting/threads"
-THREADS="$THREADS_DIR"/*
+import argparse
+import os
+import re
+import sys
+from datetime import datetime, timedelta
 
-# Check if the directory exists, if not, create it
-if [ ! -d "$THREADS_DIR" ]; then
-    mkdir -p "$THREADS_DIR"
-fi
+THREADS_DIR = os.path.expanduser("~/.adulting/threads")
 
-# Get the current date
-dt=$(date '+%Y-%m-%d')
-
-# Get the lag for reporting
-LAG=7
-
-# Get the date 7 days ago
-if [[ $(uname) == "Linux" ]]; then
-    last_week=$(date -d "$dt - $LAG days" '+%Y-%m-%d')
-elif [[ $(uname) == "Darwin" ]]; then
-    last_week=$(date -v -${LAG}d '+%Y-%m-%d')
-else
-    echo "Unsupported operating system"
-    exit 1
-fi
-
-# Get tomorrow
-if [[ $(uname) == "Linux" ]]; then
-    tomorrow=$(date -d "$dt + 1 days" '+%Y-%m-%d')
-elif [[ $(uname) == "Darwin" ]]; then
-    tomorrow=$(date -v +1d '+%Y-%m-%d')
-else
-    echo "Unsupported operating system"
-    exit 1
-fi
+BULLET_RE = re.compile(r'^- (\d{4}-\d{2}-\d{2}) — (.+?)\s*$')
+SEP = "-" * 53
 
 
-#######################################################
-# Reporter
-if [[ "$1" == "--report" ]]; then
-  echo
-  echo "###================ THREAD REPORT $last_week TO $dt ================###"
-  for f in $THREADS
-    do
-      lag_date=$last_week
-      printf '%s\n' "THREAD ===> $(basename "$f") : $lag_date to $dt"
-      while [[ $lag_date != $tomorrow ]]
-      do
-        thread_name=$(basename "$f")
-          if [[ $(grep $lag_date "$f") ]]; then
-            grep $lag_date "$f"
-          fi
-        lag_date=$(date -jf "%Y-%m-%d" -v +1d "$lag_date" '+%Y-%m-%d')
-      done
-      echo
-    done
-  exit 0
-fi
-
-#####################################################
-# Daily reporter
-if [[ "$1" == "--daily" ]]; then
-  echo
-  echo "###================ THREAD REPORT $2 ================###"
-  for f in $THREADS
-    do
-      lag_date="$2"
-      thread_name=$(basename "$f")
-        if [[ $(grep $lag_date "$f") ]]; then
-            grep $lag_date "$f"
-        fi
-    done
-  exit 0
-fi
-
-#######################################################
-# Tail Reporter
-if [[ "$1" == "--tail" ]]; then
-  for f in $THREADS
-    do
-      printf '%s\n' "THREAD ===> $(basename "$f")" | column -t  | awk '{ print toupper($0) }'
-      status=$(tail -n 1 "$f" | column -t -s '|' | awk '{ print $2 }')
-      if [ $status == "CLOSED" ]
-      then
-        continue
-      fi
-      tail -n 1 "$f" | column -t -s '|'
-    done
-  exit 0
-fi
+def today_str():
+    return datetime.now().strftime("%Y-%m-%d")
 
 
-######################################################
-# Logger
-echo
-echo "###================ THREAD LOGGER ================###"
-# Work through existing threads, prompting for new logs
-if [ "$(ls $THREADS_DIR)" ]; then
-  echo
-  echo "These are the current threads ==>"
-  ls $THREADS_DIR
-  echo
-  echo "Working through threads..."
-  echo
-  for f in $THREADS
-    do
-      echo "-----------------------------------------------------"
-      echo
-      printf '%s\n' "THREAD ===> $(basename "$f")" | column -t  | awk '{ print toupper($0) }'
-      status=$(tail -n 1 "$f" | column -t -s '|' | awk '{ print $2 }')
-      if [ $status == "CLOSED" ]
-      then
-        echo $(basename "$f") "is CLOSED"
-        continue
-      fi
-      echo
-      # take action on each file. "$f" store current file name
-      tail -n 5 "$f" | column -t -s '|'
-      echo
-      echo "Enter a new log:"
-      echo "  press [Enter] to skip..."
-      echo "  type CLOSED to close the thread..."
-      read log_entry
-      if [ -z "$log_entry" ]
-      then
-        echo "Skipping..."
-        echo
-      else
-        echo "Committing log entry..."
-        log_entry="$dt | $log_entry"
-        echo $log_entry >> "$f"
-        echo "Done!"
-        echo
-      fi
-    done
-  echo "====================================================="
-else
-    echo "$THREADS_DIR is empty."
-    echo
-    echo "====================================================="
-fi
+def list_threads():
+    """Return [(name, path)] for every thread file, sorted by name. Walks
+    subdirectories (e.g. People/). Skips hidden files and .bak files.
+    Names are path-qualified relative to THREADS_DIR (e.g. 'People/Charlie')."""
+    if not os.path.isdir(THREADS_DIR):
+        os.makedirs(THREADS_DIR, exist_ok=True)
+        return []
+    out = []
+    for root, dirs, files in os.walk(THREADS_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for f in files:
+            if not f.endswith('.md') or f.startswith('.'):
+                continue
+            full_path = os.path.join(root, f)
+            rel = os.path.relpath(full_path, THREADS_DIR)
+            out.append((rel[:-3], full_path))
+    return sorted(out)
 
-# Ask if you want to make a new thread
-echo
-while true;
-do
-    read -r -p "Would you like to create a new thread [y/N]? " response
-    if [[ $response =~ ^([yY][eE][sS]|[yY])$ ]]
-    then
-        echo "Enter name of new thread. Make it filename compatible. "
-        read -r thread
-        echo "New thread created..."
-        echo "Enter the first log entry for $thread "
-        read log_entry
-        log_entry="$dt | $log_entry"
-        echo "First entry committed!"
-        echo "$log_entry" >> "$THREADS_DIR/$thread"
-        echo
-        echo "--------------------------------------------------"
-    else
-        exit 0
-    fi
-done
 
-echo "Exiting."
+def read_frontmatter(path):
+    """Return dict of frontmatter fields, plus the body-start line index.
+
+    Handles flat scalars and a single nested level (list-of-mappings under
+    a top-level key — used for `cadences`). Returns the list as Python
+    list-of-dicts; flat scalars as strings."""
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    if not lines or lines[0].rstrip() != '---':
+        return {}, 0
+    fm = {}
+    body_start = 0
+    i = 1
+    while i < len(lines):
+        if lines[i].rstrip() == '---':
+            body_start = i + 1
+            break
+        line = lines[i]
+        # Top-level key (no leading whitespace) followed by ':'
+        m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', line)
+        if not m:
+            i += 1
+            continue
+        key, val = m.group(1), m.group(2)
+        if val == '':
+            # Possibly a nested list. Collect indented children.
+            children = []
+            current = None
+            i += 1
+            while i < len(lines) and lines[i].rstrip() != '---':
+                child = lines[i]
+                if not child.strip():
+                    i += 1
+                    continue
+                if not (child.startswith(' ') or child.startswith('\t')):
+                    break  # back to top level
+                stripped = child.lstrip()
+                if stripped.startswith('- '):
+                    current = {}
+                    children.append(current)
+                    rest = stripped[2:].strip()
+                    if ':' in rest:
+                        ck, _, cv = rest.partition(':')
+                        current[ck.strip()] = cv.strip()
+                else:
+                    if current is not None and ':' in stripped:
+                        ck, _, cv = stripped.partition(':')
+                        current[ck.strip()] = cv.strip()
+                i += 1
+            fm[key] = children
+        else:
+            fm[key] = val
+            i += 1
+    return fm, body_start
+
+
+def thread_status(path):
+    fm, _ = read_frontmatter(path)
+    return fm.get('status', 'open')
+
+
+def thread_entries(path):
+    """Yield (date, text) for every top-level log bullet in the thread."""
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    _, body_start = read_frontmatter(path)
+    for line in lines[body_start:]:
+        m = BULLET_RE.match(line.rstrip())
+        if m:
+            yield m.group(1), m.group(2)
+
+
+def append_entry(path, date, text):
+    """Append a top-level bullet to the thread, ensuring a newline first."""
+    with open(path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    sep = '' if content.endswith('\n') else '\n'
+    with open(path, 'a', encoding='utf-8') as f:
+        f.write(f"{sep}- {date} — {text}\n")
+
+
+def close_thread(path, date):
+    """Flip status to closed and set ended in the thread's frontmatter."""
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    if not lines or lines[0].rstrip() != '---':
+        sys.exit(f"thread {path} has no YAML frontmatter")
+    fm_end = None
+    for i in range(1, len(lines)):
+        if lines[i].rstrip() == '---':
+            fm_end = i
+            break
+    if fm_end is None:
+        sys.exit(f"thread {path} has unterminated frontmatter")
+    out_fm, have_status, have_ended = [], False, False
+    for line in lines[1:fm_end]:
+        if line.startswith('status:'):
+            out_fm.append('status: closed\n')
+            have_status = True
+        elif line.startswith('ended:'):
+            out_fm.append(f'ended: {date}\n')
+            have_ended = True
+        else:
+            out_fm.append(line)
+    if not have_status:
+        out_fm.append('status: closed\n')
+    if not have_ended:
+        out_fm.append(f'ended: {date}\n')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.writelines(['---\n'] + out_fm + ['---\n'] + lines[fm_end + 1:])
+
+
+def create_thread(name, first_date, first_text,
+                  kind='process', category='professional'):
+    """Create a new-format thread file."""
+    safe_name = name.strip()
+    path = os.path.join(THREADS_DIR, f"{safe_name}.md")
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write("---\n")
+        f.write("status: open\n")
+        f.write(f"kind: {kind}\n")
+        f.write(f"category: {category}\n")
+        f.write(f"started: {first_date}\n")
+        f.write("---\n\n")
+        f.write(f"# {safe_name}\n\n")
+        if first_text:
+            f.write(f"- {first_date} — {first_text}\n")
+    return path
+
+
+def fmt_entry(date, text):
+    return f"{date}    {text}"
+
+
+def overdue_for_thread(name, path):
+    """Return [(thread_name, cadence_key, frequency, last_date, days_overdue)]
+    for every cadence on this thread that is past due. Closed threads are
+    skipped. A cadence with no satisfying entry is overdue from `started`."""
+    if thread_status(path) == 'closed':
+        return []
+    fm, _ = read_frontmatter(path)
+    cadences = fm.get('cadences') or []
+    if not cadences:
+        return []
+    today = datetime.now().date()
+    started_str = fm.get('started')
+    started = None
+    if started_str:
+        try:
+            started = datetime.strptime(started_str, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+    out = []
+    entries = list(thread_entries(path))
+    for cadence in cadences:
+        key = cadence.get('key')
+        try:
+            freq = int(cadence.get('frequency', 0))
+        except (TypeError, ValueError):
+            freq = 0
+        if not key or freq <= 0:
+            continue
+        tag_re = re.compile(r'#' + re.escape(key) + r'\b')
+        last = None
+        for date_str, text in entries:
+            if tag_re.search(text):
+                if last is None or date_str > last:
+                    last = date_str
+        if last:
+            try:
+                last_d = datetime.strptime(last, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            due = (today - last_d).days - freq
+            if due > 0:
+                out.append((name, key, freq, last, due))
+        else:
+            ref = started or today
+            due = (today - ref).days - freq
+            if due > 0:
+                out.append((name, key, freq, None, due))
+    return out
+
+
+def cmd_overdue(threads):
+    rows = []
+    for name, path in threads:
+        rows.extend(overdue_for_thread(name, path))
+    if not rows:
+        print("No overdue cadences.")
+        return
+    rows.sort(key=lambda r: r[4], reverse=True)
+    name_w = max(len(r[0]) for r in rows)
+    key_w = max(len(r[1]) for r in rows)
+    print(f"{'THREAD':<{name_w}}  {'CADENCE':<{key_w}}  {'OVERDUE':>9}  {'LAST':<10}  {'EVERY':>6}")
+    for name, key, freq, last, due in rows:
+        last_str = last if last else 'never'
+        print(f"{name:<{name_w}}  {key:<{key_w}}  {due:>5}d   {last_str:<10}  {freq:>4}d ")
+
+
+def cmd_tail(threads):
+    for name, path in threads:
+        print(f"THREAD  ===>  {name.upper()}")
+        if thread_status(path) == 'closed':
+            continue
+        entries = list(thread_entries(path))
+        if entries:
+            date, text = entries[-1]
+            print(fmt_entry(date, text))
+
+
+def cmd_report(threads, days=7):
+    today = datetime.now().date()
+    cutoff = today - timedelta(days=days)
+    cutoff_str = cutoff.strftime('%Y-%m-%d')
+    today_s = today.strftime('%Y-%m-%d')
+    print()
+    print(f"###================ THREAD REPORT {cutoff_str} TO {today_s} ================###")
+    for name, path in threads:
+        print(f"THREAD ===> {name} : {cutoff_str} to {today_s}")
+        for date_str, text in thread_entries(path):
+            try:
+                d = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            if cutoff <= d <= today:
+                print(fmt_entry(date_str, text))
+        print()
+
+
+def cmd_daily(threads, target_date):
+    print()
+    print(f"###================ THREAD REPORT {target_date} ================###")
+    for name, path in threads:
+        for date_str, text in thread_entries(path):
+            if date_str == target_date:
+                print(fmt_entry(date_str, text))
+
+
+def prompt(text=""):
+    try:
+        return input(text)
+    except EOFError:
+        return None
+
+
+def cmd_loop(threads):
+    today = today_str()
+    print()
+    print("###================ THREAD LOGGER ================###")
+    if not threads:
+        print()
+        print(f"{THREADS_DIR} is empty.")
+        print()
+        print("=" * 53)
+    else:
+        print()
+        print("These are the current threads ==>")
+        for name, _ in threads:
+            print(name)
+        print()
+        print("Working through threads...")
+        print()
+        for name, path in threads:
+            print(SEP)
+            print()
+            print(f"THREAD  ===>  {name.upper()}")
+            print()
+            if thread_status(path) == 'closed':
+                print(f"{name} is CLOSED")
+                continue
+            entries = list(thread_entries(path))
+            for date, text in entries[-5:]:
+                print(fmt_entry(date, text))
+            print()
+            print("Enter a new log:")
+            print("  press [Enter] to skip...")
+            print("  type CLOSED to close the thread...")
+            entry = prompt()
+            if entry is None:
+                break
+            entry = entry.strip()
+            if not entry:
+                print("Skipping...")
+                print()
+            elif entry == 'CLOSED':
+                close_thread(path, today)
+                print(f"Closed {name}")
+                print()
+            else:
+                append_entry(path, today, entry)
+                print("Committing log entry...")
+                print("Done!")
+                print()
+        print("=" * 53)
+
+    print()
+    while True:
+        response = prompt("Would you like to create a new thread [y/N]? ")
+        if response is None:
+            return
+        if response.strip().lower() not in ('y', 'yes'):
+            return
+        print("Enter name of new thread. Make it filename-compatible. ")
+        name = prompt()
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            print("Empty name, skipping.")
+            continue
+        path = os.path.join(THREADS_DIR, f"{name}.md")
+        if os.path.exists(path) or os.path.exists(os.path.join(THREADS_DIR, name)):
+            print(f"A thread named {name!r} already exists, skipping.")
+            continue
+        print(f"Enter the first log entry for {name} ")
+        first = prompt()
+        if first is None:
+            return
+        create_thread(name, today, first.strip())
+        print("First entry committed!")
+        print()
+        print("-" * 50)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Append-only logs for ongoing projects.",
+        usage="%(prog)s [--tail | --report | --daily YYYY-MM-DD | --overdue]")
+    parser.add_argument('--tail', action='store_true',
+                        help='Print the last entry of each open thread.')
+    parser.add_argument('--report', action='store_true',
+                        help='Print all entries in the last 7 days, grouped by thread.')
+    parser.add_argument('--daily', metavar='YYYY-MM-DD',
+                        help='Print entries on the given date.')
+    parser.add_argument('--overdue', action='store_true',
+                        help='Print cadences whose most recent satisfying entry is past due.')
+    args = parser.parse_args()
+
+    threads = list_threads()
+
+    if args.tail:
+        cmd_tail(threads)
+    elif args.report:
+        cmd_report(threads)
+    elif args.daily:
+        cmd_daily(threads, args.daily)
+    elif args.overdue:
+        cmd_overdue(threads)
+    else:
+        cmd_loop(threads)
+
+
+if __name__ == '__main__':
+    main()

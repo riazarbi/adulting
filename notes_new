@@ -1,5 +1,8 @@
 #!/bin/bash
 
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+: "${THREAD_DIR:?must be invoked via 'notes', not directly}"
+
 	# Determine timestamp
 	dt=$(date '+%Y-%m-%d-%H-%M-%S');
 	# Set note filename
@@ -9,18 +12,19 @@
 	# Determine note type
 	# Feel free to edit these options
 	PS3="What type of note is this? : "
-	select type in Meeting Workshop Report Correspondence Blog Study Writing Log Deskwork
+	select type in Meeting Correspondence Workshop Report Log Research
 	do
     		echo ""
     		break
 	done
 
-        # Determine the thread
-        THREADS="$THREAD_DIR/*"
-        # Set IFS to only newline character
+        # Determine the thread.
+        # Thread files may be legacy (no extension) or new (.md). Strip the
+        # .md extension and dedupe so the picker shows clean names.
         IFS=$'\n'
         PS3="What thread does this relate to? : "
-        select thread in "uncategorized" $(ls "$THREAD_DIR")
+        thread_names=$(ls "$THREAD_DIR" 2>/dev/null | grep -v '\.bak$' | sed 's/\.md$//' | sort -u)
+        select thread in "uncategorized" $thread_names
         do
                 echo ""
                 break
@@ -31,11 +35,12 @@
 	echo "Enter the topic of this $type note:"
 	read topic
         echo
-	# Write metadata
+	# Write metadata as YAML frontmatter (Obsidian Properties friendly)
 cat > "$note" << EOM
-# Topic:			$topic  
-**Type**:			$type  
-**Thread**:			$thread  
+---
+topic: $topic
+type: $type
+thread: $thread
 EOM
 
 	# Get additional data if it's a meeting
@@ -51,9 +56,9 @@ EOM
     		read attendees
     		echo
 cat >> "$note" << EOM
-**Counterparty**:	$counterparty  
-**Location**:		$location  
-**Attendees**:		$attendees   
+counterparty: $counterparty
+location: $location
+attendees: $attendees
 EOM
 	# Get additional data if it's correspondence
 	elif [[ $type = "Correspondence" ]]
@@ -62,13 +67,14 @@ EOM
     		read participants
     		echo
 cat >> "$note" << EOM
-**Participants**:   $participants  
+participants: $participants
 EOM
 	fi
 
-	# Separate the metadata from the actual note
+	# Close frontmatter and separate metadata from the actual note
 cat >> "$note" << EOM
-**Timestamp**:		$dt  
+timestamp: $dt
+---
 
 --------------------------------------------------------------------
 

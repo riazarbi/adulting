@@ -5,7 +5,6 @@ import tempfile
 from datetime import datetime
 import argparse
 import random
-import subprocess
 import json
 import re
 import shutil
@@ -32,6 +31,9 @@ def find_action_items(folder_path):
     action_items = []
     for root, _, files in os.walk(folder_path):
         for file in files:
+            # Skip hidden files (e.g. .action_items.md, editor swap files).
+            if file.startswith("."):
+                continue
             if file.endswith(".md"):
                 file_path = os.path.join(root, file)
                 with open(file_path, "r") as f:
@@ -93,26 +95,48 @@ def parse_markdown(file_path):
         'Thread': None,
         'Actions': []
     }
+    YAML_TO_FIELD = {'topic': 'Topic', 'thread': 'Thread', 'timestamp': 'Timestamp'}
+
     with open(file_path, 'r', encoding='utf-8') as file:
-        for line in file:
-            if line.startswith('# Topic:'):
-                data['Topic'] = line.split(':')[-1].strip()
-            elif line.startswith('**Thread**:'):  # Parsing thread line
-                data['Thread'] = line.split(':')[-1].strip()
-            elif line.startswith('**Timestamp**:'):
-                data['Timestamp'] = line.split(':')[-1].strip()
-            elif line.strip().startswith('- ['):
-                status = 'x' if 'x]' in line else '-'
-                task = line.split(']')[-1].strip()
-                # Extract only the first word of the task
-                task_key = task.split()[0]  # This splits the task string into words and picks the first one
-                data['Actions'].append((task_key, task.replace(task_key, ""), status))
+        lines = file.readlines()
+
+    # YAML frontmatter: bounded by --- on line 1 and a later ---
+    body_start = 0
+    if lines and lines[0].rstrip() == '---':
+        for i in range(1, len(lines)):
+            if lines[i].rstrip() == '---':
+                for fm_line in lines[1:i]:
+                    if ':' not in fm_line:
+                        continue
+                    key, _, val = fm_line.partition(':')
+                    key = key.strip().lower()
+                    val = val.strip()
+                    # Unquote YAML scalars
+                    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+                        val = val[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+                    elif len(val) >= 2 and val[0] == "'" and val[-1] == "'":
+                        val = val[1:-1].replace("''", "'")
+                    if key in YAML_TO_FIELD:
+                        data[YAML_TO_FIELD[key]] = val
+                body_start = i + 1
+                break
+
+    for line in lines[body_start:]:
+        if line.strip().startswith('- ['):
+            status = 'x' if 'x]' in line else '-'
+            task = line.split(']')[-1].strip()
+            # Extract only the first word of the task
+            task_key = task.split()[0] if task.split() else ''
+            data['Actions'].append((task_key, task.replace(task_key, ""), status))
     return data
 
 
 def parse_markdown_folder(folder_path):
     actions = []
     for filename in os.listdir(folder_path):
+        # Skip hidden files (e.g. .action_items.md, editor swap files).
+        if filename.startswith('.'):
+            continue
         if filename.endswith('.md'):
             file_path = os.path.join(folder_path, filename)
             
@@ -237,11 +261,9 @@ def report_actions(actions):
 
         # Calculate total width of fixed columns
         fixed_width = sum(min_col_widths.values()) + len(min_col_widths) - 1  # Account for spacing
-        print(fixed_width)
 
         # Calculate width for action_item column
         action_item_width = max(0, terminal_width - fixed_width + 100)
-        print(action_item_width)
         headers = ["Thread", "Assignee", "Status", "Days", "Action Item"]
                 
         # Print the header row

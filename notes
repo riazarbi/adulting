@@ -2,7 +2,6 @@
 
 NOTES_DIR="$HOME/.adulting/notes"
 THREAD_DIR="$HOME/.adulting/threads"
-CSS_LOCATION="$HOME/.adulting/pandoc.css"
 DOWNLOADS_DIR="$HOME/Downloads"
 
 
@@ -88,15 +87,14 @@ select_note() {
 
 # Open  note
 open_note() {
-    # Check the operating system
+    local encoded
+    encoded=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$note")
+    local uri="obsidian://open?path=$encoded"
     if [[ $(uname) == "Linux" ]]; then
-        #nano -"$@" note
-        open -g $note
+        xdg-open "$uri"
     elif [[ $(uname) == "Darwin" ]]; then
-        #nano "$@" note
-        open -g $note
+        open "$uri"
     else
-        # If it's neither Linux nor macOS, print an error message
         echo "Unsupported operating system"
     fi
 }
@@ -116,15 +114,47 @@ nano_note() {
     fi
 }
 
+# Read a metadata field from a YAML frontmatter block in a note.
+# Strips surrounding single/double YAML quotes from the value when present.
+extract_meta() {
+    local field="$1"
+    local file="$2"
+    awk -v want="$field" '
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    function unquote(s,    n, c) {
+        n = length(s)
+        if (n < 2) return s
+        c = substr(s, 1, 1)
+        if (c == "\"" && substr(s, n, 1) == "\"") {
+            s = substr(s, 2, n - 2)
+            gsub(/\\"/, "\"", s)
+            gsub(/\\\\/, "\\", s)
+        } else if (c == "'\''" && substr(s, n, 1) == "'\''") {
+            s = substr(s, 2, n - 2)
+            gsub(/'\'\''/, "'\''", s)
+        }
+        return s
+    }
+    NR == 1 && $0 == "---" { in_fm = 1; next }
+    in_fm && $0 == "---" { exit }
+    in_fm {
+        pos = index($0, ":")
+        if (pos == 0) next
+        key = trim(substr($0, 1, pos-1))
+        if (key == want) { print unquote(trim(substr($0, pos+1))); exit }
+    }
+    ' "$file"
+}
+
 # EXPORTS
 # Export variables
 export NOTES_DIR
 export THREAD_DIR
-export CSS_LOCATION
 export DOWNLOADS_DIR
 
 # Export functions
 export -f open_note
+export -f extract_meta
 
 
 # NEW NOTE
@@ -135,20 +165,20 @@ else
 actions --update
 
 # GET NOTES LIST
-for f in $NOTES_DIR/*
+for f in $NOTES_DIR/*.md
     do
         filenum=$((filenum+1))
         note_info=$filenum
         note_info+="|"
         note_info+=$(basename $f)
         note_info+="|"
-        note_info+=$(grep "\*\*Timestamp\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//' | cut -c 1-10)  
+        note_info+=$(extract_meta timestamp "$f" | cut -c 1-10)
         note_info+="|"
-        note_info+=$(grep "\*\*Thread\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        note_info+=$(extract_meta thread "$f")
         note_info+="|"
-        note_info+=$(grep "\*\*Type\*\*:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        note_info+=$(extract_meta type "$f")
         note_info+="|"
-        note_info+=$(grep "# Topic:" $f | cut -d ":" -f2- | sed -e 's/^[[:space:]]*//')
+        note_info+=$(extract_meta topic "$f")
         notes_unfiltered="${notes_unfiltered}"$'\n'"${note_info}"
     done
 

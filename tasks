@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Bridge ACTION: lines from notes into taskwarrior, then export taskwarrior
-state back into the vault as per-thread / per-person markdown views.
+"""Bridge ACTION: lines from notes into taskwarrior; keep source TASK:/DONE:
+lines in sync with taskwarrior state.
 
 Default flow on every invocation:
   1. Configure the `source` UDA in taskwarrior if not already (idempotent).
@@ -8,13 +8,15 @@ Default flow on every invocation:
      - Resolve the note's `thread:` to a taskwarrior project.
      - Validate assignee against ~/.adulting/people/.
      - `task add project:<thread> source:<note_stem> <description>`.
-     - Rewrite the source line `ACTION:` -> `TASK:`.
-  3. Regenerate ~/.adulting/actions/ with one file per project, process,
-     topic, and person — populated from `task export` JSON.
+     - Rewrite the source line `ACTION:` -> `TASK: <body> <!--<uuid8>-->`.
+  3. Sync source <-> taskwarrior:
+     - Description drift (source body != tw description): source wins.
+     - Status drift: completed-state-wins. If source says DONE or tw says
+       completed, both converge to done. (Reverting a done state requires
+       deliberate action on both sides.)
 
-`task` (taskwarrior) must be on PATH. The check is lazy — only errors when
-there's actually something to ingest. The export step silently skips if
-taskwarrior is missing.
+`task` must be on PATH. The check is lazy — only errors when there's
+something to ingest.
 """
 
 import argparse
@@ -24,38 +26,22 @@ import re
 import shutil
 import subprocess
 import sys
-from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 
 HOME = Path(os.path.expanduser('~/.adulting'))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
-ACTIONS_DIR = HOME / 'actions'
 CONFIG_FILE = HOME / 'config.yaml'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 ACTION_RE = re.compile(r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
-ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s+(.+)$')
 
 
 # ---------- helpers ----------
 
 def task_in_path():
     return shutil.which('task') is not None
-
-
-def read_owner():
-    """Read owner from ~/.adulting/config.yaml. Returns '' if missing."""
-    try:
-        for line in CONFIG_FILE.read_text().splitlines():
-            m = re.match(r'^owner:\s*(.+?)\s*$', line)
-            if m:
-                return m.group(1).strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return ''
 
 
 # ---------- UDA bootstrap ----------
@@ -128,14 +114,33 @@ def thread_resolves(target):
     return (THREADS_DIR / kind_dir / f"{name}.md").exists()
 
 
-def rewrite_action_to_task(note_path, line_no):
+def rewrite_action_to_task(note_path, line_no, uuid_prefix=''):
+    """Rewrite source line `ACTION: <body>` to
+    `TASK: <body> <!--<uuid8>-->`. The UUID is stored as an HTML comment
+    at end-of-line so it's visible to scripts but hidden in Obsidian
+    reading view and in pandoc-rendered PDFs. If `uuid_prefix` is empty,
+    the line gets the legacy `TASK: <body>` form (no anchor)."""
     lines = note_path.read_text(encoding='utf-8').split('\n')
     idx = line_no - 1
     if idx < 0 or idx >= len(lines) or not lines[idx].startswith('ACTION:'):
         return False
-    lines[idx] = 'TASK:' + lines[idx][len('ACTION:'):]
+    body = lines[idx][len('ACTION:'):].strip()
+    if uuid_prefix:
+        lines[idx] = f'TASK: {body} <!--{uuid_prefix}-->'
+    else:
+        lines[idx] = f'TASK: {body}'
     note_path.write_text('\n'.join(lines), encoding='utf-8')
     return True
+
+
+def task_uuid_after_add(stdout):
+    """Parse 'Created task N.' from `task add` stdout, resolve to UUID."""
+    m = re.search(r'Created task (\d+)\.', stdout or '')
+    if not m:
+        return ''
+    result = subprocess.run(['task', m.group(1), '_uuid'],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ''
 
 
 def cmd_ingest(args):
@@ -183,11 +188,12 @@ def cmd_ingest(args):
                 print(f"would: {' '.join(repr(a) if ' ' in a else a for a in cmd)}")
             continue
         try:
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
             failed.append((prefix, [f"task add failed: {e.stderr.strip() or e.stdout.strip()}"]))
             continue
-        rewrite_action_to_task(note, line_no)
+        uuid_prefix = task_uuid_after_add(result.stdout)[:8]
+        rewrite_action_to_task(note, line_no, uuid_prefix)
         succeeded += 1
         if not args.quiet:
             short = description[:60] + ('...' if len(description) > 60 else '')
@@ -195,154 +201,112 @@ def cmd_ingest(args):
     return succeeded, failed
 
 
-# ---------- export ----------
+# ---------- sync (source <-> taskwarrior) ----------
 
-def thread_kind_for_project(project):
-    """Return 'Projects'/'Processes'/'Topics' if the project name maps to an
-    existing thread file, else None."""
-    for kind in ('Projects', 'Processes', 'Topics'):
-        if (THREADS_DIR / kind / f"{project}.md").exists():
-            return kind
+# Comment-form, open:  `TASK: <body> <!--<uuid8>-->`
+# Comment-form, done:  `DONE: <body> <!--<uuid8>-->`
+TASK_COMMENT_RE = re.compile(r'^(TASK|DONE):\s+(.+?)\s*<!--([a-f0-9]{8})-->\s*$')
+
+
+def parse_task_line(line):
+    """If the line is a TASK:/DONE: line with a UUID anchor, return
+    (state, uuid_prefix, body) where state is 'open' or 'done'.
+    Returns None for non-anchored lines."""
+    m = TASK_COMMENT_RE.match(line)
+    if not m:
+        return None
+    keyword, body, uuid_prefix = m.group(1), m.group(2).strip(), m.group(3)
+    state = 'open' if keyword == 'TASK' else 'done'
+    return state, uuid_prefix, body
+
+
+def rewrite_state_in_line(line, new_state):
+    """Flip TASK <-> DONE keyword on a parsed line. Returns the new line."""
+    if new_state == 'done':
+        return re.sub(r'^TASK:', 'DONE:', line, count=1)
+    else:
+        return re.sub(r'^DONE:', 'TASK:', line, count=1)
+
+
+def tw_status_to_state(s):
+    """taskwarrior status -> our binary state. Anything completed is 'done';
+    pending/waiting/recurring all map to 'open'. 'deleted' returns None."""
+    if s == 'completed':
+        return 'done'
+    if s in ('pending', 'waiting', 'recurring'):
+        return 'open'
     return None
 
 
-def fmt_tw_date(s):
-    """Taskwarrior dates are 'YYYYMMDDTHHMMSSZ' (compact ISO 8601).
-    Render as YYYY-MM-DD. Tolerant of already-dashed input."""
-    if not s:
-        return ''
-    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
-        return s[:10]
-    if len(s) >= 8 and s[:8].isdigit():
-        return f'{s[:4]}-{s[4:6]}-{s[6:8]}'
-    return s
+def cmd_sync(args):
+    """Bidirectional sync between source TASK:/DONE: lines and taskwarrior.
 
-
-def fmt_task_line(t, omit):
-    """Format one task as a markdown bullet for the export view.
-
-    `omit` is the dimension that's already implicit (file name):
-      'person'  — we're in a Project/Process/Topic view; show the assignee
-      'project' — we're in a Person view; show the thread
+    Description: source wins. If source body != tw description, push source.
+    Status: completed-state-wins. If either side is done, both converge.
     """
-    parts = []
-    desc = t.get('description', '')
-    m = ASSIGNEE_PREFIX_RE.match(desc)
-
-    if omit == 'project':
-        # Person view: show the thread instead of the assignee.
-        body = m.group(2) if m else desc
-        project = t.get('project')
-        if project:
-            kind = thread_kind_for_project(project)
-            parts.append(f'[[{kind}/{project}]]' if kind else project)
-    else:
-        # Project view: show the assignee (omit the project — it's the file).
-        if m:
-            assignee, body = m.group(1).strip(), m.group(2)
-            if (PEOPLE_DIR / f'{assignee}.md').exists():
-                parts.append(f'[[people/{assignee}]]')
-            else:
-                parts.append(f'({assignee})')
-        else:
-            body = desc
-
-    parts.append(body)
-    if t.get('due'):
-        parts.append(f'due {fmt_tw_date(t["due"])}')
-    elif t.get('wait'):
-        parts.append(f'until {fmt_tw_date(t["wait"])}')
-    elif t.get('end'):
-        parts.append(fmt_tw_date(t['end']))
-    if t.get('source'):
-        parts.append(f'[[notes/{t["source"]}]]')
-    if t.get('id'):
-        parts.append(f'#{t["id"]}')
-    return '- ' + ' · '.join(parts)
-
-
-def write_view(path, label_link, tasks, omit):
-    open_t = sorted(
-        [t for t in tasks if t.get('status') == 'pending'],
-        key=lambda x: (x.get('due', '9999'), x.get('id', 0)),
-    )
-    waiting_t = sorted(
-        [t for t in tasks if t.get('status') == 'waiting'],
-        key=lambda x: x.get('wait', '9999'),
-    )
-    done_t = sorted(
-        [t for t in tasks if t.get('status') == 'completed'],
-        key=lambda x: x.get('end', '9999'),
-        reverse=True,
-    )
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    out = [
-        f'<!-- generated by `tasks` on {now}; do not edit -->',
-        '',
-        f'# Actions: {label_link}',
-        '',
-    ]
-    if open_t:
-        out += ['## Open', ''] + [fmt_task_line(t, omit) for t in open_t] + ['']
-    if waiting_t:
-        out += ['## Waiting', ''] + [fmt_task_line(t, omit) for t in waiting_t] + ['']
-    if done_t:
-        out += ['## Done', ''] + [fmt_task_line(t, omit) for t in done_t] + ['']
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('\n'.join(out))
-
-
-def cmd_export(args):
-    """Regenerate ~/.adulting/actions/ from `task export` JSON."""
-    if not task_in_path():
-        return
+    if not task_in_path() or not NOTES_DIR.is_dir():
+        return 0
     result = subprocess.run(['task', 'export'], capture_output=True, text=True)
     if result.returncode != 0:
-        if not args.quiet:
-            print(f"task export failed: {result.stderr.strip()}", file=sys.stderr)
-        return
+        return 0
     tasks = json.loads(result.stdout) if result.stdout.strip() else []
+    by_prefix = {t['uuid'][:8]: t for t in tasks if t.get('uuid')}
 
-    # Wipe and regenerate
-    if ACTIONS_DIR.exists():
-        shutil.rmtree(ACTIONS_DIR)
-
-    by_project = defaultdict(list)
-    by_person = defaultdict(list)
-    owner = read_owner()
-    skipped_no_project = 0
-
-    for t in tasks:
-        project = t.get('project')
-        if not project:
-            skipped_no_project += 1
+    desc_updates = 0
+    status_updates_to_tw = 0
+    status_updates_to_src = 0
+    for note in sorted(NOTES_DIR.iterdir()):
+        if note.suffix != '.md' or note.name.startswith('.'):
             continue
-        by_project[project].append(t)
-        m = ASSIGNEE_PREFIX_RE.match(t.get('description', ''))
-        if m:
-            assignee = m.group(1).strip()
-            by_person[assignee].append(t)
-        elif owner:
-            by_person[owner].append(t)
+        text = note.read_text(encoding='utf-8')
+        lines = text.split('\n')
+        file_changed = False
+        for i, line in enumerate(lines):
+            parsed = parse_task_line(line)
+            if not parsed:
+                continue
+            src_state, prefix, src_body = parsed
+            t = by_prefix.get(prefix)
+            if not t:
+                continue
+            tw_state = tw_status_to_state(t.get('status'))
+            if tw_state is None:
+                continue  # tw says deleted; leave source alone
 
-    project_files = 0
-    person_files = 0
-    for project, ts in by_project.items():
-        kind = thread_kind_for_project(project)
-        if kind is None:
-            continue  # project doesn't map to any known thread; skip silently
-        out = ACTIONS_DIR / kind / f'{project}.md'
-        write_view(out, f'[[{kind}/{project}]]', ts, omit='person')
-        project_files += 1
-    for person, ts in by_person.items():
-        if not (PEOPLE_DIR / f'{person}.md').exists():
-            continue  # unknown person; skip silently
-        out = ACTIONS_DIR / 'People' / f'{person}.md'
-        write_view(out, f'[[people/{person}]]', ts, omit='project')
-        person_files += 1
+            # Description sync: source wins
+            if t.get('description', '') != src_body:
+                try:
+                    subprocess.run(['task', t['uuid'], 'modify', src_body],
+                                   capture_output=True, text=True, check=True)
+                    desc_updates += 1
+                    if not args.quiet:
+                        print(f"desc->tw: {note.stem}  #{t.get('id', '?')}  -> {src_body[:60]}")
+                except subprocess.CalledProcessError:
+                    pass
 
-    if not args.quiet:
-        print(f"exported: {project_files} project view(s), {person_files} person view(s).")
+            # Status sync: completed-state-wins
+            if src_state == 'open' and tw_state == 'done':
+                # tw was marked done in CLI; flip source
+                lines[i] = rewrite_state_in_line(line, 'done')
+                file_changed = True
+                status_updates_to_src += 1
+                if not args.quiet:
+                    print(f"status->src: {note.stem}  #{t.get('id', '?')}  TASK->DONE")
+            elif src_state == 'done' and tw_state == 'open':
+                # source marked done; flip tw
+                try:
+                    subprocess.run(['task', t['uuid'], 'done'],
+                                   capture_output=True, text=True, check=True)
+                    status_updates_to_tw += 1
+                    if not args.quiet:
+                        print(f"status->tw: {note.stem}  #{t.get('id', '?')}  done")
+                except subprocess.CalledProcessError:
+                    pass
+
+        if file_changed:
+            note.write_text('\n'.join(lines), encoding='utf-8')
+
+    return desc_updates + status_updates_to_tw + status_updates_to_src
 
 
 # ---------- main ----------
@@ -360,7 +324,7 @@ def main():
     succeeded, failed = cmd_ingest(args)
 
     if not args.dry_run:
-        cmd_export(args)
+        cmd_sync(args)
 
     if failed:
         print()

@@ -2,6 +2,27 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-06 - Source as canonical store: TASK/DONE in notes, bidirectional sync, drop export
+
+- `tasks`:
+  - **UUID anchor moves to an HTML comment at end-of-line.** Format is now `TASK: <body> <!--<uuid8>-->`. The comment is stripped by Obsidian's reading view and by pandoc, so the rendered text is just `TASK: <body>` — no UUID clutter in the viewer. Source-view and any script reading raw text still see the anchor. The earlier transitional `TASK:<uuid8> <body>` form (UUID as a bare prefix) is gone; everything migrated.
+  - **New `DONE:` keyword** as the completed-state counterpart to `TASK:`. Source can carry status directly: `TASK:` (open) and `DONE:` (completed) are the two states the source tracks. taskwarrior's other states (waiting / recurring / deleted) stay tw-internal — they're not surfaced in source.
+  - **`cmd_sync_descriptions` replaced by `cmd_sync`** — bidirectional. Description drift: source wins (push body to tw). Status drift: **completed-state-wins** — if either side is done, both converge to done. The user can mark something done by editing source `TASK:` → `DONE:` (next sync runs `task <uuid> done`) OR by `task <id> done` in CLI (next sync flips source `TASK:` → `DONE:`). Reverting a done state requires explicit action on both sides; sync won't unilaterally undo a completion.
+  - **`cmd_export` removed** along with all its helpers (`write_view`, `fmt_task_line`, `thread_kind_for_project`, `fmt_tw_date`, `read_owner`, `ACTIONS_DIR`). Per-project / per-person aggregation now lives in taskwarrior CLI (`task project:X list`, `task description.contains:"Chris" list`); per-thread browsing falls out of Obsidian's backlinks panel against the thread file. The source `TASK:`/`DONE:` lines are the canonical store; `~/.adulting/actions/` directory deleted.
+  - Imports trimmed (`defaultdict`, `datetime`, `timezone` — all dead after export removal). Net reduction of ~85 lines in the script.
+  - `parse_task_line(line)` returns `(state, uuid_prefix, body)` — the single parser used by sync. State is `'open'` or `'done'`; non-anchored lines return `None` (skipped silently).
+
+- `notes_minutes`, `notes_pdf` (action items table extractor):
+  - Regex extended to recognise `DONE:` alongside `ACTION:`/`TASK:`. Closed and open items now both surface in the rendered minutes table.
+  - HTML comment stripping: `re.sub(r'\s*<!--[^>]*-->\s*', ' ', text)` runs on each line's body before deduping, so the embedded UUID anchors don't leak into rendered descriptions.
+
+### Operational events (data, not in this repo)
+
+- 219 TASK lines migrated from `TASK:<uuid8> <body>` to `TASK: <body> <!--<uuid8>-->` (the transitional bare-prefix form is dead).
+- 34 of 36 previously-stragglers got their `source:` UDA + UUID anchor via a smarter backfill that matched on `(project, body-with-assignee-stripped)`. Sync then auto-pushed the post-rewrite assignee names ((SMT)→(Chris Storey), (Bern Ralph)→(Bern Sellmeyer), etc.) from source to taskwarrior. 2 stragglers remain in `2026-04-21-07-32-57.md` (body text edited in source after migration; manual fix needed).
+- 191 source TASK lines flipped to `DONE:` for tasks already in `status: completed` in taskwarrior. After this one-shot, source state mirrors taskwarrior state.
+- `~/.adulting/actions/` directory deleted; lint count unchanged (it never walked there).
+
 ## 2026-05-06 - Taskwarrior export: per-thread / per-person markdown views, source UDA backfill
 
 - `tasks`:

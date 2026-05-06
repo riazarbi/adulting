@@ -160,7 +160,8 @@ rm "$metadata_file"
         python3 - "$temp_file" "$owner" >> "$action_lines" << 'PYEOF'
 import re, sys
 LEGACY = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
-NEW = re.compile(r'^(?:ACTION|TASK):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+NEW = re.compile(r'^(?:ACTION|TASK|DONE):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+COMMENT = re.compile(r'\s*<!--[^>]*-->\s*')
 owner = sys.argv[2] if len(sys.argv) > 2 else ''
 seen = set()
 with open(sys.argv[1]) as f:
@@ -170,7 +171,7 @@ with open(sys.argv[1]) as f:
         if not m:
             continue
         assignee = (m.group(1) or '').strip() or owner
-        text = m.group(2)
+        text = COMMENT.sub(' ', m.group(2)).strip()
         key = (assignee, text)
         if key in seen:
             continue

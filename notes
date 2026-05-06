@@ -3,7 +3,7 @@
 NOTES_DIR="$HOME/.adulting/notes"
 THREAD_DIR="$HOME/.adulting/threads"
 PEOPLE_DIR="$HOME/.adulting/people"
-DOWNLOADS_DIR="$HOME/Downloads"
+EXPORT_DIR="$HOME/Downloads"
 
 
 
@@ -43,29 +43,29 @@ DELETION - permanently removes data:
     --delete    Select and permanently delete a note.
 
 
-RENDERING - does not alter original note contents. Rendered documents are saved to ~/Downloads:
+RENDERING - does not alter original note contents. Rendered documents are saved to \$EXPORT_DIR (default ~/Downloads):
     --cat       Print the note content to the terminal. Useful for piping.
 
-    --pdf       Select, reformat and open a selected note as PDF and markdown. 
+    --pdf       Select, reformat and open a selected note as PDF and markdown.
                 For --pdf, reformatting includes:
                     - Creating a latex header from the note metadata.
                     - Placing the location, attendees participants on the first page, if they exist.
                     - Adds a Summary section above all content which contains:
-                        - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
+                        - Action items, as indicated by ACTION: / TASK: lines.
 
-    --minutes   Select, reformat and open a selected note as Meeting Minutes in PDF and markdown. 
-                Saves to Downloads folder by default.
+    --minutes   Select, reformat and open a selected note as Meeting Minutes in PDF and markdown.
+                Saves to \$EXPORT_DIR (default ~/Downloads).
                 For --minutes, reformatting includes:
                     - Creating a latex header from the note metadata.
                     - Adding a table of contents, as indicated by markdown headers.
                     - Placing the location, attendees participants on the first page, if they exist.
                     - Adds a Summary section above all content which contains:
-                        - Minutes agreements, as indicaed by the "AGREED:" keyword.
+                        - Minutes agreements, as indicated by the "AGREED:" keyword.
                         - Resolutions, as indicated by the "RESOLVED:" keyword.
-                        - Action items, as indicated by the presence of a markdown checkbox ([ ] or [x]). 
+                        - Action items, as indicated by ACTION: / TASK: lines.
 
-    --agenda   Select, reformat and open a selected note as Meeting Agenda in PDF and markdown. 
-                Saves to Downloads folder by default.
+    --agenda   Select, reformat and open a selected note as Meeting Agenda in PDF and markdown.
+                Saves to \$EXPORT_DIR (default ~/Downloads).
                 For --agenda, reformatting includes:
                     - Creating a latex header from the note metadata.
                     - Placing the location, attendees participants on the first page, if they exist.
@@ -115,6 +115,44 @@ nano_note() {
     fi
 }
 
+# Read the YAML `people:` list out of a note's frontmatter, one entry per
+# stdout line. Wikilinks `[[people/Name]]` are unwrapped to bare names;
+# plain string entries are returned as-is.
+extract_people_list() {
+    local file="$1"
+    awk '
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    function strip_quotes(s,    n, c) {
+        n = length(s)
+        if (n < 2) return s
+        c = substr(s, 1, 1)
+        if ((c == "\"" && substr(s, n, 1) == "\"") || (c == "'\''" && substr(s, n, 1) == "'\''")) {
+            return substr(s, 2, n - 2)
+        }
+        return s
+    }
+    function unwiki_people(s,   tmp) {
+        tmp = s
+        if (sub(/^\[\[people\//, "", tmp) > 0 && sub(/\]\]$/, "", tmp) > 0) return tmp
+        return s
+    }
+    NR == 1 && $0 == "---" { in_fm = 1; next }
+    in_fm && $0 == "---" { exit }
+    !in_fm { next }
+    in_list && /^[^[:space:]]/ { in_list = 0 }
+    in_list && /^[[:space:]]+- / {
+        v = $0
+        sub(/^[[:space:]]+-[[:space:]]+/, "", v)
+        v = trim(v)
+        v = strip_quotes(v)
+        v = unwiki_people(v)
+        print v
+        next
+    }
+    /^people:[[:space:]]*$/ { in_list = 1; next }
+    ' "$file"
+}
+
 # Read a metadata field from a YAML frontmatter block in a note.
 # Strips surrounding single/double YAML quotes from the value when present.
 extract_meta() {
@@ -152,11 +190,12 @@ extract_meta() {
 export NOTES_DIR
 export THREAD_DIR
 export PEOPLE_DIR
-export DOWNLOADS_DIR
+export EXPORT_DIR
 
 # Export functions
 export -f open_note
 export -f extract_meta
+export -f extract_people_list
 
 
 # NEW NOTE
@@ -205,9 +244,7 @@ fi
 if [[ $1 = "--last" ]]; then
     last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
     note="$NOTES_DIR/$last_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
     open_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
 
 
 # COMPILE AND RENDER NOTE AS MEETING MINUTES
@@ -238,17 +275,13 @@ elif [[ $1 = "--delete" ]]; then
 elif [[ $1 = "--edit" ]]; then
     select_note
     note="$NOTES_DIR/$selected_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
     open_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 # NANO NOTE
 elif [[ $1 = "--nano" ]]; then
     select_note
     note="$NOTES_DIR/$selected_note"
-    echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
     nano_note $note
-    echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S')'  ' >> "$note"
 
 
 # CAT NOTE

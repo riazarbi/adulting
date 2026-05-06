@@ -1,36 +1,84 @@
 #!/usr/bin/env python3
-"""Bridge ACTION: lines from notes into taskwarrior.
+"""Bridge ACTION: lines from notes into taskwarrior, then export taskwarrior
+state back into the vault as per-thread / per-person markdown views.
 
-For each line `ACTION: [(Assignee)] description` in any note body:
-  1. Resolve the note's thread to a project name.
-  2. Validate the assignee (if any) against ~/.adulting/people/.
-  3. Run `task add project:<thread> [+<assignee>] <description>`.
-  4. Rewrite the source line `ACTION:` -> `TASK:`.
+Default flow on every invocation:
+  1. Configure the `source` UDA in taskwarrior if not already (idempotent).
+  2. For each `ACTION: [(Assignee)] description` in any note body:
+     - Resolve the note's `thread:` to a taskwarrior project.
+     - Validate assignee against ~/.adulting/people/.
+     - `task add project:<thread> source:<note_stem> <description>`.
+     - Rewrite the source line `ACTION:` -> `TASK:`.
+  3. Regenerate ~/.adulting/actions/ with one file per project, process,
+     topic, and person — populated from `task export` JSON.
 
-Lines beginning `TASK:` are skipped (already ingested). Failures are
-collected and printed; the source is left as `ACTION:` so the user can
-fix and re-run.
-
-`task` (taskwarrior) must be on PATH. The check is lazy — only errors
-when there is something to ingest.
+`task` (taskwarrior) must be on PATH. The check is lazy — only errors when
+there's actually something to ingest. The export step silently skips if
+taskwarrior is missing.
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 HOME = Path(os.path.expanduser('~/.adulting'))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
+ACTIONS_DIR = HOME / 'actions'
+CONFIG_FILE = HOME / 'config.yaml'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 ACTION_RE = re.compile(r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s+(.+)$')
 
+
+# ---------- helpers ----------
+
+def task_in_path():
+    return shutil.which('task') is not None
+
+
+def read_owner():
+    """Read owner from ~/.adulting/config.yaml. Returns '' if missing."""
+    try:
+        for line in CONFIG_FILE.read_text().splitlines():
+            m = re.match(r'^owner:\s*(.+?)\s*$', line)
+            if m:
+                return m.group(1).strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return ''
+
+
+# ---------- UDA bootstrap ----------
+
+def ensure_uda():
+    """Configure the `source` UDA in taskwarrior. Idempotent. Silent no-op
+    if `task` is missing."""
+    if not task_in_path():
+        return
+    result = subprocess.run(['task', '_config'], capture_output=True, text=True)
+    if 'uda.source.type' in (result.stdout or ''):
+        return
+    subprocess.run(
+        ['task', 'rc.confirmation:no', 'config', 'uda.source.type', 'string'],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ['task', 'rc.confirmation:no', 'config', 'uda.source.label', 'Source note'],
+        capture_output=True, check=True,
+    )
+
+
+# ---------- ingest ----------
 
 def parse_frontmatter_thread(text):
     """Pull the bare wikilink target out of a note's `thread:` field.
@@ -52,17 +100,12 @@ def parse_frontmatter_thread(text):
 
 
 def thread_to_project(target):
-    """Convert a wikilink target like 'Processes/SGB' to a taskwarrior
-    project string. We use the bare name (right of the slash). The kind
-    prefix is implicit (it's the directory the file lives in)."""
     if '/' in target:
         return target.split('/', 1)[1]
     return target
 
 
 def find_action_lines(note_path):
-    """Yield (line_no, line_text, assignee, description) for every
-    ACTION: line in this note's body."""
     text = note_path.read_text(encoding='utf-8')
     for idx, line in enumerate(text.split('\n'), start=1):
         m = ACTION_RE.match(line)
@@ -77,9 +120,7 @@ def assignee_resolves(name):
 
 
 def thread_resolves(target):
-    if not target:
-        return False
-    if '/' not in target:
+    if not target or '/' not in target:
         return False
     kind_dir, name = target.split('/', 1)
     if kind_dir not in ('Projects', 'Processes', 'Topics'):
@@ -88,36 +129,27 @@ def thread_resolves(target):
 
 
 def rewrite_action_to_task(note_path, line_no):
-    """In-place: change ACTION: at line_no to TASK: on the same line."""
     lines = note_path.read_text(encoding='utf-8').split('\n')
     idx = line_no - 1
-    if idx < 0 or idx >= len(lines):
-        return False
-    if not lines[idx].startswith('ACTION:'):
+    if idx < 0 or idx >= len(lines) or not lines[idx].startswith('ACTION:'):
         return False
     lines[idx] = 'TASK:' + lines[idx][len('ACTION:'):]
     note_path.write_text('\n'.join(lines), encoding='utf-8')
     return True
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Ingest ACTION: lines from notes into taskwarrior.")
-    parser.add_argument('--dry-run', action='store_true',
-                        help="Show what would be ingested; don't call task or rewrite files.")
-    parser.add_argument('--quiet', action='store_true',
-                        help="Suppress per-action output; just summary + errors.")
-    args = parser.parse_args()
-
+def cmd_ingest(args):
+    """Returns (succeeded, failed_list)."""
     if not NOTES_DIR.is_dir():
-        return 0
+        return 0, []
 
-    plan = []  # (note_path, line_no, project, assignee, description, errors)
+    plan = []
     for note in sorted(NOTES_DIR.iterdir()):
         if note.suffix != '.md' or note.name.startswith('.'):
             continue
         text = note.read_text(encoding='utf-8')
         thread_target = parse_frontmatter_thread(text)
-        for line_no, line, assignee, description in find_action_lines(note):
+        for line_no, _line, assignee, description in find_action_lines(note):
             errors = []
             if not description:
                 errors.append("missing description")
@@ -131,12 +163,11 @@ def main():
             plan.append((note, line_no, project, assignee, description, errors))
 
     if not plan:
-        return 0
+        return 0, []
 
-    # Lazy PATH check.
-    if shutil.which('task') is None:
+    if not task_in_path():
         print("error: 'task' (taskwarrior) not in PATH; install it or remove the ACTION: lines.", file=sys.stderr)
-        return 2
+        return 0, [(f"{note}:{ln}", ["task not in PATH"]) for note, ln, *_ in plan]
 
     succeeded = 0
     failed = []
@@ -145,36 +176,191 @@ def main():
         if errors:
             failed.append((prefix, errors))
             continue
-        # Build `task add` invocation.
-        cmd = ['task', 'add']
-        # project: with quoting handled by argv
-        if project:
-            cmd.append(f'project:{project}')
-        if assignee:
-            # Prepend the assignee in parens to the description so it's
-            # visible in `task list`. Could also use a tag, but the
-            # convention so far is parens in the text.
-            full_desc = f'({assignee}) {description}'
-        else:
-            full_desc = description
-        cmd.append(full_desc)
-
+        full_desc = f'({assignee}) {description}' if assignee else description
+        cmd = ['task', 'add', f'project:{project}', f'source:{note.stem}', full_desc]
         if args.dry_run:
             if not args.quiet:
                 print(f"would: {' '.join(repr(a) if ' ' in a else a for a in cmd)}")
             continue
-
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
             failed.append((prefix, [f"task add failed: {e.stderr.strip() or e.stdout.strip()}"]))
             continue
-
         rewrite_action_to_task(note, line_no)
         succeeded += 1
         if not args.quiet:
             short = description[:60] + ('...' if len(description) > 60 else '')
             print(f"ingested: {prefix}  project:{project}  {short}")
+    return succeeded, failed
+
+
+# ---------- export ----------
+
+def thread_kind_for_project(project):
+    """Return 'Projects'/'Processes'/'Topics' if the project name maps to an
+    existing thread file, else None."""
+    for kind in ('Projects', 'Processes', 'Topics'):
+        if (THREADS_DIR / kind / f"{project}.md").exists():
+            return kind
+    return None
+
+
+def fmt_tw_date(s):
+    """Taskwarrior dates are 'YYYYMMDDTHHMMSSZ' (compact ISO 8601).
+    Render as YYYY-MM-DD. Tolerant of already-dashed input."""
+    if not s:
+        return ''
+    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+        return s[:10]
+    if len(s) >= 8 and s[:8].isdigit():
+        return f'{s[:4]}-{s[4:6]}-{s[6:8]}'
+    return s
+
+
+def fmt_task_line(t, omit):
+    """Format one task as a markdown bullet for the export view.
+
+    `omit` is the dimension that's already implicit (file name):
+      'person'  — we're in a Project/Process/Topic view; show the assignee
+      'project' — we're in a Person view; show the thread
+    """
+    parts = []
+    desc = t.get('description', '')
+    m = ASSIGNEE_PREFIX_RE.match(desc)
+
+    if omit == 'project':
+        # Person view: show the thread instead of the assignee.
+        body = m.group(2) if m else desc
+        project = t.get('project')
+        if project:
+            kind = thread_kind_for_project(project)
+            parts.append(f'[[{kind}/{project}]]' if kind else project)
+    else:
+        # Project view: show the assignee (omit the project — it's the file).
+        if m:
+            assignee, body = m.group(1).strip(), m.group(2)
+            if (PEOPLE_DIR / f'{assignee}.md').exists():
+                parts.append(f'[[people/{assignee}]]')
+            else:
+                parts.append(f'({assignee})')
+        else:
+            body = desc
+
+    parts.append(body)
+    if t.get('due'):
+        parts.append(f'due {fmt_tw_date(t["due"])}')
+    elif t.get('wait'):
+        parts.append(f'until {fmt_tw_date(t["wait"])}')
+    elif t.get('end'):
+        parts.append(fmt_tw_date(t['end']))
+    if t.get('source'):
+        parts.append(f'[[notes/{t["source"]}]]')
+    if t.get('id'):
+        parts.append(f'#{t["id"]}')
+    return '- ' + ' · '.join(parts)
+
+
+def write_view(path, label_link, tasks, omit):
+    open_t = sorted(
+        [t for t in tasks if t.get('status') == 'pending'],
+        key=lambda x: (x.get('due', '9999'), x.get('id', 0)),
+    )
+    waiting_t = sorted(
+        [t for t in tasks if t.get('status') == 'waiting'],
+        key=lambda x: x.get('wait', '9999'),
+    )
+    done_t = sorted(
+        [t for t in tasks if t.get('status') == 'completed'],
+        key=lambda x: x.get('end', '9999'),
+        reverse=True,
+    )
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    out = [
+        f'<!-- generated by `tasks` on {now}; do not edit -->',
+        '',
+        f'# Actions: {label_link}',
+        '',
+    ]
+    if open_t:
+        out += ['## Open', ''] + [fmt_task_line(t, omit) for t in open_t] + ['']
+    if waiting_t:
+        out += ['## Waiting', ''] + [fmt_task_line(t, omit) for t in waiting_t] + ['']
+    if done_t:
+        out += ['## Done', ''] + [fmt_task_line(t, omit) for t in done_t] + ['']
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('\n'.join(out))
+
+
+def cmd_export(args):
+    """Regenerate ~/.adulting/actions/ from `task export` JSON."""
+    if not task_in_path():
+        return
+    result = subprocess.run(['task', 'export'], capture_output=True, text=True)
+    if result.returncode != 0:
+        if not args.quiet:
+            print(f"task export failed: {result.stderr.strip()}", file=sys.stderr)
+        return
+    tasks = json.loads(result.stdout) if result.stdout.strip() else []
+
+    # Wipe and regenerate
+    if ACTIONS_DIR.exists():
+        shutil.rmtree(ACTIONS_DIR)
+
+    by_project = defaultdict(list)
+    by_person = defaultdict(list)
+    owner = read_owner()
+    skipped_no_project = 0
+
+    for t in tasks:
+        project = t.get('project')
+        if not project:
+            skipped_no_project += 1
+            continue
+        by_project[project].append(t)
+        m = ASSIGNEE_PREFIX_RE.match(t.get('description', ''))
+        if m:
+            assignee = m.group(1).strip()
+            by_person[assignee].append(t)
+        elif owner:
+            by_person[owner].append(t)
+
+    project_files = 0
+    person_files = 0
+    for project, ts in by_project.items():
+        kind = thread_kind_for_project(project)
+        if kind is None:
+            continue  # project doesn't map to any known thread; skip silently
+        out = ACTIONS_DIR / kind / f'{project}.md'
+        write_view(out, f'[[{kind}/{project}]]', ts, omit='person')
+        project_files += 1
+    for person, ts in by_person.items():
+        if not (PEOPLE_DIR / f'{person}.md').exists():
+            continue  # unknown person; skip silently
+        out = ACTIONS_DIR / 'People' / f'{person}.md'
+        write_view(out, f'[[people/{person}]]', ts, omit='project')
+        person_files += 1
+
+    if not args.quiet:
+        print(f"exported: {project_files} project view(s), {person_files} person view(s).")
+
+
+# ---------- main ----------
+
+def main():
+    parser = argparse.ArgumentParser(description="Ingest ACTION: lines and export taskwarrior views into the vault.")
+    parser.add_argument('--dry-run', action='store_true',
+                        help="Show what would be ingested; don't call task or rewrite files.")
+    parser.add_argument('--quiet', action='store_true',
+                        help="Suppress per-action output.")
+    args = parser.parse_args()
+
+    ensure_uda()
+
+    succeeded, failed = cmd_ingest(args)
+
+    if not args.dry_run:
+        cmd_export(args)
 
     if failed:
         print()
@@ -185,9 +371,10 @@ def main():
         print()
 
     if not args.quiet:
-        print(f"Ingested: {succeeded}.  Failed: {len(failed)}.  Total: {len(plan)}.")
+        if succeeded or failed:
+            print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
 
-    return 0 if not failed else 1
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Manage people files in ~/.adulting/people/.
+
+People are link targets (`[[people/<name>]]`) for `note.people` and
+action `assignee:`. They are not threads — they cannot be the value of
+`note.thread`. Skeleton: just create / delete / list / show.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path(os.path.expanduser('~/.adulting'))
+PEOPLE_DIR = HOME / 'people'
+CATEGORIES = ['professional', 'personal', 'voluntary']
+
+
+def today():
+    return datetime.now().strftime('%Y-%m-%d')
+
+
+def discover_people():
+    if not PEOPLE_DIR.is_dir():
+        return
+    for f in sorted(PEOPLE_DIR.iterdir()):
+        if f.suffix == '.md' and not f.name.startswith('.'):
+            yield f.stem, f
+
+
+def read_frontmatter(path):
+    fm = {}
+    text = path.read_text(encoding='utf-8')
+    lines = text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return fm
+    for line in lines[1:]:
+        if line.strip() == '---':
+            break
+        m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', line)
+        if m:
+            fm[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    return fm
+
+
+def cmd_new(args):
+    if args.category:
+        category = args.category
+    else:
+        print("Category:")
+        for i, c in enumerate(CATEGORIES, start=1):
+            print(f"  {i}. {c}")
+        choice = input("Pick: ").strip()
+        try:
+            category = CATEGORIES[int(choice) - 1]
+        except (ValueError, IndexError):
+            sys.exit("invalid choice")
+    if category not in CATEGORIES:
+        sys.exit(f"unknown category: {category}")
+
+    if args.name:
+        name = args.name
+    else:
+        name = input("Full name: ").strip()
+    if not name:
+        sys.exit("empty name")
+
+    PEOPLE_DIR.mkdir(parents=True, exist_ok=True)
+    path = PEOPLE_DIR / f"{name}.md"
+    if path.exists():
+        sys.exit(f"already exists: {path}")
+    path.write_text(
+        f"---\nstatus: open\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
+        encoding='utf-8',
+    )
+    print(f"created: {path}")
+
+
+def cmd_delete(args):
+    if not args.person:
+        sys.exit("usage: people --delete <name>")
+    path = PEOPLE_DIR / f"{args.person}.md"
+    if not path.exists():
+        sys.exit(f"not found: {path}")
+    if not args.yes:
+        ans = input(f"delete {path}? [y/N] ").strip().lower()
+        if ans not in ('y', 'yes'):
+            sys.exit("aborted")
+    path.unlink()
+    print(f"deleted: {path}")
+
+
+def cmd_list(args):
+    rows = []
+    for name, path in discover_people():
+        fm = read_frontmatter(path)
+        rows.append({
+            'name': name,
+            'path': str(path.relative_to(HOME)),
+            'status': fm.get('status', ''),
+            'category': fm.get('category', ''),
+            'started': fm.get('started', ''),
+            'ended': fm.get('ended', ''),
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no people)")
+        return
+    cat_w = max(len(r['category']) for r in rows)
+    print(f"{'STATUS':<8}  {'CATEGORY':<{cat_w}}  NAME")
+    for r in rows:
+        print(f"{r['status']:<8}  {r['category']:<{cat_w}}  {r['name']}")
+
+
+def cmd_show(args):
+    if not args.person:
+        sys.exit("usage: people --show <name>")
+    path = PEOPLE_DIR / f"{args.person}.md"
+    if not path.exists():
+        sys.exit(f"not found: {path}")
+    if args.json:
+        fm = read_frontmatter(path)
+        print(json.dumps({
+            'name': path.stem,
+            'path': str(path.relative_to(HOME)),
+            **fm,
+        }, indent=2))
+    else:
+        sys.stdout.write(path.read_text(encoding='utf-8'))
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Manage people files.",
+        usage="%(prog)s [--new | --delete <name> | --list | --show <name>] [options]")
+    parser.add_argument('--new', action='store_true')
+    parser.add_argument('--delete', action='store_true')
+    parser.add_argument('--list', action='store_true')
+    parser.add_argument('--show', action='store_true')
+    parser.add_argument('person', nargs='?', default=None,
+                        help="Person name (for --delete / --show).")
+    parser.add_argument('--category', choices=CATEGORIES, help="(for --new) category")
+    parser.add_argument('--name', help="(for --new) full name")
+    parser.add_argument('--json', action='store_true', help="(for --list / --show) JSON output")
+    parser.add_argument('-y', '--yes', action='store_true', help="Skip confirmation prompts")
+    args = parser.parse_args()
+
+    actions = sum([args.new, args.delete, args.list, args.show])
+    if actions != 1:
+        parser.error("specify exactly one of --new, --delete, --list, --show")
+
+    if args.new:
+        cmd_new(args)
+    elif args.delete:
+        cmd_delete(args)
+    elif args.list:
+        cmd_list(args)
+    elif args.show:
+        cmd_show(args)
+
+
+if __name__ == '__main__':
+    main()

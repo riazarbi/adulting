@@ -1,6 +1,13 @@
 # adulting
 
-Scripts to help me organise my day to day life. Everything stores plain-text state under `~/.adulting/` so the data outlives any one tool — you can grep it, back it up, sync it, or browse the whole directory as an Obsidian vault (see [Obsidian compatibility](#obsidian-compatibility)).
+Scripts to help me organise my day-to-day life. Everything stores plain-text state under `~/.adulting/` so the data outlives any one tool — you can grep it, back it up, sync it, or browse the whole directory as an Obsidian vault.
+
+## Conceptual model
+
+- **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/.adulting/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
+- **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/.adulting/threads/{Projects,Processes,Topics}/`.
+- **Person** — a contact you track. People live in `~/.adulting/people/` and are link targets — never threads themselves.
+- **Action** — a task. Notes contain `ACTION:` lines that get ingested into [taskwarrior](https://taskwarrior.org) by the `tasks` bridge, then rewritten in place to `TASK:`.
 
 # Installation
 
@@ -21,215 +28,171 @@ export PATH=/Users/riaz/bin/adulting:$PATH
 
 ## Dependencies
 
-The scripts lean on base system tools wherever possible. A few features need extras:
-
 - `bash`, `python3`, `awk`, `sed`, `grep` — required by everything
-- `nano` — used by `actions` and `notes --nano`
 - `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes --pdf`, `notes --minutes`, `notes --agenda`
-- `open` (macOS) — used by `notes` to launch the system default markdown editor (Linux users will need to swap it for `xdg-open`)
+- [`task`](https://taskwarrior.org) (taskwarrior) — required by the `tasks` bridge. Install via `brew install task` on macOS.
+- macOS `open` (or Linux `xdg-open`) — used to launch Obsidian for note editing
 
 # Scripts
 
-## summary
-
-Prints a one-screen dashboard of the latest log line on each open thread. Add `summary` to the bottom of `.zshrc`/`.bashrc` to see it on every new shell.
-
 ## notes
 
-Markdown note taker. Notes are stored in `~/.adulting/notes/` as `<timestamp>.md` files. Each note carries a metadata header (Topic, Type, Thread, Timestamp — plus Counterparty/Location/Attendees for meetings, or Participants for correspondence) followed by free-form content.
+Markdown note taker. Notes live in `~/.adulting/notes/` as `<timestamp>.md` files with YAML frontmatter and a free-form body.
 
-The body recognises a handful of keywords that downstream tools look for:
+### Frontmatter
 
-| Keyword     | Meaning                                                      |
-|-------------|--------------------------------------------------------------|
-| `- [ ]`     | Open action item — tracked across all notes by `actions`     |
-| `- [x]`     | Completed action item                                        |
-| `AGREED:`   | Formal agreement — surfaced in `notes --minutes`             |
-| `RESOLVED:` | Formal resolution — surfaced in `notes --minutes`            |
-| `!:`        | Important callout — surfaced in the `notes --pdf` summary    |
+| Field        | Required | Notes                                                                                  |
+|--------------|----------|----------------------------------------------------------------------------------------|
+| topic        | yes      | Free-form title                                                                        |
+| type         | yes      | `Meeting`, `Correspondence`, `Workshop`, `Report`, `Log`, `Research`                   |
+| thread       | yes      | Single wikilink `[[Projects/X]]` / `[[Processes/Y]]` / `[[Topics/Z]]`                  |
+| timestamp    | yes      | `YYYY-MM-DD-HH-MM-SS`, matches filename prefix                                         |
+| people       | optional | List of wikilinks `[[people/<name>]]` (or plain strings for untracked attendees)       |
+| counterparty | optional | Meeting only                                                                           |
+| location     | yes      | Meeting only                                                                           |
 
-Action items can be prefixed with `(Assignee)` and `actions` will parse it out, e.g. `- [ ] (Riaz) Send the invite`.
+### Body keywords
+
+| Keyword     | Meaning                                                                  |
+|-------------|--------------------------------------------------------------------------|
+| `ACTION:`   | Action item — ingested by `tasks` into taskwarrior, then rewritten to `TASK:` |
+| `TASK:`     | Already-ingested action (set by `tasks`; don't write by hand)            |
+| `AGREED:`   | Formal agreement — surfaced in `notes --minutes`                         |
+| `RESOLVED:` | Formal resolution — surfaced in `notes --minutes`                        |
+| `!:`        | Important callout — surfaced in `notes --pdf` summary                    |
+
+`ACTION:` lines may carry an optional assignee in parens: `ACTION: (Riaz Arbi) Send the invite`. The assignee must match an existing `people/<name>.md` file or `tasks` will surface an error.
 
 ### Subcommands
 
 | Command              | What it does                                                    |
 |----------------------|-----------------------------------------------------------------|
-| `notes` / `--new`    | Create a new note and open it in the default markdown editor    |
-| `--edit`             | Pick an existing note and edit it                               |
-| `--nano`             | Pick an existing note and edit it in `nano`                     |
-| `--last`             | Open the most recent note                                       |
-| `--copy`             | Clone a note (keeps the original timestamp inside)              |
-| `--strip`            | Clone a note keeping only headers — handy for templates         |
-| `--delete`           | Delete a note                                                   |
-| `--cat`              | Print a note to stdout                                          |
-| `--actions`          | See [actions](#actions)                                         |
-| `--pdf`              | Render selected note as PDF (saved to `~/Downloads`)            |
-| `--minutes`          | Render as Meeting Minutes PDF (TOC, AGREED/RESOLVED/Action summary) |
-| `--agenda`           | Render as Meeting Agenda PDF                                    |
+| `notes` / `--new`    | Create a new note (interactive: type → thread → topic → people → meeting extras → opens editor) |
+| `--edit` / `--nano`  | Pick a note, edit in default editor / nano                      |
+| `--last`             | Open most recent note                                           |
+| `--copy` / `--strip` / `--delete` / `--cat` | Pick a note, do the thing                |
+| `--pdf` / `--minutes` / `--agenda` | Pick a note, render PDF                           |
 | `--help`             | Full help                                                       |
 
-The files `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, and `notes_strip` are helpers invoked by `notes`. They expect environment variables exported by the parent script and are not meant to be called directly.
+Every non-`--new` invocation runs `tasks` first to ingest any pending `ACTION:` lines.
 
-## actions
-
-Indexes every `- [ ]` checkbox across all your notes, assigns each one a stable 5-character key the first time it sees it, and lets you edit the global list as a single text file in `nano`. Saving propagates the edits back to the original notes.
-
-A history of every action ever seen — open, completed, or removed — is kept in `~/.adulting/actions_log.json`.
-
-| Command                                       | What it does                                                                 |
-|-----------------------------------------------|------------------------------------------------------------------------------|
-| `actions`                                     | Open all open action items in `nano`; saving propagates back into the notes  |
-| `actions --noninteractive`                    | Print the action items file instead of opening it (good for piping)          |
-| `actions --update`                            | Refresh keys + log without opening anything                                  |
-| `actions --query [--<field> <value>...]`      | Query the log; returns JSON                                                  |
-| `actions --report [--<field> <value>...]`     | Same as `--query`, rendered as a table                                       |
-| `actions --delete`                            | Open the JSON log directly for manual surgery                                |
-
-Available query fields: `key`, `filename`, `topic`, `timestamp`, `current_time`, `thread`, `action_item_text`, `assignee`, `text`, `status`, `days_interval`. Example: `actions --query --thread SGB --status x`.
-
-`notes` runs `actions --update` on every invocation, so the log stays current while you work.
+The files `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, `notes_strip` are helpers invoked by `notes`. They fail loudly if called directly (env-var guards).
 
 ## threads
 
-Append-only logs for ongoing projects. Each thread is a markdown file in `~/.adulting/threads/<thread name>.md` with YAML frontmatter and a chronological list of bullets:
+Skeleton management for thread files. Daily-review / tail / overdue tooling will be rebuilt later from notes data.
 
-```markdown
----
-status: open                # open | paused | closed
-kind: process               # process (ongoing) | project (time-delimited)
-category: professional      # professional | personal | voluntary
-started: 2024-04-28
----
+| Command                              | What it does                                                  |
+|--------------------------------------|---------------------------------------------------------------|
+| `threads --new`                      | Interactive: pick kind, category, name; creates the file      |
+| `threads --delete <thread>`          | Delete a thread (with confirm)                                |
+| `threads --list [--json]`            | List all threads (kind, status, category, name)               |
+| `threads --show <thread> [--json]`   | Print frontmatter + body (or JSON of frontmatter)             |
 
-# <thread name>
+`<thread>` accepts a bare name (`SGB`) or a path (`Processes/SGB`). Bare names error if ambiguous across kinds.
 
-- 2024-04-28 — Started on the IB integration.
-    - Got the docker image working
-    - Hit auth wall, debugging tomorrow
-- 2024-05-17 — Made progress on rblncr.
-- 2024-06-01 — Vendor decision finalised [[2024-06-01-14-30-00]].
-```
+## people
 
-What's a thread? Anything you want to keep an eye on — `Beetle Restoration`, `JIRA-1234`, `PTA Bake Sale`. I run `threads` at the end of each day to walk through every open thread and add a log line. Hit Enter to skip; type `CLOSED` to flip the thread to `status: closed` (and set `ended:` to today).
+Same skeleton shape, applied to people files.
 
-For an entry that warrants structure (multiple fields, action items, links), spawn a *note* and link to it from the thread bullet. Threads stay a cheap chronological log; notes are the home for typed records.
+| Command                              | What it does                                                  |
+|--------------------------------------|---------------------------------------------------------------|
+| `people --new`                       | Interactive: pick category, name; creates the file            |
+| `people --delete <name>`             | Delete a person (with confirm)                                |
+| `people --list [--json]`             | List all people                                               |
+| `people --show <name> [--json]`      | Print the file (or JSON of frontmatter)                       |
 
-| Command                       | What it does                                                  |
-|-------------------------------|---------------------------------------------------------------|
-| `threads`                     | Daily review loop                                             |
-| `threads --tail`              | Last log line for each open thread (status snapshot)          |
-| `threads --report`            | Every log entry from the last 7 days, grouped by thread       |
-| `threads --daily YYYY-MM-DD`  | Every log entry on that date — useful for time tracking       |
-| `threads --overdue`           | Cadences past due, sorted worst-first                         |
+## tasks
 
-### Cadences and overdue tracking
+Bridge from `ACTION:` lines in notes into taskwarrior.
 
-A thread can declare any number of recurring obligations under `cadences:`:
+| Command                  | What it does                                                                                |
+|--------------------------|---------------------------------------------------------------------------------------------|
+| `tasks`                  | Walk notes, validate every `ACTION:` line, ingest valid ones via `task add`, rewrite to `TASK:` |
+| `tasks --dry-run`        | Show what would be ingested without calling `task` or modifying files                       |
+| `tasks --quiet`          | Suppress per-action output                                                                  |
 
-```yaml
-cadences:
-  - key: tax_return
-    frequency: 31
-    description: Monthly tax return, file before 7th
-  - key: quarterly_review
-    frequency: 90
-    description: All-hands with trustees
-```
+Validation rules:
+- The note's `thread:` must resolve to an existing thread file.
+- If the action has `(Assignee)`, that name must resolve to `people/<name>.md`.
+- Description must be non-empty.
 
-A cadence is satisfied when a log entry is tagged with `#<key>`:
-
-```markdown
-- 2024-04-01 — #tax_return Filed for March
-```
-
-`threads --overdue` reports cadences whose most-recent matching entry is older than `frequency` days (or that have never been satisfied), sorted worst-first.
-
-### Relationships (people)
-
-Relationships are threads with `kind: relationship`, conventionally stored under `~/.adulting/threads/People/<Name>.md`. Each relationship typically has one cadence (`catch_up`) representing how often you want to be in touch. The same `threads --overdue` mechanism surfaces lapsed relationships alongside lapsed project obligations.
-
-```yaml
----
-status: open
-kind: relationship
-category: personal
-started: 2024-04-26
-cadences:
-  - key: catch_up
-    frequency: 30
-    description: Catch up at least every month
----
-
-# Charlie
-
-- 2024-04-26 — #catch_up phone: He's moving out of his place end of April.
-- 2024-05-08 — #catch_up message: Asked for guidance on rust.
-```
+Failures are printed; the source line is left as `ACTION:` so you can fix it and re-run. `task` (taskwarrior) is checked lazily — only errors when there's something to ingest.
 
 ## lint
 
-Validates everything in `~/.adulting/` against the schemas in `schemas/`. Reports violations as `path:line: message` and exits 1 if any. Designed to be reused — other tools (or a save hook) can shell out to `lint <file>` for pre-save validation.
+Validates everything in `~/.adulting/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
 
 | Command          | What it does                                              |
 |------------------|-----------------------------------------------------------|
 | `lint`           | Walk the vault, validate every file, report violations    |
-| `lint <path>`    | Validate one file (good for CI / pre-save hooks)          |
-| `lint --quiet`   | Suppress per-violation output; just exit code             |
+| `lint <path>`    | Validate one file (good for pre-save hooks)               |
+| `lint --quiet`   | Suppress per-violation output, exit-code only             |
 
-Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `schemas/note_meeting.md` for the canonical shape; the format is simple enough to extend by hand.
+Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `schemas/note_meeting.md` for the canonical shape.
 
 # Data store
 
-Everything lives under `~/.adulting/`:
-
 ```
 ~/.adulting/
-├── .obsidian/                  # Obsidian vault config (already set up)
+├── .obsidian/                  # Obsidian vault config
 ├── notes/                      # markdown notes (one file per note)
-├── threads/                    # thread logs (one .md file per thread)
-│   └── People/                 # relationship threads (kind: relationship)
-└── actions_log.json            # full history of every action item ever seen
+├── threads/
+│   ├── Projects/               # bounded efforts
+│   ├── Processes/              # ongoing operations
+│   └── Topics/                 # interest areas / catchalls
+├── people/                     # people files (relationship link targets)
+├── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
+└── actions_log.json            # legacy, no longer maintained — delete when you're done with cross-checks
 ```
 
-Files are plain text on purpose — back them up, version them, grep them, sync them across machines.
+# Schemas
 
-# Obsidian compatibility
+| File                          | Validates                                                       |
+|-------------------------------|-----------------------------------------------------------------|
+| `note_meeting.md`             | Meeting notes                                                   |
+| `note_correspondence.md`      | Correspondence notes                                            |
+| `note_simple.md`              | Workshop / Report / Log / Research notes                        |
+| `thread.md`                   | Thread files in `threads/{Projects,Processes,Topics}/`          |
+| `person.md`                   | Person files in `people/`                                       |
+| `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |
 
-The `~/.adulting/` directory is set up as an Obsidian vault: `.obsidian/` already lives in there with the standard core plugins enabled (Properties, Backlinks, Graph, Bases, Daily Notes, etc.). Open the folder in Obsidian and your notes render natively.
+Each schema is a markdown file with YAML frontmatter (`schema`, `scope`, `directory`, `filename`, optionally `applies_when`) and a `## Fields` table describing required fields, types, and constraints. Pipes inside cells (e.g. inside a regex) must be escaped as `\|`.
 
-## What works today
+Constraint cell DSL (single cell, semicolon-separated):
+- `regex=<pattern>` — value must match
+- `min=<N>` — string length ≥ N
+- `must_contain_digit` — flag
+- bare values (comma-separated) — enum
 
-- `notes/` markdown files render and are fully searchable
-- All notes use YAML frontmatter, so Topic, Type, Thread, Timestamp, and meeting fields populate Obsidian's Properties panel and are queryable via Bases.
-- `threads/` files are now `.md` with YAML frontmatter (`status`, `kind`, `category`, `started`, `ended`) and bullet-list entries — fully browsable in Obsidian and queryable in Bases ("show me all `kind: project` threads with `status: open`").
-- Action checkboxes are picked up by Obsidian's task tracker
-- The Daily Notes plugin is enabled (no script integration yet)
+# Buffer / agent ritual (deferred)
 
-## Vault hygiene
+`~/.adulting/buffer.md` is an append-only inbox for quick-capture entries. Routing those entries to notes (resolving threads, fixing references, applying schemas) is intended as a periodic ritual run by an AI agent against a tool-call API; the routing logic is not yet automated.
 
-- `actions`'s working file lives in the system temp directory — never appears as a stray note in the vault.
-- `notes --pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD.
+# Vault hygiene
 
-## Roadmap
+- All `notes_*` helpers fail loudly if invoked outside `notes` (env-var guards)
+- `notes --pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD
 
-To make the vault first-class in Obsidian:
+# Obsidian roadmap
 
-1. **Use `[[wikilinks]]` between notes and threads.** Notes name their thread as a string today; turning it into `[[Threads/<thread name>]]` would surface backlinks and graph edges. Same for assignees in action items (`[[People/Riaz]]`).
-2. **Slug topics into note filenames.** `2024-04-29-09-03-15--sgb-onboarding.md` keeps the timestamp prefix (so existing parsing still works) but makes the file picker readable. Alternative: emit `aliases:` in the YAML frontmatter.
-3. **Render markdown mirrors of remaining JSON state.** `actions` could keep `Actions/_index.md` updated (open items by thread/assignee); the JSON stays canonical, the markdown is a read-only view for browsing inside the vault.
+What's done:
+- All notes use YAML frontmatter; thread / people / counterparty / location all populate Obsidian's Properties panel
+- Threads and people render as Obsidian files with `[[wikilinks]]` between them — graph view, backlinks, Bases all work natively
 
-# Suggestions / known issues beyond Obsidian
+What remains:
+- **Topic-discoverable filenames.** Notes are timestamp-named (`2024-04-29-09-03-15.md`); the file picker is opaque without an `aliases:` field. Adding `aliases: [<topic>]` in frontmatter makes Cmd-O find notes by topic without renaming files. Unimplemented.
+- **Compiled views.** A future `threads --tail` / `--report` / `--overdue` should query notes data, not thread bodies. Skeleton today is just create / delete / list / show.
 
-- `notes` portability: the `open -g` calls in `notes`, `notes_new`, and the renderers are macOS-only. README says the scripts run on Linux, but they currently won't open notes there. A `uname` switch to `xdg-open` would fix it.
-- `actions` keeps a long-running JSON log (`actions_log.json`) but never garbage-collects entries for notes that were deleted. A `--prune` option that drops orphans would keep the log honest.
+# Known issues
+
+- `nano_note` Linux branch calls `nano -"$@" note` (literal "note" filename, almost certainly a bug). Never noticed because it isn't run on Linux.
 
 # Design goals
 
-Each script should:
-
-- Run on macOS or Linux (a few `open` calls assume macOS — see Suggestions above).
-- Be one self-contained file per utility (with thin `notes_*` helpers).
-- Require no libraries beyond what ships with the system.
+- Run on macOS or Linux.
+- One self-contained file per utility (with thin `notes_*` helpers).
+- Require no Python libraries beyond the standard library; no pip installs.
 - Be operated from the command line.
 - Maintain state in simple text-based file formats.
 - Maintain all state under the `~/.adulting/` hidden directory.

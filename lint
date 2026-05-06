@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate adulting files (notes, threads) against schemas in schemas/.
+"""Validate adulting files against schemas in schemas/.
 
 Usage:
     lint                        # walk ~/.adulting/ and validate everything
@@ -19,12 +19,39 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
 HOME = Path(os.path.expanduser('~/.adulting'))
 
+WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
+ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')
+TASK_RE = re.compile(r'^TASK:\s*(\([^)]+\)\s*)?(.*?)\s*$')
+
+
+# ---------- helpers ----------
+
+def unquote(s):
+    """Strip surrounding single/double quotes if present, with simple escape handling."""
+    s = s.strip()
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+    if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
+        return s[1:-1].replace("''", "'")
+    return s
+
+
+def unwiki(s):
+    """If s is a wikilink string `[[target]]`, return the target. Else None."""
+    m = WIKILINK_RE.match(s.strip())
+    return m.group(1) if m else None
+
 
 # ---------- frontmatter parsing ----------
 
 def parse_frontmatter(text):
-    """Flat key:value plus a single nested-list level (for `cadences:`).
-    Returns (dict, body_start_line_index)."""
+    """Parse YAML-ish frontmatter. Returns (dict, body_start_line_index).
+
+    Handles:
+      - flat scalars `key: value` (with surrounding quotes stripped)
+      - list of scalars (each line `  - "value"`)
+      - list of mappings (each list item with `  key: val` lines)
+    """
     lines = text.split('\n')
     if not lines or lines[0].strip() != '---':
         return {}, 0
@@ -41,41 +68,68 @@ def parse_frontmatter(text):
             continue
         key, val = m.group(1), m.group(2)
         if val == '':
-            children = []
-            current = None
-            i += 1
-            while i < len(lines) and lines[i].strip() != '---':
-                child = lines[i]
-                if not child.strip():
-                    i += 1
-                    continue
-                if not (child.startswith(' ') or child.startswith('\t')):
-                    break
-                stripped = child.lstrip()
-                if stripped.startswith('- '):
-                    current = {}
-                    children.append(current)
-                    rest = stripped[2:].strip()
-                    if ':' in rest:
-                        ck, _, cv = rest.partition(':')
-                        current[ck.strip()] = cv.strip()
-                else:
-                    if current is not None and ':' in stripped:
-                        ck, _, cv = stripped.partition(':')
-                        current[ck.strip()] = cv.strip()
-                i += 1
+            children, mode = _read_block_children(lines, i + 1)
             fm[key] = children
+            # advance past the block — _read_block_children returns end index
+            i = mode
         else:
-            fm[key] = val
+            fm[key] = unquote(val)
             i += 1
     return fm, body_start
 
 
+def _read_block_children(lines, start):
+    """Read indented block children starting at lines[start]. Returns
+    (collected, end_index). collected is either a list of dicts (when items
+    have key:value bodies) or a list of strings (when items are scalars)."""
+    collected = []
+    is_mapping_list = None  # decided by first item
+    current_dict = None
+    i = start
+    while i < len(lines) and lines[i].strip() != '---':
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        if not (line.startswith(' ') or line.startswith('\t')):
+            break
+        stripped = line.lstrip()
+        if stripped.startswith('- '):
+            rest = stripped[2:].rstrip()
+            # Decide list type from first item
+            if is_mapping_list is None:
+                # Mapping if rest looks like `key: value` (and isn't a quoted string)
+                if not rest.startswith('"') and not rest.startswith("'") and re.match(r'^[a-z_][a-z0-9_]*:\s', rest):
+                    is_mapping_list = True
+                else:
+                    is_mapping_list = False
+            if is_mapping_list:
+                current_dict = {}
+                collected.append(current_dict)
+                if ':' in rest:
+                    ck, _, cv = rest.partition(':')
+                    current_dict[ck.strip()] = unquote(cv.strip())
+            else:
+                collected.append(unquote(rest))
+                current_dict = None
+        else:
+            # Continuation of current mapping list item
+            if is_mapping_list and current_dict is not None and ':' in stripped:
+                ck, _, cv = stripped.partition(':')
+                current_dict[ck.strip()] = unquote(cv.strip())
+        i += 1
+    return collected, i
+
+
 # ---------- schema loading ----------
+
+_CELL_SPLIT_RE = re.compile(r'(?<!\\)\|')
+
 
 def parse_md_table(lines, start_idx):
     """Read consecutive |-prefixed lines as a markdown table. Returns
-    (data_rows, end_idx). The header and separator rows are dropped."""
+    (data_rows, end_idx). The header and separator rows are dropped.
+    Pipes inside cells can be escaped as \\|."""
     rows = []
     i = start_idx
     while i < len(lines):
@@ -85,15 +139,13 @@ def parse_md_table(lines, start_idx):
         if re.match(r'^\|[-: |]+\|$', line):
             i += 1
             continue
-        rows.append([c.strip() for c in line.strip('|').split('|')])
+        cells = _CELL_SPLIT_RE.split(line.strip('|'))
+        rows.append([c.replace(r'\|', '|').strip() for c in cells])
         i += 1
     return rows, i
 
 
 def parse_constraint(text):
-    """Parse a constraint cell. Multiple constraints separated by ';'.
-    Recognised forms: regex=..., min=N, must_contain_digit, comma-separated
-    bare values (treated as an enum)."""
     out = {}
     text = text.strip()
     if not text:
@@ -125,6 +177,7 @@ def parse_schema(path):
         'scope': fm.get('scope', 'file'),
         'applies_when': fm.get('applies_when', ''),
         'filename': fm.get('filename', ''),
+        'directory': fm.get('directory', ''),  # optional dir scope
         'shape': fm.get('shape', ''),
         'fields': {},
         'path': str(path),
@@ -168,8 +221,6 @@ def load_schemas(schemas_dir):
 # ---------- applies_when evaluation ----------
 
 def eval_when(expr, ctx):
-    """Evaluate an applies_when expression against a context dict.
-    Forms: '<var> == <value>', '<var> in [<v1>, <v2>, ...]', '<var> =~ <regex>'."""
     expr = expr.strip()
     if not expr:
         return False
@@ -193,9 +244,10 @@ def eval_when(expr, ctx):
 # ---------- value validation ----------
 
 def validate_value(name, value, spec):
-    """Yield error strings for a single field value."""
-    if value is None or value == '' or isinstance(value, list):
+    if value is None or value == '':
         return
+    if isinstance(value, list):
+        return  # list-of-scalars validated separately
     constraint = spec.get('constraint', {})
     enum = constraint.get('enum')
     if enum and value not in enum:
@@ -216,6 +268,8 @@ def validate_cadences(cadences):
         return
     seen = set()
     for idx, cad in enumerate(cadences):
+        if not isinstance(cad, dict):
+            continue
         prefix = f"cadences[{idx}]"
         for required in ('key', 'frequency', 'description'):
             if not cad.get(required):
@@ -235,14 +289,44 @@ def validate_cadences(cadences):
                 yield f"{prefix}: frequency {freq!r} must be an integer"
 
 
+# ---------- cross-file (wikilink resolution) ----------
+
+def resolve_wikilink(target):
+    """Given a wikilink target like 'Projects/SGB' or 'people/Charlie',
+    return the absolute path it refers to (whether or not it exists)."""
+    target = target.strip()
+    if target.startswith(('Projects/', 'Processes/', 'Topics/')):
+        return HOME / 'threads' / (target + '.md')
+    if target.startswith('people/'):
+        return HOME / (target + '.md')
+    return None  # unrecognised prefix
+
+
+def wikilink_exists(target):
+    p = resolve_wikilink(target)
+    if p is None:
+        return False
+    return p.exists()
+
+
 # ---------- file validation ----------
 
-def find_file_schema(filename, fm, schemas):
+def find_file_schema(path, fm, schemas):
+    """Match by filename + applies_when + (new) directory scope."""
+    rel = path.relative_to(HOME) if HOME in path.parents or path.parent == HOME else path
+    rel_str = str(rel)
     for s in schemas.values():
         if s['scope'] != 'file':
             continue
+        # Directory scope (if set)
+        sdir = s.get('directory', '')
+        if sdir:
+            top = rel_str.split(os.sep, 1)[0]
+            if top != sdir:
+                continue
+        # Filename pattern
         fpattern = s.get('filename')
-        if fpattern and not re.search(fpattern, filename):
+        if fpattern and not re.search(fpattern, path.name):
             continue
         applies = s.get('applies_when')
         if applies and not eval_when(applies, fm):
@@ -252,7 +336,6 @@ def find_file_schema(filename, fm, schemas):
 
 
 def validate_file(path, schemas):
-    """Yield (line_no, message) tuples. line_no=0 means file-level."""
     path = Path(path)
     if not path.exists():
         yield (0, "file does not exist")
@@ -260,7 +343,7 @@ def validate_file(path, schemas):
     text = path.read_text(encoding='utf-8')
     fm, body_start = parse_frontmatter(text)
 
-    schema = find_file_schema(path.name, fm, schemas)
+    schema = find_file_schema(path, fm, schemas)
     if not schema:
         yield (0, "no matching file schema")
         return
@@ -270,27 +353,51 @@ def validate_file(path, schemas):
         if spec['required'] and not fm.get(fname):
             yield (0, f"missing required field {fname!r} (per {schema['name']})")
 
-    # Field values.
+    # Field values (scalars).
     for fname, value in fm.items():
         spec = schema['fields'].get(fname)
         if spec:
             for err in validate_value(fname, value, spec):
                 yield (0, err)
 
-    # Conditional rules (small enough to inline; expand if more arise).
+    # Conditional rules.
     if schema['name'] == 'thread' and fm.get('status') == 'closed' and not fm.get('ended'):
         yield (0, "ended is required when status is closed")
+    if schema['name'] == 'person' and fm.get('status') == 'closed' and not fm.get('ended'):
+        yield (0, "ended is required when status is closed")
 
-    # Cadences (nested validation; not in field table).
+    # Cadences.
     if 'cadences' in fm:
         for err in validate_cadences(fm['cadences']):
             yield (0, err)
 
-    # Body lines: any line schema whose applies_when matches.
+    # Wikilink resolution: thread field on notes
+    if 'thread' in fm and isinstance(fm['thread'], str):
+        target = unwiki(fm['thread'])
+        if target and not wikilink_exists(target):
+            yield (0, f"thread: wikilink {fm['thread']!r} does not resolve")
+
+    # Wikilink resolution: people list (entries that ARE wikilinks)
+    if 'people' in fm and isinstance(fm['people'], list):
+        for entry in fm['people']:
+            if not isinstance(entry, str):
+                continue
+            target = unwiki(entry)
+            if target:
+                if not target.startswith('people/'):
+                    yield (0, f"people: wikilink {entry!r} should target 'people/...'")
+                elif not wikilink_exists(target):
+                    yield (0, f"people: wikilink {entry!r} does not resolve")
+            # plain strings allowed (untracked attendees)
+
+    # Body lines: line schemas (e.g. thread_entry on threads); ACTION/TASK on notes.
     line_schemas = [s for s in schemas.values() if s['scope'] == 'line']
     body_lines = text.split('\n')[body_start:]
+    is_note = schema['name'] in ('note_meeting', 'note_correspondence', 'note_simple')
     for offset, line in enumerate(body_lines):
         line_no = body_start + offset + 1
+
+        # Line schemas (thread_entry etc.)
         for ls in line_schemas:
             if not eval_when(ls.get('applies_when', ''), {'line': line}):
                 continue
@@ -309,19 +416,29 @@ def validate_file(path, schemas):
                     for err in validate_value(f"{ls['name']}.{fname}", captured, spec):
                         yield (line_no, err)
 
+        # ACTION: lines (notes only)
+        if is_note:
+            m = ACTION_RE.match(line)
+            if m:
+                assignee_paren, text_rest = m.groups()
+                if not text_rest.strip():
+                    yield (line_no, "ACTION: missing description")
+                if assignee_paren:
+                    name = assignee_paren.strip()[1:-1].strip()  # strip ( )
+                    person_path = HOME / 'people' / f"{name}.md"
+                    if not person_path.exists():
+                        yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
+
 
 # ---------- file discovery ----------
 
 def discover_files():
-    notes_dir = HOME / 'notes'
-    if notes_dir.is_dir():
-        for f in sorted(notes_dir.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
-                yield f
-    threads_dir = HOME / 'threads'
-    if threads_dir.is_dir():
-        for root, dirs, files in os.walk(threads_dir):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+    for sub in ('notes', 'threads', 'people'):
+        d = HOME / sub
+        if not d.is_dir():
+            continue
+        for root, dirs, files in os.walk(d):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]
             for f in sorted(files):
                 if f.startswith('.') or f.endswith('.bak'):
                     continue

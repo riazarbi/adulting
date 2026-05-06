@@ -11,20 +11,22 @@ A note recording email, message, or letter exchanges with one or more participan
 
 ## Fields
 
-| name         | required | type   | constraint                                |
-|--------------|----------|--------|-------------------------------------------|
-| topic        | yes      | string |                                           |
-| type         | yes      | enum   | Correspondence                            |
-| thread       | yes      | string |                                           |
-| timestamp    | yes      | string | regex=\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2} |
-| participants | yes      | string |                                           |
+| name      | required | type   | constraint                                |
+|-----------|----------|--------|-------------------------------------------|
+| topic     | yes      | string |                                           |
+| type      | yes      | enum   | Correspondence                            |
+| thread    | yes      | string | regex=\[\[(Projects\|Processes\|Topics)/[^\]]+\]\] |
+| timestamp | yes      | string | regex=\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2} |
+| people    | no       | list   |                                           |
+
+`thread` is a single wikilink to a project, process, or topic thread. `people` is a list whose entries may be wikilinks `[[people/X]]` (validated to resolve) or plain strings (untracked participants).
 
 ## Body
 
 | pattern         | meaning                                                         |
 |-----------------|-----------------------------------------------------------------|
-| `- [ ] ...`     | open action item — must conform to `action_item` schema         |
-| `- [x] ...`     | completed action item — same schema                             |
+| `ACTION: ...`   | open action item — ingested into taskwarrior by `tasks`         |
+| `TASK: ...`     | already-ingested action item                                    |
 | `AGREED: ...`   | formal agreement — surfaced in `notes --minutes`                |
 | `RESOLVED: ...` | formal resolution — surfaced in `notes --minutes`               |
 | `!: ...`        | important callout — surfaced in `notes --pdf`                   |

@@ -1,6 +1,7 @@
 ---
 schema: thread
 scope: file
+directory: threads
 filename: ^[^.]+\.md$
 ---
 
@@ -13,7 +14,7 @@ Markdown file holding a chronological log of an ongoing project, process, or rel
 | name      | required | type   | constraint                                            |
 |-----------|----------|--------|-------------------------------------------------------|
 | status    | yes      | enum   | open, paused, closed                                  |
-| kind      | yes      | enum   | project, process, relationship                        |
+| kind      | yes      | enum   | project, process, topic                               |
 | category  | yes      | enum   | professional, personal, voluntary                     |
 | started   | yes      | string | regex=\d{4}-\d{2}-\d{2}                               |
 | ended     | no       | string | regex=\d{4}-\d{2}-\d{2}                               |

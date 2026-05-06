@@ -2,91 +2,113 @@
 
 : "${NOTES_DIR:?must be invoked via 'notes', not directly}"
 : "${THREAD_DIR:?must be invoked via 'notes', not directly}"
+: "${PEOPLE_DIR:?must be invoked via 'notes', not directly}"
 
-	# Determine timestamp
-	dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	# Set note filename
-	mkdir -p "$NOTES_DIR"
-	note="$NOTES_DIR/$dt.md"
+# Timestamp + filename
+dt=$(date '+%Y-%m-%d-%H-%M-%S')
+mkdir -p "$NOTES_DIR"
+note="$NOTES_DIR/$dt.md"
 
-	# Determine note type
-	# Feel free to edit these options
-	PS3="What type of note is this? : "
-	select type in Meeting Correspondence Workshop Report Log Research
-	do
-    		echo ""
-    		break
-	done
+# --- Type ---
+PS3="What type of note is this? : "
+select type in Meeting Correspondence Workshop Report Log Research
+do
+    echo ""
+    break
+done
 
-        # Determine the thread.
-        # Thread files may be legacy (no extension) or new (.md). Strip the
-        # .md extension and dedupe so the picker shows clean names.
-        IFS=$'\n'
-        PS3="What thread does this relate to? : "
-        thread_names=$(ls "$THREAD_DIR" 2>/dev/null | grep -v '\.bak$' | sed 's/\.md$//' | sort -u)
-        select thread in "uncategorized" $thread_names
-        do
-                echo ""
-                break
+# --- Thread (single, from Projects/Processes/Topics) ---
+IFS=$'\n'
+PS3="What thread does this relate to? : "
+# Build labels like 'Projects/SGB' so the kind is visible in the picker.
+thread_labels=$(
+    for sub in Projects Processes Topics; do
+        d="$THREAD_DIR/$sub"
+        [ -d "$d" ] || continue
+        for f in "$d"/*.md; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f" .md)
+            echo "$sub/$base"
+        done
+    done | sort
+)
+select thread_label in $thread_labels
+do
+    echo ""
+    break
+done
+unset IFS
+
+if [ -z "$thread_label" ]; then
+    echo "no thread chosen, aborting" >&2
+    exit 1
+fi
+
+# --- Topic ---
+echo "Enter the topic of this $type note:"
+read topic
+echo
+
+# --- People (multi-pick, optional) ---
+people_yaml=""
+if [[ "$type" = "Meeting" || "$type" = "Correspondence" ]]; then
+    echo "Enter people (semicolon-separated; blank to skip):"
+    read people_input
+    echo
+    if [ -n "$people_input" ]; then
+        people_yaml="people:"$'\n'
+        IFS=';'
+        for raw in $people_input; do
+            name=$(echo "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            [ -z "$name" ] && continue
+            if [ -f "$PEOPLE_DIR/$name.md" ]; then
+                people_yaml+="  - \"[[people/$name]]\""$'\n'
+            else
+                # Plain string for unresolved (escape internal quotes)
+                escaped=$(echo "$name" | sed 's/"/\\"/g')
+                people_yaml+="  - \"$escaped\""$'\n'
+            fi
         done
         unset IFS
+    fi
+fi
 
-	# Determine the topic
-	echo "Enter the topic of this $type note:"
-	read topic
-        echo
-	# Write metadata as YAML frontmatter (Obsidian Properties friendly)
-cat > "$note" << EOM
----
-topic: $topic
-type: $type
-thread: $thread
-EOM
+# --- Meeting extras (counterparty, location) ---
+meeting_extras=""
+if [[ "$type" = "Meeting" ]]; then
+    echo "Enter the counterparty (blank to skip):"
+    read counterparty
+    echo
+    echo "Enter the location:"
+    read location
+    echo
+    if [ -n "$counterparty" ]; then
+        meeting_extras+="counterparty: $counterparty"$'\n'
+    fi
+    meeting_extras+="location: $location"$'\n'
+fi
 
-	# Get additional data if it's a meeting
-	if [[ $type = "Meeting" ]]
-	then
-    		echo "Enter the counterparty:"
-    		read counterparty
-    		echo
-    		echo "Enter the location:"
-    		read location
-    		echo
-    		echo "Enter attendees, separated by semicolon (eg Riaz Arbi; John Smith etc)"
-    		read attendees
-    		echo
-cat >> "$note" << EOM
-counterparty: $counterparty
-location: $location
-attendees: $attendees
-EOM
-	# Get additional data if it's correspondence
-	elif [[ $type = "Correspondence" ]]
-	then
-    		echo "Enter the participants:"
-    		read participants
-    		echo
-cat >> "$note" << EOM
-participants: $participants
-EOM
-	fi
+# --- Write the note ---
+{
+    echo "---"
+    echo "topic: $topic"
+    echo "type: $type"
+    echo "thread: \"[[$thread_label]]\""
+    echo "timestamp: $dt"
+    [ -n "$meeting_extras" ] && printf '%s' "$meeting_extras"
+    [ -n "$people_yaml" ] && printf '%s' "$people_yaml"
+    echo "---"
+    echo ""
+    echo "--------------------------------------------------------------------"
+    echo ""
+    echo "# Content"
+    echo ""
+    echo "-------------------------------------------------------------------"
+    echo ""
+    echo "# Timesheet"
+    echo ""
+} > "$note"
 
-	# Close frontmatter and separate metadata from the actual note
-cat >> "$note" << EOM
-timestamp: $dt
----
-
---------------------------------------------------------------------
-
-# Content
-
--------------------------------------------------------------------
-
-# Timesheet
-
-EOM
-        echo -e Start:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
-
-        open_note $note
-
-        echo -e End:'\t'$(date '+%Y-%m-%d-%H:%M:%S') >> "$note"
+echo -e "Start:\t$(date '+%Y-%m-%d-%H:%M:%S')" >> "$note"
+open_note "$note"
+echo -e "End:\t$(date '+%Y-%m-%d-%H:%M:%S')" >> "$note"

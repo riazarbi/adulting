@@ -1,396 +1,233 @@
 #!/usr/bin/env python3
-"""Append-only logs for ongoing projects. Each thread is one .md file in
-~/.adulting/threads/ (or a subdirectory like People/). Frontmatter declares
-status / kind / category / started / ended / cadences; body is a list of
-top-level bullets `- YYYY-MM-DD — text` with optional indented sub-bullets.
+"""Manage thread files in ~/.adulting/threads/{Projects,Processes,Topics}/.
+
+Skeleton: just create / delete / list / show. The richer reporting tools
+(daily review, tail, overdue, report) are intentionally omitted — they'll
+be rebuilt when we know what views we actually want from notes data.
 """
 
 import argparse
+import json
 import os
 import re
+import shutil
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 
-THREADS_DIR = os.path.expanduser("~/.adulting/threads")
+HOME = Path(os.path.expanduser('~/.adulting'))
+THREADS_DIR = HOME / 'threads'
+KIND_DIRS = {
+    'project': 'Projects',
+    'process': 'Processes',
+    'topic': 'Topics',
+}
+CATEGORIES = ['professional', 'personal', 'voluntary']
 
-BULLET_RE = re.compile(r'^- (\d{4}-\d{2}-\d{2}) — (.+?)\s*$')
-SEP = "-" * 53
+
+def today():
+    return datetime.now().strftime('%Y-%m-%d')
 
 
-def today_str():
-    return datetime.now().strftime("%Y-%m-%d")
-
-
-def list_threads():
-    """Return [(name, path)] for every thread file, sorted by name. Walks
-    subdirectories (e.g. People/). Skips hidden files and .bak files.
-    Names are path-qualified relative to THREADS_DIR (e.g. 'People/Charlie')."""
-    if not os.path.isdir(THREADS_DIR):
-        os.makedirs(THREADS_DIR, exist_ok=True)
-        return []
-    out = []
-    for root, dirs, files in os.walk(THREADS_DIR):
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        for f in files:
-            if not f.endswith('.md') or f.startswith('.'):
-                continue
-            full_path = os.path.join(root, f)
-            rel = os.path.relpath(full_path, THREADS_DIR)
-            out.append((rel[:-3], full_path))
-    return sorted(out)
+def discover_threads():
+    """Yield (kind, name, path) for every thread file."""
+    for kind, subdir in KIND_DIRS.items():
+        d = THREADS_DIR / subdir
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            if f.suffix == '.md' and not f.name.startswith('.'):
+                yield kind, f.stem, f
 
 
 def read_frontmatter(path):
-    """Return dict of frontmatter fields, plus the body-start line index.
-
-    Handles flat scalars and a single nested level (list-of-mappings under
-    a top-level key — used for `cadences`). Returns the list as Python
-    list-of-dicts; flat scalars as strings."""
-    with open(path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    if not lines or lines[0].rstrip() != '---':
-        return {}, 0
     fm = {}
-    body_start = 0
-    i = 1
-    while i < len(lines):
-        if lines[i].rstrip() == '---':
-            body_start = i + 1
+    text = path.read_text(encoding='utf-8')
+    lines = text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return fm
+    for line in lines[1:]:
+        if line.strip() == '---':
             break
-        line = lines[i]
-        # Top-level key (no leading whitespace) followed by ':'
         m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', line)
-        if not m:
-            i += 1
-            continue
-        key, val = m.group(1), m.group(2)
-        if val == '':
-            # Possibly a nested list. Collect indented children.
-            children = []
-            current = None
-            i += 1
-            while i < len(lines) and lines[i].rstrip() != '---':
-                child = lines[i]
-                if not child.strip():
-                    i += 1
-                    continue
-                if not (child.startswith(' ') or child.startswith('\t')):
-                    break  # back to top level
-                stripped = child.lstrip()
-                if stripped.startswith('- '):
-                    current = {}
-                    children.append(current)
-                    rest = stripped[2:].strip()
-                    if ':' in rest:
-                        ck, _, cv = rest.partition(':')
-                        current[ck.strip()] = cv.strip()
-                else:
-                    if current is not None and ':' in stripped:
-                        ck, _, cv = stripped.partition(':')
-                        current[ck.strip()] = cv.strip()
-                i += 1
-            fm[key] = children
-        else:
-            fm[key] = val
-            i += 1
-    return fm, body_start
-
-
-def thread_status(path):
-    fm, _ = read_frontmatter(path)
-    return fm.get('status', 'open')
-
-
-def thread_entries(path):
-    """Yield (date, text) for every top-level log bullet in the thread."""
-    with open(path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    _, body_start = read_frontmatter(path)
-    for line in lines[body_start:]:
-        m = BULLET_RE.match(line.rstrip())
         if m:
-            yield m.group(1), m.group(2)
+            fm[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    return fm
 
 
-def append_entry(path, date, text):
-    """Append a top-level bullet to the thread, ensuring a newline first."""
-    with open(path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    sep = '' if content.endswith('\n') else '\n'
-    with open(path, 'a', encoding='utf-8') as f:
-        f.write(f"{sep}- {date} — {text}\n")
-
-
-def close_thread(path, date):
-    """Flip status to closed and set ended in the thread's frontmatter."""
-    with open(path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    if not lines or lines[0].rstrip() != '---':
-        sys.exit(f"thread {path} has no YAML frontmatter")
-    fm_end = None
-    for i in range(1, len(lines)):
-        if lines[i].rstrip() == '---':
-            fm_end = i
-            break
-    if fm_end is None:
-        sys.exit(f"thread {path} has unterminated frontmatter")
-    out_fm, have_status, have_ended = [], False, False
-    for line in lines[1:fm_end]:
-        if line.startswith('status:'):
-            out_fm.append('status: closed\n')
-            have_status = True
-        elif line.startswith('ended:'):
-            out_fm.append(f'ended: {date}\n')
-            have_ended = True
-        else:
-            out_fm.append(line)
-    if not have_status:
-        out_fm.append('status: closed\n')
-    if not have_ended:
-        out_fm.append(f'ended: {date}\n')
-    with open(path, 'w', encoding='utf-8') as f:
-        f.writelines(['---\n'] + out_fm + ['---\n'] + lines[fm_end + 1:])
-
-
-def create_thread(name, first_date, first_text,
-                  kind='process', category='professional'):
-    """Create a new-format thread file."""
-    safe_name = name.strip()
-    path = os.path.join(THREADS_DIR, f"{safe_name}.md")
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write("---\n")
-        f.write("status: open\n")
-        f.write(f"kind: {kind}\n")
-        f.write(f"category: {category}\n")
-        f.write(f"started: {first_date}\n")
-        f.write("---\n\n")
-        f.write(f"# {safe_name}\n\n")
-        if first_text:
-            f.write(f"- {first_date} — {first_text}\n")
-    return path
-
-
-def fmt_entry(date, text):
-    return f"{date}    {text}"
-
-
-def overdue_for_thread(name, path):
-    """Return [(thread_name, cadence_key, frequency, last_date, days_overdue)]
-    for every cadence on this thread that is past due. Closed threads are
-    skipped. A cadence with no satisfying entry is overdue from `started`."""
-    if thread_status(path) == 'closed':
-        return []
-    fm, _ = read_frontmatter(path)
-    cadences = fm.get('cadences') or []
-    if not cadences:
-        return []
-    today = datetime.now().date()
-    started_str = fm.get('started')
-    started = None
-    if started_str:
-        try:
-            started = datetime.strptime(started_str, '%Y-%m-%d').date()
-        except ValueError:
-            pass
-    out = []
-    entries = list(thread_entries(path))
-    for cadence in cadences:
-        key = cadence.get('key')
-        try:
-            freq = int(cadence.get('frequency', 0))
-        except (TypeError, ValueError):
-            freq = 0
-        if not key or freq <= 0:
-            continue
-        tag_re = re.compile(r'#' + re.escape(key) + r'\b')
-        last = None
-        for date_str, text in entries:
-            if tag_re.search(text):
-                if last is None or date_str > last:
-                    last = date_str
-        if last:
-            try:
-                last_d = datetime.strptime(last, '%Y-%m-%d').date()
-            except ValueError:
-                continue
-            due = (today - last_d).days - freq
-            if due > 0:
-                out.append((name, key, freq, last, due))
-        else:
-            ref = started or today
-            due = (today - ref).days - freq
-            if due > 0:
-                out.append((name, key, freq, None, due))
-    return out
-
-
-def cmd_overdue(threads):
-    rows = []
-    for name, path in threads:
-        rows.extend(overdue_for_thread(name, path))
-    if not rows:
-        print("No overdue cadences.")
-        return
-    rows.sort(key=lambda r: r[4], reverse=True)
-    name_w = max(len(r[0]) for r in rows)
-    key_w = max(len(r[1]) for r in rows)
-    print(f"{'THREAD':<{name_w}}  {'CADENCE':<{key_w}}  {'OVERDUE':>9}  {'LAST':<10}  {'EVERY':>6}")
-    for name, key, freq, last, due in rows:
-        last_str = last if last else 'never'
-        print(f"{name:<{name_w}}  {key:<{key_w}}  {due:>5}d   {last_str:<10}  {freq:>4}d ")
-
-
-def cmd_tail(threads):
-    for name, path in threads:
-        print(f"THREAD  ===>  {name.upper()}")
-        if thread_status(path) == 'closed':
-            continue
-        entries = list(thread_entries(path))
-        if entries:
-            date, text = entries[-1]
-            print(fmt_entry(date, text))
-
-
-def cmd_report(threads, days=7):
-    today = datetime.now().date()
-    cutoff = today - timedelta(days=days)
-    cutoff_str = cutoff.strftime('%Y-%m-%d')
-    today_s = today.strftime('%Y-%m-%d')
-    print()
-    print(f"###================ THREAD REPORT {cutoff_str} TO {today_s} ================###")
-    for name, path in threads:
-        print(f"THREAD ===> {name} : {cutoff_str} to {today_s}")
-        for date_str, text in thread_entries(path):
-            try:
-                d = datetime.strptime(date_str, '%Y-%m-%d').date()
-            except ValueError:
-                continue
-            if cutoff <= d <= today:
-                print(fmt_entry(date_str, text))
-        print()
-
-
-def cmd_daily(threads, target_date):
-    print()
-    print(f"###================ THREAD REPORT {target_date} ================###")
-    for name, path in threads:
-        for date_str, text in thread_entries(path):
-            if date_str == target_date:
-                print(fmt_entry(date_str, text))
-
-
-def prompt(text=""):
-    try:
-        return input(text)
-    except EOFError:
+def resolve_thread(arg):
+    """Resolve a user-supplied thread reference to (kind, name, path).
+    Accepts:
+      - bare name 'SGB' (must be unique across kinds, else error)
+      - path 'Processes/SGB'
+      - wikilink form '[[Processes/SGB]]'
+    Returns None if not found, raises ValueError on ambiguity."""
+    arg = arg.strip()
+    m = re.match(r'^\[\[([^\]]+)\]\]$', arg)
+    if m:
+        arg = m.group(1)
+    if '/' in arg:
+        kind_dir, name = arg.split('/', 1)
+        for kind, subdir in KIND_DIRS.items():
+            if subdir == kind_dir:
+                p = THREADS_DIR / subdir / f"{name}.md"
+                if p.exists():
+                    return kind, name, p
+                return None
         return None
+    matches = [(k, n, p) for k, n, p in discover_threads() if n == arg]
+    if len(matches) == 0:
+        return None
+    if len(matches) > 1:
+        raise ValueError(f"ambiguous thread name {arg!r}; matches in: {', '.join(KIND_DIRS[k] for k, _, _ in matches)}")
+    return matches[0]
 
 
-def cmd_loop(threads):
-    today = today_str()
-    print()
-    print("###================ THREAD LOGGER ================###")
-    if not threads:
-        print()
-        print(f"{THREADS_DIR} is empty.")
-        print()
-        print("=" * 53)
+def cmd_new(args):
+    """Interactive: prompt for kind, category, name; create the file."""
+    if args.kind:
+        kind = args.kind
     else:
-        print()
-        print("These are the current threads ==>")
-        for name, _ in threads:
-            print(name)
-        print()
-        print("Working through threads...")
-        print()
-        for name, path in threads:
-            print(SEP)
-            print()
-            print(f"THREAD  ===>  {name.upper()}")
-            print()
-            if thread_status(path) == 'closed':
-                print(f"{name} is CLOSED")
-                continue
-            entries = list(thread_entries(path))
-            for date, text in entries[-5:]:
-                print(fmt_entry(date, text))
-            print()
-            print("Enter a new log:")
-            print("  press [Enter] to skip...")
-            print("  type CLOSED to close the thread...")
-            entry = prompt()
-            if entry is None:
-                break
-            entry = entry.strip()
-            if not entry:
-                print("Skipping...")
-                print()
-            elif entry == 'CLOSED':
-                close_thread(path, today)
-                print(f"Closed {name}")
-                print()
-            else:
-                append_entry(path, today, entry)
-                print("Committing log entry...")
-                print("Done!")
-                print()
-        print("=" * 53)
+        print("Kind:")
+        for i, k in enumerate(KIND_DIRS, start=1):
+            print(f"  {i}. {k}")
+        choice = input("Pick: ").strip()
+        try:
+            kind = list(KIND_DIRS)[int(choice) - 1]
+        except (ValueError, IndexError):
+            sys.exit("invalid choice")
+    if kind not in KIND_DIRS:
+        sys.exit(f"unknown kind: {kind}")
 
-    print()
-    while True:
-        response = prompt("Would you like to create a new thread [y/N]? ")
-        if response is None:
-            return
-        if response.strip().lower() not in ('y', 'yes'):
-            return
-        print("Enter name of new thread. Make it filename-compatible. ")
-        name = prompt()
-        if name is None:
-            return
-        name = name.strip()
-        if not name:
-            print("Empty name, skipping.")
-            continue
-        path = os.path.join(THREADS_DIR, f"{name}.md")
-        if os.path.exists(path) or os.path.exists(os.path.join(THREADS_DIR, name)):
-            print(f"A thread named {name!r} already exists, skipping.")
-            continue
-        print(f"Enter the first log entry for {name} ")
-        first = prompt()
-        if first is None:
-            return
-        create_thread(name, today, first.strip())
-        print("First entry committed!")
-        print()
-        print("-" * 50)
+    if args.category:
+        category = args.category
+    else:
+        print("Category:")
+        for i, c in enumerate(CATEGORIES, start=1):
+            print(f"  {i}. {c}")
+        choice = input("Pick: ").strip()
+        try:
+            category = CATEGORIES[int(choice) - 1]
+        except (ValueError, IndexError):
+            sys.exit("invalid choice")
+    if category not in CATEGORIES:
+        sys.exit(f"unknown category: {category}")
+
+    if args.name:
+        name = args.name
+    else:
+        name = input("Name: ").strip()
+    if not name:
+        sys.exit("empty name")
+
+    target_dir = THREADS_DIR / KIND_DIRS[kind]
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / f"{name}.md"
+    if path.exists():
+        sys.exit(f"already exists: {path}")
+    path.write_text(
+        f"---\nstatus: open\nkind: {kind}\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
+        encoding='utf-8',
+    )
+    print(f"created: {path}")
+
+
+def cmd_delete(args):
+    if not args.thread:
+        sys.exit("usage: threads --delete <thread>")
+    try:
+        match = resolve_thread(args.thread)
+    except ValueError as e:
+        sys.exit(str(e))
+    if not match:
+        sys.exit(f"not found: {args.thread}")
+    kind, name, path = match
+    if not args.yes:
+        ans = input(f"delete {path}? [y/N] ").strip().lower()
+        if ans not in ('y', 'yes'):
+            sys.exit("aborted")
+    path.unlink()
+    print(f"deleted: {path}")
+
+
+def cmd_list(args):
+    rows = []
+    for kind, name, path in discover_threads():
+        fm = read_frontmatter(path)
+        rows.append({
+            'kind': kind,
+            'name': name,
+            'path': str(path.relative_to(HOME)),
+            'status': fm.get('status', ''),
+            'category': fm.get('category', ''),
+            'started': fm.get('started', ''),
+            'ended': fm.get('ended', ''),
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no threads)")
+        return
+    name_w = max(len(r['name']) for r in rows)
+    kind_w = max(len(r['kind']) for r in rows)
+    cat_w = max(len(r['category']) for r in rows)
+    print(f"{'KIND':<{kind_w}}  {'STATUS':<8}  {'CATEGORY':<{cat_w}}  NAME")
+    for r in rows:
+        print(f"{r['kind']:<{kind_w}}  {r['status']:<8}  {r['category']:<{cat_w}}  {r['name']}")
+
+
+def cmd_show(args):
+    if not args.thread:
+        sys.exit("usage: threads --show <thread>")
+    try:
+        match = resolve_thread(args.thread)
+    except ValueError as e:
+        sys.exit(str(e))
+    if not match:
+        sys.exit(f"not found: {args.thread}")
+    kind, name, path = match
+    if args.json:
+        fm = read_frontmatter(path)
+        print(json.dumps({
+            'kind': kind,
+            'name': name,
+            'path': str(path.relative_to(HOME)),
+            **fm,
+        }, indent=2))
+    else:
+        sys.stdout.write(path.read_text(encoding='utf-8'))
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Append-only logs for ongoing projects.",
-        usage="%(prog)s [--tail | --report | --daily YYYY-MM-DD | --overdue]")
-    parser.add_argument('--tail', action='store_true',
-                        help='Print the last entry of each open thread.')
-    parser.add_argument('--report', action='store_true',
-                        help='Print all entries in the last 7 days, grouped by thread.')
-    parser.add_argument('--daily', metavar='YYYY-MM-DD',
-                        help='Print entries on the given date.')
-    parser.add_argument('--overdue', action='store_true',
-                        help='Print cadences whose most recent satisfying entry is past due.')
+        description="Manage thread files.",
+        usage="%(prog)s [--new | --delete <thread> | --list | --show <thread>] [options]")
+    parser.add_argument('--new', action='store_true')
+    parser.add_argument('--delete', action='store_true')
+    parser.add_argument('--list', action='store_true')
+    parser.add_argument('--show', action='store_true')
+    parser.add_argument('thread', nargs='?', default=None,
+                        help="Thread name or path (for --delete / --show).")
+    parser.add_argument('--kind', choices=list(KIND_DIRS), help="(for --new) kind")
+    parser.add_argument('--category', choices=CATEGORIES, help="(for --new) category")
+    parser.add_argument('--name', help="(for --new) thread name")
+    parser.add_argument('--json', action='store_true', help="(for --list / --show) JSON output")
+    parser.add_argument('-y', '--yes', action='store_true', help="Skip confirmation prompts")
     args = parser.parse_args()
 
-    threads = list_threads()
+    actions = sum([args.new, args.delete, args.list, args.show])
+    if actions != 1:
+        parser.error("specify exactly one of --new, --delete, --list, --show")
 
-    if args.tail:
-        cmd_tail(threads)
-    elif args.report:
-        cmd_report(threads)
-    elif args.daily:
-        cmd_daily(threads, args.daily)
-    elif args.overdue:
-        cmd_overdue(threads)
-    else:
-        cmd_loop(threads)
+    if args.new:
+        cmd_new(args)
+    elif args.delete:
+        cmd_delete(args)
+    elif args.list:
+        cmd_list(args)
+    elif args.show:
+        cmd_show(args)
 
 
 if __name__ == '__main__':

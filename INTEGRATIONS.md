@@ -4,44 +4,81 @@ This codebase relies on three external applications. Each section
 documents what we use it for, the configuration the integration
 needs, and the steps a fresh install requires.
 
-## Taskwarrior
+## Taskwarrior (internal backend)
 
-Used as the canonical task store. The `tasks` script ingests `ACTION:`
-lines from notes, syncs description and status changes bidirectionally,
-and the `task` CLI is the primary surface for querying / modifying
-tasks (`task list`, `task next`, `task <id> done`, etc.).
+Taskwarrior is **not user-facing in this system**. It's the backend that
+stores task state; the `tasks` script is the only sanctioned interface
+to it. Treat `task` (the binary) the way you'd treat a database driver:
+nobody calls it directly.
 
-### Required configuration
+### What this means in practice
 
-In `~/.taskrc`:
+- **Don't run `task add` / `task <id> modify` / `task <id> done`** by
+  hand or from any agent tool. Use the `tasks` subcommands:
+
+  | Operation                        | Use                                          |
+  |----------------------------------|----------------------------------------------|
+  | Capture a new action             | `tasks add <thread> "<text>"` (writes buffer) |
+  | Mark complete                    | `tasks done <uuid>`                          |
+  | Edit description                 | `tasks set-description <uuid> "<text>"`      |
+  | Reassign person                  | `tasks set-assignee <uuid> <person>`         |
+  | Set due / scheduled              | `tasks set-due <uuid> YYYY-MM-DD` etc.       |
+  | Set priority                     | `tasks set-priority <uuid> H\|M\|L`          |
+  | Add / remove dependency          | `tasks add-depends`, `tasks rm-depends`      |
+  | List / next / show               | `tasks list`, `tasks next`, `tasks show`     |
+
+- **No new tasks are created by `tasks add` directly.** It buffers a
+  conformant ACTION line; tasks are created when buffer entries flush
+  to notes and the regular `tasks` ingest pre-pass picks up the ACTION.
+  This keeps a single creation path: ACTION-line-in-a-note → ingest.
+
+- The only programmatic access to taskwarrior state for callers
+  (humans, scripts, agent tools) is via `tasks` and the markdown source
+  notes themselves. Read access via `task list` is fine if you want to
+  query interactively; for automation, use `tasks list` so you get
+  UUID prefixes in the output.
+
+### Why this matters
+
+`tasks` enforces format and validation at write time:
+- Threads must resolve to a real `threads/<Kind>/<Name>.md` file.
+- Assignees must resolve to a real `people/<Name>.md` file.
+- Dates must be `YYYY-MM-DD`. Relative terms like "tomorrow" / "friday"
+  are rejected so the agent can't fudge time arithmetic.
+- Priority must be `H`, `M`, or `L`.
+
+Bypassing `tasks` to call `task` directly skips these gates and creates
+the source-vs-tw drift this whole architecture is designed to prevent.
+The `cmd_sync` source-wins policy specifically assumes nobody else is
+mutating task descriptions.
+
+### Required UDA
+
+The bridge needs one taskwarrior UDA configured:
 
 ```
 uda.source.type=string
 uda.source.label=Source note
 ```
 
-Every task created by the `tasks` bridge gets `source:<note_stem>`
-populated, anchoring it to the markdown note that produced it. The
-bridge calls `ensure_uda()` on every invocation; if the UDA is missing
-it sets both keys via `task rc.confirmation:no config ...`. **No manual
-setup is required for a fresh install** — running `tasks` once is
-enough.
+Every task created by ingest gets `source:<note_stem>` populated. The
+bridge calls `ensure_uda()` on every invocation, so **no manual setup
+is required** — running `tasks` once configures it.
 
 ### Default locations
 
 - Data: `~/.task/`
 - Config: `~/.taskrc`
 
-Both can be relocated via `TASKDATA` / `TASKRC` env vars. This codebase
-does **not** relocate them — taskwarrior state lives outside the vault
-on purpose, so other taskwarrior tooling (mobile sync, `tasksh`, etc.)
-keeps working unchanged.
+Both can be relocated via `TASKDATA` / `TASKRC`. This codebase doesn't
+relocate them today — vendoring the taskwarrior binary inside the vault
+is a future option that would point these at vault-internal paths.
 
 ### User-editable
 
-The user's own `.taskrc` content (themes, aliases, custom reports,
-contexts, hooks, additional UDAs like `reviewed` for `tasksh`) is none
-of this codebase's business. Only the `source` UDA is required.
+The user's own `.taskrc` content (themes, custom reports, contexts,
+hooks, other UDAs) is none of this codebase's business. Only the
+`source` UDA is required.
 
 ---
 

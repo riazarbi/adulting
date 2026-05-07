@@ -2,6 +2,34 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-07 - Topic-searchable notes via `aliases:`
+
+- `notes_new`: emits `aliases: ["<topic>"]` alongside `topic:` for every new note. Quoted to survive special characters in topics (colons, brackets).
+- One-shot backfill: 50 existing notes had `aliases: [<topic>]` inserted after the `topic:` line. No notes had a pre-existing `aliases:` field, so nothing was skipped.
+- Lint untouched (`aliases` is not in any `## Fields` table; lint ignores unknown fields). Still 106 files / 0 violations.
+
+Effect: Obsidian's Quick Switcher (Cmd-O) now matches notes by topic. Typing "sgb" finds `2024-04-29-09-03-15.md` because its alias is "SGB Onboarding". Filenames stay timestamp-only — schemas, parsers, and wikilinks are unchanged.
+
+## 2026-05-07 - Orphan TASK lines anchored, all lint violations cleared
+
+- 2 orphan `TASK:` lines in `2026-04-21-07-32-57.md` (the FAMCO meeting note) anchored to their taskwarrior matches (`d2b9a3fc`, `edf1c1c4`). Source `<!--<uuid8>-->` comments added; `source:2026-04-21-07-32-57` UDA set on both tw tasks. The bidirectional sync in `tasks` then pushed the (post-edit) source descriptions to taskwarrior on the next run, aligning both sides.
+- 7 stale `[[John Lewis Experimentation]]` wikilink references rewrote to `[[Projects/John Lewis Experimentation]]` (Obsidian's rename refactor had produced shortest-path wikilinks, which our schema's path-qualified regex rejects).
+- 8 closed person/thread files had `ended: 2026-05-07` added (the schema requires `ended:` whenever `status: closed`).
+- Lint: 106 files, 0 violations. **Vault is fully clean for the first time since the refactor began.**
+
+New top-level `INTEGRATIONS.md` documents the external applications this codebase works with (taskwarrior, Obsidian, pandoc/xelatex) and the configuration each one needs for the integration to work. Going forward, **CHANGELOG tracks changes to this codebase's source; INTEGRATIONS.md tracks the configuration of external tools we depend on.** Previous CHANGELOG entries that mention external config (Obsidian app.json / types.json edits, taskwarrior UDA setup) won't be retroactively split — the historical record stays as-is, the convention applies forward.
+
+## 2026-05-06 - Agent prompts realigned to current data model
+
+`~/.adulting/.agent/` (operational, outside this repo) updated to match the post-refactor layout. Mechanical find-and-replace plus one schema adjustment:
+
+- `prompt/00-role.md`: people path `~/.adulting/threads/People/` → `~/.adulting/people/`. Threads path expanded to `~/.adulting/threads/{Projects,Processes,Topics}/` with a note that the kind subdirectory is implicit in taskwarrior's `project:` value.
+- `prompt/10-buffer.md`: wikilink format updated. `[[People/<Name>]]` → `[[people/<Name>]]` (lowercase to match the directory). `[[Threads/<filename>]]` → `[[Projects/<name>]]` / `[[Processes/<name>]]` / `[[Topics/<name>]]`.
+- `prompt/20-tasks.md`: same path updates (assignee resolution against `~/.adulting/people/`, project resolution against the kind-subdirectories).
+- `skills/create_person.md`: file path and template updated. Dropped `kind: relationship` from the frontmatter template — the `person.md` schema doesn't include a `kind:` field (kind is reserved for thread files). Added a clarifying note pointing at the schema.
+
+Tools (`tools/*.{json,sh}`) untouched. They wrap taskwarrior CLI directly and were already correct; the path conventions live in the prompts.
+
 ## 2026-05-06 - Source as canonical store: TASK/DONE in notes, bidirectional sync, drop export
 
 - `tasks`:

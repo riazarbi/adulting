@@ -89,12 +89,16 @@ if [[ "$type" = "Meeting" ]]; then
 fi
 
 # --- Write the note ---
+# Escape any " in the topic for safe YAML quoting (rare but handles e.g. "Q3 review")
+alias_escaped=$(echo "$topic" | sed 's/"/\\"/g')
+
 {
     echo "---"
     echo "topic: $topic"
     echo "type: $type"
     echo "thread: \"[[$thread_label]]\""
     echo "timestamp: $dt"
+    echo "aliases: [\"$alias_escaped\"]"
     [ -n "$meeting_extras" ] && printf '%s' "$meeting_extras"
     [ -n "$people_yaml" ] && printf '%s' "$people_yaml"
     echo "---"

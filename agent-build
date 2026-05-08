@@ -1,36 +1,33 @@
 #!/usr/bin/env python3
-"""Generate <target>/.agent/tools/<binary>.json for the six adulting CLI tools.
+"""Build the agent surface for an adulting vault.
 
-Each generated JSON has:
-    {
-      "command": "<absolute path to binary>",
-      "description": "<terse: one-line per subcommand + pointer to --help and skill>",
-      "args_schema": {"type": "array", "items": {"type": "string"}}
-    }
+Three things deploy to <target>:
+  - tools/<binary>.json — generated from each tool's --help-json
+  - prompt/*.md         — copied from <repo>/agent/prompt/
+  - skills/*.md         — copied from <repo>/agent/skills/
 
-The agent invokes each tool via the registered command + a list of argv
-strings; the binary itself validates everything past argv[0]. For full
-flag/arg detail on a subcommand, the agent calls e.g.
-    tasks ["add", "--help"]
-
-Workflow guidance lives in <target>/.agent/skills/. This script does NOT
-touch skill files.
+Tools are introspected from the binaries on PATH. Prompts and skills are
+hand-authored markdown sources living next to this script under agent/;
+they're synced verbatim. Files in the target that don't have a source
+(e.g. preexisting third-party skills) are left alone.
 
 Usage:
     agent-build [--target <dir>] [--check] [--quiet]
 
 Default target: $HOME/.adulting/.agent
-With --check: print a diff and exit 1 if generated content differs from
-              what's currently on disk. No writes. Useful in CI.
+With --check: diff the would-be-generated content against what's on
+              disk; non-zero exit if any drift. No writes. Useful in CI.
 """
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+AGENT_SOURCE = SCRIPT_DIR / 'agent'
 
 # Per-tool overrides applied on top of the auto-generated description.
 # read_only is the only field we currently set; lint is the only purely
@@ -111,7 +108,7 @@ def generate_tool_json(binary_name):
 
 
 def write_or_check(target_dir, generated, check_only, quiet):
-    """Write to target_dir/.agent/tools/, or diff if check_only."""
+    """Write tools/<binary>.json to target_dir, or diff if check_only."""
     tools_dir = Path(target_dir) / 'tools'
     if not check_only:
         tools_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +131,33 @@ def write_or_check(target_dir, generated, check_only, quiet):
     return drift
 
 
+def sync_authored(source_dir, target_dir, check_only, quiet):
+    """Copy each *.md file from source_dir to target_dir verbatim.
+    Files in target_dir without a source counterpart are left alone
+    (so a preexisting third-party skill like evaluate-tools/ is not
+    deleted). Returns drift entries for --check."""
+    drift = []
+    if not source_dir.is_dir():
+        return drift
+    if not check_only:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    for src in sorted(source_dir.glob('*.md')):
+        dst = target_dir / src.name
+        new_text = src.read_text(encoding='utf-8')
+        existing_text = dst.read_text(encoding='utf-8') if dst.exists() else ''
+        if existing_text == new_text:
+            if not quiet:
+                print(f"  unchanged: {dst}")
+            continue
+        if check_only:
+            drift.append((dst, existing_text, new_text))
+            print(f"  DRIFT: {dst}", file=sys.stderr)
+            continue
+        dst.write_text(new_text, encoding='utf-8')
+        print(f"  wrote:    {dst}")
+    return drift
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate agent tool JSON from each binary's --help-json.")
@@ -152,18 +176,25 @@ def main():
     for binary in TOOLS:
         generated[binary] = generate_tool_json(binary)
 
-    drift = write_or_check(target, generated, args.check, args.quiet)
+    tool_drift = write_or_check(target, generated, args.check, args.quiet)
+    prompt_drift = sync_authored(AGENT_SOURCE / 'prompt', target / 'prompt', args.check, args.quiet)
+    skills_drift = sync_authored(AGENT_SOURCE / 'skills', target / 'skills', args.check, args.quiet)
+    drift = tool_drift + prompt_drift + skills_drift
 
     if args.check:
         if drift:
             print(f"\n{len(drift)} file(s) drifted. Run agent-build to regenerate.", file=sys.stderr)
             sys.exit(1)
         if not args.quiet:
-            print(f"\nclean: tools/*.json match generated content for {len(generated)} tools.")
+            print(f"\nclean: target matches sources ({len(generated)} tool(s), "
+                  f"{sum(1 for _ in (AGENT_SOURCE / 'prompt').glob('*.md'))} prompt(s), "
+                  f"{sum(1 for _ in (AGENT_SOURCE / 'skills').glob('*.md'))} skill(s)).")
         sys.exit(0)
 
     if not args.quiet:
-        print(f"\ngenerated {len(generated)} tool definitions in {target}/tools/")
+        print(f"\nbuilt agent surface in {target}: {len(generated)} tools, "
+              f"{sum(1 for _ in (AGENT_SOURCE / 'prompt').glob('*.md'))} prompt(s), "
+              f"{sum(1 for _ in (AGENT_SOURCE / 'skills').glob('*.md'))} skill(s).")
 
 
 if __name__ == '__main__':

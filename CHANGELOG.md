@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-08 - Skills and prompt move into the repo; `agent-build` deploys all three
+
+The hand-authored agent content (one prompt file, four skill files) was previously developed in a sandbox `.adulting/` copy inside the repo, then manually copied to live. Now those sources live alongside the project as `agent/prompt/*.md` and `agent/skills/*.md` (version-controlled), and `agent-build` deploys them to the target alongside the generated `tools/*.json`.
+
+- **`agent/prompt/00-role.md`** + **`agent/skills/{buffer-workflow,task-workflow,create-person,footguns}.md`** moved into the repo proper.
+- **`agent-build`** extended with `sync_authored()` — for each `*.md` in `agent/prompt/` and `agent/skills/`, write to `<target>/prompt/` and `<target>/skills/`. Files in the target without a corresponding source (e.g. preexisting third-party skills like `evaluate-tools/`) are left alone — no `--delete` semantics.
+- **`--check` mode** now covers tools, prompts, and skills; non-zero exit on any drift.
+- **Sandbox `.adulting/` removed** from the repo. Was always untracked; the canonical sources now live in `agent/`.
+- **`.gitignore` added** for `__pycache__/`, `*.pyc`, `.DS_Store`.
+
+`agent-build --target ~/.adulting/.agent` is now a one-shot deploy: regenerates tool defs from the binaries' `--help-json`, copies prompt + skills verbatim, leaves runtime state (context/cache/livecontext/mailbox) untouched.
+
 ## 2026-05-08 - List outputs surface the resolvable name
 
 `threads list` and `people list` previously split the resolvable identifier across two columns (kind + name for threads, just bare name for people), forcing the caller to reconstruct `Kind/Name` or `people/Name` mentally before passing to other commands. Now the list outputs show the resolvable form directly.

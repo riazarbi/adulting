@@ -40,6 +40,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+
 HOME = Path(os.path.expanduser('~/.adulting'))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
@@ -494,6 +497,20 @@ def cmd_flush(args):
             rel = path.relative_to(HOME)
             print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
+        # Flush before invoking the subprocess so our prints appear ahead
+        # of its output rather than after (parent stdout is block-buffered
+        # when not attached to a TTY in some cases).
+        sys.stdout.flush()
+
+    # Trigger ingest + sync so any ACTION lines just written to logs/ become
+    # real taskwarrior tasks immediately. Output is passed through (not
+    # silenced) so the operator/agent can read the new uuid prefixes off
+    # the ingest summary lines.
+    try:
+        import subprocess as _subprocess
+        _subprocess.run(['tasks'], check=False)
+    except FileNotFoundError:
+        pass
     return 0
 
 
@@ -540,6 +557,7 @@ def main():
     p_flush = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
     p_flush.set_defaults(func=cmd_flush)
 
+    emit_helpjson_if_requested(parser)
     args = parser.parse_args()
     return args.func(args)
 

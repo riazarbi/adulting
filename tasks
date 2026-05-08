@@ -38,6 +38,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+
 HOME = Path(os.path.expanduser('~/.adulting'))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
@@ -352,7 +355,7 @@ def cmd_ingest(args):
         succeeded += 1
         if not args.quiet:
             short = description[:60] + ('...' if len(description) > 60 else '')
-            print(f"ingested: {prefix}  {short}")
+            print(f"ingested: {uuid_prefix}  {prefix}  {short}")
     return succeeded, failed
 
 
@@ -864,6 +867,7 @@ def main():
     p_show.add_argument('uuid')
     p_show.set_defaults(func=cmd_show)
 
+    emit_helpjson_if_requested(parser)
     args = parser.parse_args()
 
     ensure_uda()

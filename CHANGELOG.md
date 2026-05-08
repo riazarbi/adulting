@@ -2,6 +2,21 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-08 - Agent surface: `agent-build`, `--help-json`, auto-ingest on flush
+
+The agent's tool surface is now generated from the binaries themselves, not hand-maintained. Each binary self-describes via `--help-json`; a build script reads those manifests and writes terse tool definitions into `<adulting-home>/.agent/tools/`. Workflow guidance, footguns, and worked examples live in skills (hand-authored markdown). Three layers, each with a clear role: tool descriptions for discovery, skills for judgment, `<tool> --help` for syntax.
+
+- **`_argparse_helpjson.py`**: ~60-line shared module. Walks an argparse parser tree (including subparsers, args, flags, choices) and emits a structured JSON manifest. Each Python tool calls `emit_helpjson_if_requested(parser)` ahead of `parse_args`. `notes` (bash dispatcher) hand-rolls a `--help-json` case branch — small one-time cost.
+- **`agent-build`**: introspects the six binaries (`tasks`, `buffer`, `notes`, `threads`, `people`, `lint`), generates `<target>/.agent/tools/<binary>.json` with `command` (absolute path resolved via `which`), terse `description` (subcommand list with one-liners + pointer to `<tool> --help`), and per-tool overrides (`lint` is `read_only: true`). `--target <dir>` sets the output location (default `~/.adulting/.agent`); `--check` mode for CI exits non-zero on drift.
+- **Tool argv contract**: `args` is a JSON array of strings — one element per argv entry. Spaces, quotes, apostrophes pass through verbatim with no shell quoting. The runtime change to support this lives in [`riazarbi/agent`](https://github.com/riazarbi/agent); our codebase aligned alongside.
+
+- **`tasks` ingest output now includes the new uuid prefix**: `ingested: <uuid8>  <path>:<line>  <description>`. Lets callers (esp. the agent) parse the new uuid off the flush summary without a follow-up `tasks list`.
+- **`buffer flush` now auto-ingests** after writing logs. Action items go from buffered → tw task in one step instead of three. The buffer-as-staging-area semantics still apply for TEXT/REF entries (they don't ingest; they just become log lines). Output is passed through (not silenced) so uuid prefixes appear inline. `notes <subcommand>` continues to invoke `tasks --quiet` as a pre-pass.
+
+- **`threads list` / `people list` filters**: positional `<query>` arg ranks results by similarity to filename (heuristic ladder: exact > startswith > initials-equal > substring > initials-startswith > difflib ratio, threshold 0.3). `--all` flag includes paused/closed entries; default lists only `status: open`. `AFT` resolves to `Arbi Family Trust`, `BS` to `Bern Sellmeyer`, `fam` to FAMCO and Arbi Family Trust, etc.
+
+Agent migration completes the loop: old `task_*.{sh,json}` and `buffer_append.{sh,json}` retired in favour of the six generated tool defs. Workflow knowledge moved out of the always-loaded prompt and into on-demand skills (`task-workflow.md`, `buffer-workflow.md`, `create-person.md`, `footguns.md`); `00-role.md` slimmed down to classification + confirm flow + name/thread resolution + the canonical six-tool list.
+
 ## 2026-05-08 - CLI consistency: subcommand style across all top-level tools
 
 Hard-cut rename. Convention now:

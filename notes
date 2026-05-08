@@ -1,5 +1,35 @@
 #!/bin/bash
 
+# --help-json: emit a structured manifest for agent-build. Hand-maintained
+# (this is a bash dispatcher; no argparse to introspect). Keep in sync
+# with the case statement at the bottom of the file.
+if [ "$1" = "--help-json" ]; then
+cat <<'EOF'
+{
+  "name": "notes",
+  "description": "Dispatcher for note operations: create, render, edit, query.",
+  "args": [
+    {"name": "subcommand", "description": "One of the named operations below.", "required": false, "nargs": null},
+    {"name": "filter", "description": "Optional substring filter for the picker (case-insensitive).", "required": false, "nargs": null}
+  ],
+  "subcommands": [
+    {"name": "new", "description": "Create a new note (interactive — TTY only)."},
+    {"name": "copy", "description": "Pick a note, copy contents to a new timestamp (interactive)."},
+    {"name": "strip", "description": "Pick a note, copy and remove body — for templating (interactive)."},
+    {"name": "edit", "description": "Pick a note, open in the default editor (interactive)."},
+    {"name": "nano", "description": "Pick a note, open in nano (interactive)."},
+    {"name": "last", "description": "Open the most recently-created note."},
+    {"name": "delete", "description": "Pick a note and permanently delete (interactive)."},
+    {"name": "cat", "description": "Pick a note and print to stdout."},
+    {"name": "pdf", "description": "Pick a note and render to PDF + markdown."},
+    {"name": "minutes", "description": "Render meeting minutes (TOC + AGREED/RESOLVED/ACTION summary)."},
+    {"name": "agenda", "description": "Render meeting agenda."}
+  ]
+}
+EOF
+exit 0
+fi
+
 NOTES_DIR="$HOME/.adulting/notes"
 THREAD_DIR="$HOME/.adulting/threads"
 PEOPLE_DIR="$HOME/.adulting/people"

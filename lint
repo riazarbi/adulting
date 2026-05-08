@@ -19,6 +19,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
 HOME = Path(os.path.expanduser('~/.adulting'))
 
+sys.path.insert(0, str(SCRIPT_DIR))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
 ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')
 TASK_RE = re.compile(r'^TASK:\s*(\([^)]+\)\s*)?(.*?)\s*$')
@@ -475,6 +478,7 @@ def main():
                         help=f'Schemas directory (default: {SCHEMAS_DIR}).')
     parser.add_argument('--quiet', action='store_true',
                         help='Suppress per-violation output.')
+    emit_helpjson_if_requested(parser)
     args = parser.parse_args()
 
     schemas = load_schemas(Path(args.schemas))

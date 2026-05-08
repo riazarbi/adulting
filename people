@@ -7,12 +7,16 @@ action `assignee:`. They are not threads — they cannot be the value of
 """
 
 import argparse
+import difflib
 import json
 import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
 HOME = Path(os.path.expanduser('~/.adulting'))
 PEOPLE_DIR = HOME / 'people'
@@ -91,6 +95,26 @@ def cmd_delete(args):
     print(f"deleted: {path}")
 
 
+def fuzzy_score(query, name):
+    """Score a name against a query (lowercase compare). Higher = better.
+    Heuristic ladder: exact > startswith > initials-equal > substring >
+    initials-startswith > difflib ratio (capped below the heuristic floor)."""
+    q = query.lower()
+    n = name.lower()
+    if q == n:
+        return 1.0
+    if n.startswith(q):
+        return 0.9
+    initials = ''.join(w[0] for w in re.findall(r'\w+', name)).lower()
+    if initials == q:
+        return 0.85
+    if q in n:
+        return 0.7
+    if initials.startswith(q):
+        return 0.6
+    return difflib.SequenceMatcher(None, q, n).ratio() * 0.5
+
+
 def cmd_list(args):
     rows = []
     for name, path in discover_people():
@@ -103,11 +127,21 @@ def cmd_list(args):
             'started': fm.get('started', ''),
             'ended': fm.get('ended', ''),
         })
+
+    if not args.all:
+        rows = [r for r in rows if r['status'] == 'open']
+
+    if args.query:
+        scored = [(fuzzy_score(args.query, r['name']), r) for r in rows]
+        scored = [(s, r) for s, r in scored if s > 0.3]
+        scored.sort(key=lambda x: -x[0])
+        rows = [r for _, r in scored]
+
     if args.json:
         print(json.dumps(rows, indent=2))
         return
     if not rows:
-        print("(no people)")
+        print("(no matches)" if args.query else "(no people)")
         return
     cat_w = max(len(r['category']) for r in rows)
     print(f"{'STATUS':<8}  {'CATEGORY':<{cat_w}}  NAME")
@@ -134,7 +168,11 @@ def main():
     parser = argparse.ArgumentParser(description="Manage people files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_list = sub.add_parser('list', help="List all person files.")
+    p_list = sub.add_parser('list', help="List person files (open by default).")
+    p_list.add_argument('query', nargs='?', default=None,
+                        help="Optional fuzzy search; ranks results by similarity.")
+    p_list.add_argument('--all', action='store_true',
+                        help="Include closed people (default: open only).")
     p_list.add_argument('--json', action='store_true', help="JSON output.")
     p_list.set_defaults(func=cmd_list)
 
@@ -153,6 +191,7 @@ def main():
     p_delete.add_argument('-y', '--yes', action='store_true', help="Skip confirmation.")
     p_delete.set_defaults(func=cmd_delete)
 
+    emit_helpjson_if_requested(parser)
     args = parser.parse_args()
     args.func(args)
 

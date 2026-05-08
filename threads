@@ -179,6 +179,7 @@ def cmd_list(args):
         rows.append({
             'kind': kind,
             'name': name,
+            'thread': f"{KIND_DIRS[kind]}/{name}",  # resolvable Kind/Name form
             'path': str(path.relative_to(HOME)),
             'status': fm.get('status', ''),
             'category': fm.get('category', ''),
@@ -190,7 +191,12 @@ def cmd_list(args):
         rows = [r for r in rows if r['status'] == 'open']
 
     if args.query:
-        scored = [(fuzzy_score(args.query, r['name']), r) for r in rows]
+        # Match against both bare name and Kind/Name; take the better score.
+        scored = [
+            (max(fuzzy_score(args.query, r['name']),
+                 fuzzy_score(args.query, r['thread'])), r)
+            for r in rows
+        ]
         scored = [(s, r) for s, r in scored if s > 0.3]
         scored.sort(key=lambda x: -x[0])
         rows = [r for _, r in scored]
@@ -201,12 +207,10 @@ def cmd_list(args):
     if not rows:
         print("(no matches)" if args.query else "(no threads)")
         return
-    name_w = max(len(r['name']) for r in rows)
-    kind_w = max(len(r['kind']) for r in rows)
-    cat_w = max(len(r['category']) for r in rows)
-    print(f"{'KIND':<{kind_w}}  {'STATUS':<8}  {'CATEGORY':<{cat_w}}  NAME")
+    thread_w = max(len(r['thread']) for r in rows)
+    print(f"{'THREAD':<{thread_w}}  {'STATUS':<8}  CATEGORY")
     for r in rows:
-        print(f"{r['kind']:<{kind_w}}  {r['status']:<8}  {r['category']:<{cat_w}}  {r['name']}")
+        print(f"{r['thread']:<{thread_w}}  {r['status']:<8}  {r['category']}")
 
 
 def cmd_show(args):

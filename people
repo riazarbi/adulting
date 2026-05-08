@@ -83,8 +83,18 @@ def cmd_new(args):
     print(f"created: {path}")
 
 
+def _resolve_person(arg):
+    """Accept either bare name ('Bern Sellmeyer') or wikilink-style
+    ('people/Bern Sellmeyer'). Strips the prefix if present."""
+    arg = arg.strip()
+    if arg.startswith('people/'):
+        arg = arg[len('people/'):]
+    return arg
+
+
 def cmd_delete(args):
-    path = PEOPLE_DIR / f"{args.person}.md"
+    name = _resolve_person(args.person)
+    path = PEOPLE_DIR / f"{name}.md"
     if not path.exists():
         sys.exit(f"not found: {path}")
     if not args.yes:
@@ -121,6 +131,7 @@ def cmd_list(args):
         fm = read_frontmatter(path)
         rows.append({
             'name': name,
+            'person': f"people/{name}",  # resolvable wikilink-form
             'path': str(path.relative_to(HOME)),
             'status': fm.get('status', ''),
             'category': fm.get('category', ''),
@@ -132,7 +143,12 @@ def cmd_list(args):
         rows = [r for r in rows if r['status'] == 'open']
 
     if args.query:
-        scored = [(fuzzy_score(args.query, r['name']), r) for r in rows]
+        # Match against both bare name and people/Name; take the better score.
+        scored = [
+            (max(fuzzy_score(args.query, r['name']),
+                 fuzzy_score(args.query, r['person'])), r)
+            for r in rows
+        ]
         scored = [(s, r) for s, r in scored if s > 0.3]
         scored.sort(key=lambda x: -x[0])
         rows = [r for _, r in scored]
@@ -143,14 +159,15 @@ def cmd_list(args):
     if not rows:
         print("(no matches)" if args.query else "(no people)")
         return
-    cat_w = max(len(r['category']) for r in rows)
-    print(f"{'STATUS':<8}  {'CATEGORY':<{cat_w}}  NAME")
+    person_w = max(len(r['person']) for r in rows)
+    print(f"{'PERSON':<{person_w}}  {'STATUS':<8}  CATEGORY")
     for r in rows:
-        print(f"{r['status']:<8}  {r['category']:<{cat_w}}  {r['name']}")
+        print(f"{r['person']:<{person_w}}  {r['status']:<8}  {r['category']}")
 
 
 def cmd_show(args):
-    path = PEOPLE_DIR / f"{args.person}.md"
+    name = _resolve_person(args.person)
+    path = PEOPLE_DIR / f"{name}.md"
     if not path.exists():
         sys.exit(f"not found: {path}")
     if args.json:

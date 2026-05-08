@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-08 - List outputs surface the resolvable name
+
+`threads list` and `people list` previously split the resolvable identifier across two columns (kind + name for threads, just bare name for people), forcing the caller to reconstruct `Kind/Name` or `people/Name` mentally before passing to other commands. Now the list outputs show the resolvable form directly.
+
+- **`threads list`**: `KIND` and `NAME` columns replaced by a single `THREAD` column showing `Kind/Name` (e.g. `Projects/AXA DORA`, `Processes/SGB`, `Topics/Relationships`). Same width budget; less visual clutter.
+- **`people list`**: `NAME` column replaced by `PERSON` showing `people/<Full Name>` (the wikilink-resolvable form used in note frontmatter and buffer body references).
+- **Fuzzy match** (positional `<query>` arg) now scores against both the bare name and the resolvable form, taking the better of the two. So `AFT` and `Processes/Arbi Family Trust` both resolve; `bern` and `people/Bern Sellmeyer` both resolve.
+- **Input flexibility on the receiving side**: `people show / delete` and `tasks set-assignee` strip a leading `people/` prefix from their arg, so callers can copy values directly from `people list` output without having to translate.
+- **JSON output** (`--json`) retains the original `kind`, `name` fields for backward compat and adds the new `thread` (or `person`) field with the resolvable form.
+
 ## 2026-05-08 - Agent surface: `agent-build`, `--help-json`, auto-ingest on flush
 
 The agent's tool surface is now generated from the binaries themselves, not hand-maintained. Each binary self-describes via `--help-json`; a build script reads those manifests and writes terse tool definitions into `<adulting-home>/.agent/tools/`. Workflow guidance, footguns, and worked examples live in skills (hand-authored markdown). Three layers, each with a clear role: tool descriptions for discovery, skills for judgment, `<tool> --help` for syntax.

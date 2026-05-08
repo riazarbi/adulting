@@ -115,6 +115,53 @@ nano_note() {
     fi
 }
 
+# Read the YAML `threads:` list out of a note's frontmatter, one entry
+# per stdout line. Wikilinks `[[Kind/Name]]` are unwrapped to `Kind/Name`.
+# Falls back to a singular `thread:` field (used by log files) if
+# `threads:` is absent.
+extract_threads_list() {
+    local file="$1"
+    awk '
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    function strip_quotes(s,    n, c) {
+        n = length(s)
+        if (n < 2) return s
+        c = substr(s, 1, 1)
+        if ((c == "\"" && substr(s, n, 1) == "\"") || (c == "'\''" && substr(s, n, 1) == "'\''")) {
+            return substr(s, 2, n - 2)
+        }
+        return s
+    }
+    function unwiki_thread(s,   tmp) {
+        tmp = s
+        if (sub(/^\[\[/, "", tmp) > 0 && sub(/\]\]$/, "", tmp) > 0) return tmp
+        return s
+    }
+    NR == 1 && $0 == "---" { in_fm = 1; next }
+    in_fm && $0 == "---" { exit }
+    !in_fm { next }
+    in_list && /^[^[:space:]]/ { in_list = 0 }
+    in_list && /^[[:space:]]+- / {
+        v = $0
+        sub(/^[[:space:]]+-[[:space:]]+/, "", v)
+        v = trim(v)
+        v = strip_quotes(v)
+        v = unwiki_thread(v)
+        print v
+        next
+    }
+    /^threads:[[:space:]]*$/ { in_list = 1; next }
+    /^thread:[[:space:]]+/ {
+        v = $0
+        sub(/^thread:[[:space:]]+/, "", v)
+        v = trim(v)
+        v = strip_quotes(v)
+        v = unwiki_thread(v)
+        print v
+    }
+    ' "$file"
+}
+
 # Read the YAML `people:` list out of a note's frontmatter, one entry per
 # stdout line. Wikilinks `[[people/Name]]` are unwrapped to bare names;
 # plain string entries are returned as-is.
@@ -196,6 +243,7 @@ export EXPORT_DIR
 export -f open_note
 export -f extract_meta
 export -f extract_people_list
+export -f extract_threads_list
 
 
 # NEW NOTE
@@ -217,7 +265,7 @@ for f in $NOTES_DIR/*.md
         note_info+="|"
         note_info+=$(extract_meta timestamp "$f" | cut -c 1-10)
         note_info+="|"
-        note_info+=$(extract_meta thread "$f")
+        note_info+=$(extract_threads_list "$f" | paste -sd ',' -)
         note_info+="|"
         note_info+=$(extract_meta type "$f")
         note_info+="|"

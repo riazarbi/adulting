@@ -61,9 +61,24 @@ uda.source.type=string
 uda.source.label=Source note
 ```
 
-Every task created by ingest gets `source:<note_stem>` populated. The
+Every task created by ingest gets `source:<relative-path>` populated
+(e.g. `notes/2026-05-07-09-15-22` or `logs/Processes/SGB/2026-05-07`).
+This is the 1:1 link between a task and the file that produced it. The
 bridge calls `ensure_uda()` on every invocation, so **no manual setup
 is required** — running `tasks` once configures it.
+
+### `project:` is not used
+
+`project:` is **not** set by ingest. Thread membership is many-to-many
+on notes (a note can belong to multiple threads via its `threads:`
+frontmatter list), so a single tw `project` would lose information.
+Instead, `tasks list` / `next` / `show` derive thread(s) at query time
+by reading the source note's `threads:` field.
+
+This means **third-party taskwarrior filters like `task project:SGB
+list` won't work** — you have to query via `tasks list --thread
+Processes/SGB`. By design: it nudges all task interaction through the
+opinionated wrapper rather than direct `task` CLI use.
 
 ### Default locations
 

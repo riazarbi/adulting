@@ -2,6 +2,40 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-08 - Multi-threaded notes; capture-time attrs on ACTION
+
+Notes now belong to many threads instead of one. Threads behave like tags: a list of wikilinks in the note's `threads:` frontmatter, each entry resolved against `threads/<Kind>/<Name>.md`. The 1:1 link between a task and its origin is the `source:` UDA (relative path of the note); thread membership is **derived at query time** by reading the source note's `threads:` list. taskwarrior's `project:` is no longer set by ingest.
+
+- **Schemas**: `note_meeting`, `note_correspondence`, `note_simple` swap singular `thread:` (string + regex) → `threads:` (list with per-element regex). `note_simple` also gains `Recipe` as an allowed type.
+- **`lint`**: per-list-element constraint application — scalar constraints in a schema's Fields table are now applied to each list entry when the field type is `list`. Schema-declared regex on `threads:` fires alongside the existing wikilink-resolution check.
+- **Notes backfill**: 50 existing notes converted from `thread: "[[X]]"` (one line) to `threads:\n  - "[[X]]"` (list with one entry).
+- **`tasks` ingest**: stops passing `project:` to `task add`. Validates each entry of the note's `threads:` list. Source UDA carries the relative path (e.g. `notes/2026-05-07-09-15-22` or `logs/Processes/SGB/2026-05-07`), preserving the 1:1 link.
+- **`tasks list` / `next` / `show`**: derive `threads:` from the source note via a per-invocation cache. Multi-thread tasks display as `Thread1 +N`. `tasks list --thread <T>` filters on the derived set.
+- **taskwarrior backfill**: 273 pending tasks had `project:` cleared; 30 legacy bare-stem `source:` values prefixed with `notes/`. Effect: third-party `task project:X` filters no longer work — query via `tasks list --thread X` instead. (Documented in INTEGRATIONS.md.)
+- **Capture-time attrs on ACTION**: `buffer add-action` accepts `--due YYYY-MM-DD`, `--scheduled YYYY-MM-DD`, `--priority H|M|L`, `--depends <uuid8>` (repeatable). Attrs ride along in the buffer line's HTML comment, survive flush into the log line, and are applied to the new tw task at ingest time. Rewrite to `TASK:` strips the attrs comment (engine-plane attrs live in tw from then on). Buffer line shape: `<!--TS [attr:val ...]-->`.
+- **`tasks add` delegates** to `buffer add-action`. One canonical write path. Same flag set.
+- **`notes_new`**: thread picker is now multi-pick (numeric list with `(done)` sentinel). Emits `threads:` as a list. Buffers one REF entry per chosen thread on creation.
+- **`_uuid` bug fix**: ingest's UUID resolution switched from `task <id> _uuid` (a report that filters out `+SCHEDULED` tasks) to `task <id> export` (parses JSON; works regardless of state).
+- **Recipe note type** added for procedural notes (cooking, server provisioning, how-to guides). Same shape as Workshop/Report/Log/Research.
+
+Note: validation has always been running on threads; the regex was just hidden in lint Python code rather than declared in the schema. Both layers are now visible: schema declares per-element regex, lint code declares cross-file resolution.
+
+## 2026-05-07 - Buffer ritual: `buffer tend` / `buffer flush` → `logs/`
+
+The buffer is now a structured queue with three line types (ACTION, TEXT, REF), each anchored to a resolvable thread, all manipulated via API only (`buffer add-text` / `add-ref` / `add-action` / `list` / `rm` / `tend` / `flush`). Direct edits to `buffer.md` discouraged.
+
+- **`buffer` script** added. Subcommands enforce validation at write time: thread must resolve to `threads/<Kind>/<Name>.md`; assignees to `people/<Name>.md`; REF targets to a vault file.
+- **`buffer tend`** regroups by `(thread, date)`, sorts by timestamp, surfaces violations with line numbers + suggested fix commands. Idempotent — run repeatedly until clean.
+- **`buffer flush`** tends, then writes each `(thread, date)` group into `logs/<Kind>/<Name>/<YYYY-MM-DD>.md`. Existing log files are appended to. Buffer is cleared on success. All-or-nothing per flush — violations leave the buffer untouched.
+- **`schemas/log.md`** added; `lint` extended to walk `logs/` recursively. Log files have `thread`/`date`/`type:Log` frontmatter and ACTION/TASK/DONE/TEXT/REF lines. ACTION lines in logs are picked up by `tasks` ingest exactly like ACTION lines in notes.
+- **`tasks ingest` and `tasks sync` now scan both `notes/` and `logs/`.** New convention: `source:` UDA on tw tasks is the relative path from `~/.adulting/` without `.md` (e.g., `notes/2026-05-07-09-15-22` or `logs/Projects/SGB/2026-05-07`). Existing tasks keep their legacy bare-stem form; new ingests use the new format.
+- **`notes_new` hook**: every new note creation now appends a REF entry to the buffer so the note shows up in its thread's daily log.
+- **Agent tool `buffer_append` migrated** to call `buffer add-text <thread> <text>`. Takes thread as first positional arg. Updated `.agent/prompt/10-buffer.md` to match.
+
+Older free-text buffer entries dropped (none had actionable residue). The legacy `## TIMESTAMP` heading format is no longer recognized.
+
+Outstanding: the agent's `task_*` tools (`task_add`, `task_done`, `task_modify`, `task_list`, `task_next`, `task_log`) still call taskwarrior directly. Full migration to the `tasks <subcommand>` surface deferred — needs a design conversation about how to attach `due:` / `priority:` at capture time when the task's UUID doesn't exist yet (the action item lives as a buffer line; the tw task only exists post-flush).
+
 ## 2026-05-07 - Topic-searchable notes via `aliases:`
 
 - `notes_new`: emits `aliases: ["<topic>"]` alongside `topic:` for every new note. Quoted to survive special characters in topics (colons, brackets).

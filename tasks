@@ -42,11 +42,16 @@ HOME = Path(os.path.expanduser('~/.adulting'))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
+LOGS_DIR = HOME / 'logs'
 BUFFER_FILE = HOME / 'buffer.md'
 CONFIG_FILE = HOME / 'config.yaml'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
-ACTION_RE = re.compile(r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+# ACTION line shape (in notes/ or logs/): optional (Person), description,
+# and optional trailing HTML comment carrying ingest-time attrs.
+ACTION_RE = re.compile(
+    r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)(?:\s*<!--(.*?)-->)?\s*$'
+)
 DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 
@@ -101,10 +106,25 @@ def thread_resolves(target):
     return (THREADS_DIR / kind_dir / f"{name}.md").exists()
 
 
-def thread_to_project(target):
-    if '/' in target:
-        return target.split('/', 1)[1]
-    return target
+def discover_source_files():
+    """Yield .md files from both notes/ (flat) and logs/ (recursive). These
+    are the input domains for ACTION lines / TASK anchors. Skips dotfiles."""
+    if NOTES_DIR.is_dir():
+        for f in sorted(NOTES_DIR.iterdir()):
+            if f.suffix == '.md' and not f.name.startswith('.'):
+                yield f
+    if LOGS_DIR.is_dir():
+        for root, dirs, files in os.walk(LOGS_DIR):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for fname in sorted(files):
+                if fname.endswith('.md') and not fname.startswith('.'):
+                    yield Path(root) / fname
+
+
+def source_for(path):
+    """Compute the `source:` UDA value: relative path from HOME, no .md.
+    e.g. 'notes/2026-05-07-09-15-22' or 'logs/Projects/SGB/2026-05-07'."""
+    return str(path.relative_to(HOME).with_suffix(''))
 
 
 # ---------- UDA bootstrap ----------
@@ -129,22 +149,64 @@ def ensure_uda():
 
 # ---------- frontmatter parsing ----------
 
-def parse_frontmatter_thread(text):
-    """Pull the bare wikilink target out of a note's `thread:` field."""
+def parse_frontmatter_threads(text):
+    """Return the list of thread targets from a file's frontmatter.
+
+    Notes use `threads:` (list of wikilinks); log files use `thread:`
+    (singular wikilink). Returns a list of bare targets like
+    ['Processes/SGB', 'Projects/AXA DORA']. Empty list if neither
+    field is present."""
     lines = text.split('\n')
     if not lines or lines[0].strip() != '---':
-        return None
+        return []
+    targets = []
+    in_threads_list = False
     for line in lines[1:]:
         if line.strip() == '---':
             break
+        if in_threads_list:
+            if line.startswith(' ') or line.startswith('\t'):
+                stripped = line.lstrip()
+                if stripped.startswith('- '):
+                    val = stripped[2:].strip().strip('"').strip("'")
+                    wm = WIKILINK_RE.match(val)
+                    targets.append(wm.group(1).strip() if wm else val)
+                continue
+            else:
+                in_threads_list = False
+        if re.match(r'^threads:\s*$', line):
+            in_threads_list = True
+            continue
         m = re.match(r'^thread:\s*(.+?)\s*$', line)
         if m:
             val = m.group(1).strip().strip('"').strip("'")
             wm = WIKILINK_RE.match(val)
-            if wm:
-                return wm.group(1).strip()
-            return val
-    return None
+            targets.append(wm.group(1).strip() if wm else val)
+    return targets
+
+
+# Cache built per-invocation by callers that need many lookups.
+_threads_cache = None
+
+
+def build_threads_cache():
+    """Walk all source files once, return {source_relpath: [threads]}."""
+    cache = {}
+    for f in discover_source_files():
+        text = f.read_text(encoding='utf-8')
+        threads = parse_frontmatter_threads(text)
+        rel = str(f.relative_to(HOME).with_suffix(''))
+        cache[rel] = threads
+    return cache
+
+
+def threads_for_task(task, cache):
+    """Look up thread list for a task via its source UDA. Returns
+    a list of bare targets, possibly empty."""
+    src = task.get('source', '')
+    if not src:
+        return []
+    return cache.get(src, [])
 
 
 def find_action_lines(note_path):
@@ -152,18 +214,27 @@ def find_action_lines(note_path):
     for idx, line in enumerate(text.split('\n'), start=1):
         m = ACTION_RE.match(line)
         if m:
-            yield idx, line, (m.group(1) or '').strip(), m.group(2).strip()
+            assignee = (m.group(1) or '').strip()
+            description = m.group(2).strip()
+            attr_block = (m.group(3) or '').strip()
+            yield idx, line, assignee, description, attr_block
 
 
 # ---------- ingest ----------
 
 def rewrite_action_to_task(note_path, line_no, uuid_prefix=''):
-    """Rewrite source line `ACTION: <body>` to `TASK: <body> <!--<uuid8>-->`."""
+    """Rewrite source line `ACTION: <body> [<!--attrs-->]` to
+    `TASK: <body> <!--<uuid8>-->`. The attrs comment (if any) is dropped
+    — those attributes were already applied to the tw task at create
+    time and engine-plane state lives in tw from here on."""
     lines = note_path.read_text(encoding='utf-8').split('\n')
     idx = line_no - 1
     if idx < 0 or idx >= len(lines) or not lines[idx].startswith('ACTION:'):
         return False
-    body = lines[idx][len('ACTION:'):].strip()
+    line = lines[idx]
+    # Strip trailing HTML comment (the attrs block) so the body is clean.
+    line_no_comment = re.sub(r'\s*<!--.*?-->\s*$', '', line)
+    body = line_no_comment[len('ACTION:'):].strip()
     if uuid_prefix:
         lines[idx] = f'TASK: {body} <!--{uuid_prefix}-->'
     else:
@@ -172,39 +243,82 @@ def rewrite_action_to_task(note_path, line_no, uuid_prefix=''):
     return True
 
 
+def parse_action_attrs_for_ingest(block):
+    """Parse an ACTION line's HTML-comment attr block. Returns
+    (task_args, errors). task_args is a list of `task add`-flavored
+    tokens ready to splat into the command. Dates get T12:00:00
+    appended to avoid local-vs-UTC date slippage."""
+    args = []
+    errors = []
+    for tok in (block or '').split():
+        if not tok:
+            continue
+        if ':' not in tok:
+            errors.append(f"unknown attr token {tok!r}")
+            continue
+        key, _, val = tok.partition(':')
+        if key in ('due', 'scheduled'):
+            if not DATE_RE.match(val):
+                errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
+                continue
+            args.append(f"{key}:{val}T12:00:00")
+        elif key == 'priority':
+            if val not in ('H', 'M', 'L'):
+                errors.append(f"priority must be H, M, or L; got {val!r}")
+                continue
+            args.append(f"priority:{val}")
+        elif key == 'depends':
+            if not re.match(r'^[a-f0-9]{8}$', val):
+                errors.append(f"depends must be 8 hex chars; got {val!r}")
+                continue
+            args.append(f"depends:{val}")
+        else:
+            errors.append(f"unknown attr {key!r}")
+    return args, errors
+
+
 def task_uuid_after_add(stdout):
-    """Parse 'Created task N.' from `task add` stdout, resolve to UUID."""
+    """Parse 'Created task N.' from `task add` stdout, resolve to UUID.
+    Uses `task <id> export` rather than `_uuid` because the latter is a
+    *report*, and reports filter by status — a freshly-created scheduled
+    task is in +SCHEDULED state and excluded from the default report."""
     m = re.search(r'Created task (\d+)\.', stdout or '')
     if not m:
         return ''
-    result = subprocess.run(['task', m.group(1), '_uuid'],
+    result = subprocess.run(['task', m.group(1), 'export'],
                             capture_output=True, text=True)
-    return result.stdout.strip() if result.returncode == 0 else ''
+    if result.returncode != 0 or not result.stdout.strip():
+        return ''
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ''
+    if data and isinstance(data, list):
+        return data[0].get('uuid', '')
+    return ''
 
 
 def cmd_ingest(args):
     """Returns (succeeded, failed_list)."""
-    if not NOTES_DIR.is_dir():
-        return 0, []
-
     plan = []
-    for note in sorted(NOTES_DIR.iterdir()):
-        if note.suffix != '.md' or note.name.startswith('.'):
-            continue
+    for note in discover_source_files():
         text = note.read_text(encoding='utf-8')
-        thread_target = parse_frontmatter_thread(text)
-        for line_no, _line, assignee, description in find_action_lines(note):
+        threads = parse_frontmatter_threads(text)
+        for line_no, _line, assignee, description, attr_block in find_action_lines(note):
             errors = []
             if not description:
                 errors.append("missing description")
-            if not thread_target:
-                errors.append("note has no thread:")
-            elif not thread_resolves(thread_target):
-                errors.append(f"thread {thread_target!r} does not resolve")
+            if not threads:
+                errors.append("note has no threads:")
+            else:
+                for t in threads:
+                    if not thread_resolves(t):
+                        errors.append(f"thread {t!r} does not resolve")
             if assignee and not assignee_resolves(assignee):
                 errors.append(f"assignee {assignee!r} does not resolve to people/{assignee}.md")
-            project = thread_to_project(thread_target) if thread_target else None
-            plan.append((note, line_no, project, assignee, description, errors))
+            attr_args, attr_errs = parse_action_attrs_for_ingest(attr_block)
+            errors.extend(attr_errs)
+            plan.append((note, line_no, assignee, description, attr_args, errors))
 
     if not plan:
         return 0, []
@@ -215,13 +329,15 @@ def cmd_ingest(args):
 
     succeeded = 0
     failed = []
-    for note, line_no, project, assignee, description, errors in plan:
+    for note, line_no, assignee, description, attr_args, errors in plan:
         prefix = f"{note}:{line_no}"
         if errors:
             failed.append((prefix, errors))
             continue
         full_desc = f'({assignee}) {description}' if assignee else description
-        cmd = ['task', 'add', f'project:{project}', f'source:{note.stem}', full_desc]
+        # No project: thread is derived at query time from the source note's
+        # `threads:` frontmatter, which can list multiple threads.
+        cmd = ['task', 'add', f'source:{source_for(note)}', *attr_args, full_desc]
         if args.dry_run:
             if not args.quiet:
                 print(f"would: {' '.join(repr(a) if ' ' in a else a for a in cmd)}")
@@ -236,7 +352,7 @@ def cmd_ingest(args):
         succeeded += 1
         if not args.quiet:
             short = description[:60] + ('...' if len(description) > 60 else '')
-            print(f"ingested: {prefix}  project:{project}  {short}")
+            print(f"ingested: {prefix}  {short}")
     return succeeded, failed
 
 
@@ -270,7 +386,7 @@ def tw_status_to_state(s):
 
 
 def cmd_sync(args):
-    if not task_in_path() or not NOTES_DIR.is_dir():
+    if not task_in_path():
         return 0
     result = subprocess.run(['task', 'export'], capture_output=True, text=True)
     if result.returncode != 0:
@@ -281,9 +397,7 @@ def cmd_sync(args):
     desc_updates = 0
     status_updates_to_tw = 0
     status_updates_to_src = 0
-    for note in sorted(NOTES_DIR.iterdir()):
-        if note.suffix != '.md' or note.name.startswith('.'):
-            continue
+    for note in discover_source_files():
         text = note.read_text(encoding='utf-8')
         lines = text.split('\n')
         file_changed = False
@@ -331,62 +445,31 @@ def cmd_sync(args):
     return desc_updates + status_updates_to_tw + status_updates_to_src
 
 
-# ---------- subcommand: add (buffer append) ----------
+# ---------- subcommand: add (delegates to `buffer add-action`) ----------
 
 def cmd_add(args):
-    """Validate inputs, then append a structured ACTION line to buffer.md.
-    Buffer line format:
-      - [[<Kind>/<Name>]] ACTION: [(<Person>)] <description> <!--YYYY-MM-DD-->
-    """
-    thread = args.thread.strip()
-    text = args.text.strip()
-
-    if not thread_resolves(thread):
-        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md "
-            f"(expected Projects/X, Processes/X, or Topics/X)")
-
-    if not text:
-        die("description is empty")
-
-    am = ASSIGNEE_PREFIX_RE.match(text)
-    if am:
-        assignee = am.group(1).strip()
-        body = am.group(2).strip()
-        if not body:
-            die("description after assignee is empty")
-        if not assignee_resolves(assignee):
-            die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
-                f"(create the person file first)")
-        line_text = f"({assignee}) {body}"
-    else:
-        line_text = text
-
-    today = datetime.now().strftime('%Y-%m-%d')
-    entry = f"- [[{thread}]] ACTION: {line_text} <!--{today}-->\n"
-
-    BUFFER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    existing = BUFFER_FILE.read_text(encoding='utf-8') if BUFFER_FILE.exists() else ''
-    if existing and not existing.endswith('\n'):
-        existing += '\n'
-    BUFFER_FILE.write_text(existing + entry, encoding='utf-8')
-
-    print(f"buffered: {entry.rstrip()}")
-    return 0
+    """Capture an action item to the buffer. This is a convenience for
+    callers thinking in task-flow; it forwards to `buffer add-action`,
+    which is the canonical write path. All validation is done by buffer."""
+    cmd = ['buffer', 'add-action', args.thread, args.text]
+    if args.due:
+        cmd += ['--due', args.due]
+    if args.scheduled:
+        cmd += ['--scheduled', args.scheduled]
+    if args.priority:
+        cmd += ['--priority', args.priority]
+    for d in (args.depends or []):
+        cmd += ['--depends', d]
+    return subprocess.run(cmd).returncode
 
 
 # ---------- subcommand helpers: source-line locator ----------
 
 def find_source_line_by_uuid(uuid_prefix):
-    """Walk notes/, return (note_path, line_index, parsed) for the first
-    TASK/DONE line whose anchor matches uuid_prefix. Returns None if not
-    found. uuid_prefix is matched against the 8-char anchor exactly,
-    OR as a startswith (so a longer caller-supplied UUID also matches)."""
-    if not NOTES_DIR.is_dir():
-        return None
+    """Walk notes/ and logs/, return (path, line_index, parsed) for the
+    first TASK/DONE line whose anchor matches the 8-char uuid prefix."""
     short = uuid_prefix[:8]
-    for note in sorted(NOTES_DIR.iterdir()):
-        if note.suffix != '.md' or note.name.startswith('.'):
-            continue
+    for note in discover_source_files():
         lines = note.read_text(encoding='utf-8').split('\n')
         for i, line in enumerate(lines):
             parsed = parse_task_line(line)
@@ -605,28 +688,35 @@ def _export_filtered(filter_args):
     return tasks
 
 
-def _print_table(tasks, show_scheduled=False):
+def _filter_by_thread(tasks, thread, cache):
+    """Keep tasks whose source note's threads list includes `thread`."""
+    return [t for t in tasks if thread in threads_for_task(t, cache)]
+
+
+def _format_threads(threads):
+    if not threads:
+        return '-'
+    if len(threads) == 1:
+        return threads[0]
+    return f"{threads[0]} +{len(threads) - 1}"
+
+
+def _print_table(tasks, cache):
     if not tasks:
         print("(no tasks)")
         return
-    # Sort by urgency descending
     tasks = sorted(tasks, key=lambda t: t.get('urgency', 0), reverse=True)
     rows = []
     for t in tasks:
         prio = t.get('priority', '')
         prio_cell = f"[{prio}]" if prio else "   "
         uuid8 = (t.get('uuid') or '')[:8]
-        project = t.get('project', '') or '-'
+        thread_cell = _format_threads(threads_for_task(t, cache))
         desc = t.get('description', '')
         if len(desc) > 64:
             desc = desc[:61] + '...'
         due = fmt_tw_date(t.get('due', ''))
-        sched = fmt_tw_date(t.get('scheduled', ''))
-        source = t.get('source', '')
-        cells = [uuid8, prio_cell, project, desc, f"due:{due}" if due else '']
-        if show_scheduled:
-            cells.append(f"sched:{sched}" if sched else '')
-        cells.append(f"src:{source}" if source else '')
+        cells = [uuid8, prio_cell, thread_cell, desc, f"due:{due}" if due else '']
         rows.append(cells)
 
     widths = [max(len(r[c]) for r in rows) for c in range(len(rows[0]))]
@@ -636,14 +726,18 @@ def _print_table(tasks, show_scheduled=False):
 
 def cmd_list(args):
     tasks = _export_filtered(args.filter)
-    _print_table(tasks)
+    cache = build_threads_cache()
+    if args.thread:
+        tasks = _filter_by_thread(tasks, args.thread, cache)
+    _print_table(tasks, cache)
     return 0
 
 
 def cmd_next(args):
     tasks = _export_filtered([])
+    cache = build_threads_cache()
     tasks = sorted(tasks, key=lambda t: t.get('urgency', 0), reverse=True)[:5]
-    _print_table(tasks)
+    _print_table(tasks, cache)
     return 0
 
 
@@ -658,11 +752,13 @@ def cmd_show(args):
     if not data:
         die(f"no task with uuid {full_uuid}")
     t = data[0]
+    cache = build_threads_cache()
+    threads = threads_for_task(t, cache)
     print(f"uuid:        {t['uuid']}  ({t['uuid'][:8]})")
     print(f"id:          {t.get('id', '-')}")
     print(f"status:      {t.get('status', '-')}")
     print(f"priority:    {t.get('priority', '-')}")
-    print(f"project:     {t.get('project', '-')}")
+    print(f"threads:     {', '.join(threads) if threads else '-'}")
     print(f"source:      {t.get('source', '-')}")
     print(f"description: {t.get('description', '')}")
     print(f"due:         {fmt_tw_date(t.get('due', ''))}")
@@ -707,9 +803,14 @@ def main():
                         help="(default invocation only) Suppress per-action output.")
     sub = parser.add_subparsers(dest='subcommand')
 
-    p_add = sub.add_parser('add', help="Buffer-append a structured ACTION.")
+    p_add = sub.add_parser('add', help="Buffer-append a structured ACTION (delegates to `buffer add-action`).")
     p_add.add_argument('thread', help="Thread label like 'Projects/SGB'.")
     p_add.add_argument('text', help="'(Assignee) description' or just 'description'.")
+    p_add.add_argument('--due', help='YYYY-MM-DD due date applied at ingest.')
+    p_add.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
+    p_add.add_argument('--priority', choices=['H', 'M', 'L'])
+    p_add.add_argument('--depends', action='append', default=[],
+                       help='8-char UUID prefix; repeatable for multiple deps.')
     p_add.set_defaults(func=cmd_add)
 
     p_done = sub.add_parser('done', help="Mark a task complete (source + tw).")
@@ -753,6 +854,7 @@ def main():
 
     p_list = sub.add_parser('list', help="List pending tasks (formatted).")
     p_list.add_argument('filter', nargs='*', help="Optional taskwarrior filter args.")
+    p_list.add_argument('--thread', help="Filter to tasks whose source note has this thread (e.g. Processes/SGB).")
     p_list.set_defaults(func=cmd_list)
 
     p_next = sub.add_parser('next', help="Top 5 pending tasks by urgency.")

@@ -113,9 +113,10 @@ Bridge from `ACTION:` lines in notes into taskwarrior.
 | `tasks --quiet`          | Suppress per-action output                                                                  |
 
 Validation rules:
-- The note's `thread:` must resolve to an existing thread file.
+- Each entry in the note's `threads:` list must resolve to an existing thread file.
 - If the action has `(Assignee)`, that name must resolve to `people/<name>.md`.
 - Description must be non-empty.
+- Any inline attrs (in the trailing HTML comment, e.g. `due:2026-05-08 priority:H`) are validated and applied to the new taskwarrior task at create time.
 
 Failures are printed; the source line is left as `ACTION:` so you can fix it and re-run. `task` (taskwarrior) is checked lazily — only errors when there's something to ingest.
 

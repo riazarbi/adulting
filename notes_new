@@ -11,17 +11,15 @@ note="$NOTES_DIR/$dt.md"
 
 # --- Type ---
 PS3="What type of note is this? : "
-select type in Meeting Correspondence Workshop Report Log Research
+select type in Meeting Correspondence Workshop Report Log Research Recipe
 do
     echo ""
     break
 done
 
-# --- Thread (single, from Projects/Processes/Topics) ---
-IFS=$'\n'
-PS3="What thread does this relate to? : "
+# --- Threads (multi-pick, first pick required; Enter on subsequent picks finishes) ---
 # Build labels like 'Projects/SGB' so the kind is visible in the picker.
-thread_labels=$(
+all_thread_labels=$(
     for sub in Projects Processes Topics; do
         d="$THREAD_DIR/$sub"
         [ -d "$d" ] || continue
@@ -32,14 +30,37 @@ thread_labels=$(
         done
     done | sort
 )
-select thread_label in $thread_labels
-do
-    echo ""
-    break
-done
-unset IFS
 
-if [ -z "$thread_label" ]; then
+threads_picked=()
+remaining_labels="$all_thread_labels"
+while [ -n "$remaining_labels" ]; do
+    echo
+    printf '%s\n' "$remaining_labels" | nl -ba -w2 -s') '
+    echo
+    if [ ${#threads_picked[@]} -eq 0 ]; then
+        read -p "What thread does this relate to? : " choice
+    else
+        read -p "Add another thread (Enter to finish): " choice
+    fi
+    if [ -z "$choice" ]; then
+        if [ ${#threads_picked[@]} -eq 0 ]; then
+            echo "must pick at least one thread"
+            continue
+        fi
+        break
+    fi
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        picked=$(printf '%s\n' "$remaining_labels" | sed -n "${choice}p")
+        if [ -n "$picked" ]; then
+            threads_picked+=("$picked")
+            remaining_labels=$(printf '%s\n' "$remaining_labels" | grep -vxF "$picked")
+            continue
+        fi
+    fi
+    echo "invalid choice — pick a number from the list" >&2
+done
+
+if [ ${#threads_picked[@]} -eq 0 ]; then
     echo "no thread chosen, aborting" >&2
     exit 1
 fi
@@ -92,11 +113,16 @@ fi
 # Escape any " in the topic for safe YAML quoting (rare but handles e.g. "Q3 review")
 alias_escaped=$(echo "$topic" | sed 's/"/\\"/g')
 
+threads_yaml="threads:"$'\n'
+for t in "${threads_picked[@]}"; do
+    threads_yaml+="  - \"[[$t]]\""$'\n'
+done
+
 {
     echo "---"
     echo "topic: $topic"
     echo "type: $type"
-    echo "thread: \"[[$thread_label]]\""
+    printf '%s' "$threads_yaml"
     echo "timestamp: $dt"
     echo "aliases: [\"$alias_escaped\"]"
     [ -n "$meeting_extras" ] && printf '%s' "$meeting_extras"
@@ -106,5 +132,11 @@ alias_escaped=$(echo "$topic" | sed 's/"/\\"/g')
     echo "# Content"
     echo ""
 } > "$note"
+
+# Buffer a REF entry per thread, so this note shows up in each thread's
+# daily log on next `buffer flush`. Failure here doesn't block the editor.
+for t in "${threads_picked[@]}"; do
+    buffer add-ref "$t" "notes/$dt" "$topic" || true
+done
 
 open_note "$note"

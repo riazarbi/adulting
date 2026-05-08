@@ -247,7 +247,12 @@ def validate_value(name, value, spec):
     if value is None or value == '':
         return
     if isinstance(value, list):
-        return  # list-of-scalars validated separately
+        # Apply scalar constraints per-element. Skips list-of-mappings
+        # (those are validated by their own schema, e.g. cadences).
+        for i, item in enumerate(value):
+            if isinstance(item, str):
+                yield from validate_value(f"{name}[{i}]", item, spec)
+        return
     constraint = spec.get('constraint', {})
     enum = constraint.get('enum')
     if enum and value not in enum:
@@ -371,11 +376,24 @@ def validate_file(path, schemas):
         for err in validate_cadences(fm['cadences']):
             yield (0, err)
 
-    # Wikilink resolution: thread field on notes
+    # Wikilink resolution: thread field on logs (singular, scalar)
     if 'thread' in fm and isinstance(fm['thread'], str):
         target = unwiki(fm['thread'])
         if target and not wikilink_exists(target):
             yield (0, f"thread: wikilink {fm['thread']!r} does not resolve")
+
+    # Wikilink resolution: threads list on notes (multi)
+    if 'threads' in fm and isinstance(fm['threads'], list):
+        for entry in fm['threads']:
+            if not isinstance(entry, str):
+                continue
+            target = unwiki(entry)
+            if target is None:
+                yield (0, f"threads: entry {entry!r} is not a wikilink")
+            elif not target.startswith(('Projects/', 'Processes/', 'Topics/')):
+                yield (0, f"threads: wikilink {entry!r} must target Projects/X, Processes/X, or Topics/X")
+            elif not wikilink_exists(target):
+                yield (0, f"threads: wikilink {entry!r} does not resolve")
 
     # Wikilink resolution: people list (entries that ARE wikilinks)
     if 'people' in fm and isinstance(fm['people'], list):
@@ -393,7 +411,7 @@ def validate_file(path, schemas):
     # Body lines: line schemas (e.g. thread_entry on threads); ACTION/TASK on notes.
     line_schemas = [s for s in schemas.values() if s['scope'] == 'line']
     body_lines = text.split('\n')[body_start:]
-    is_note = schema['name'] in ('note_meeting', 'note_correspondence', 'note_simple')
+    is_note = schema['name'] in ('note_meeting', 'note_correspondence', 'note_simple', 'log')
     for offset, line in enumerate(body_lines):
         line_no = body_start + offset + 1
 
@@ -433,7 +451,7 @@ def validate_file(path, schemas):
 # ---------- file discovery ----------
 
 def discover_files():
-    for sub in ('notes', 'threads', 'people'):
+    for sub in ('notes', 'threads', 'people', 'logs'):
         d = HOME / sub
         if not d.is_dir():
             continue

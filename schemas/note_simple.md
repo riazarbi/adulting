@@ -1,25 +1,25 @@
 ---
 schema: note_simple
 scope: file
-applies_when: type in [Workshop, Report, Log, Research]
+applies_when: type in [Workshop, Report, Log, Research, Recipe]
 filename: \d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md
 ---
 
 # Simple note
 
-A note for any of the bare-shape types: Workshop, Report, Log, or Research. No type-specific fields beyond the common four. Lives in `~/.adulting/notes/`.
+A note for any of the bare-shape types: Workshop, Report, Log, Research, or Recipe. No type-specific fields beyond the common four. Lives in `~/.adulting/notes/`.
 
 ## Fields
 
 | name      | required | type   | constraint                                |
 |-----------|----------|--------|-------------------------------------------|
 | topic     | yes      | string |                                           |
-| type      | yes      | enum   | Workshop, Report, Log, Research           |
-| thread    | yes      | string | regex=\[\[(Projects\|Processes\|Topics)/[^\]]+\]\] |
+| type      | yes      | enum   | Workshop, Report, Log, Research, Recipe   |
+| threads   | yes      | list   | regex=\[\[(Projects\|Processes\|Topics)/[^\]]+\]\] |
 | timestamp | yes      | string | regex=\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2} |
 | people    | no       | list   |                                           |
 
-`thread` is a single wikilink to a project, process, or topic thread. `people` is optional; entries may be wikilinks `[[people/X]]` or plain strings.
+`threads` is a list of wikilinks; each entry must resolve to a thread file under `threads/<Kind>/<Name>.md`. A note can belong to multiple threads. `people` is optional; entries may be wikilinks `[[people/X]]` or plain strings.
 
 ## Body
 

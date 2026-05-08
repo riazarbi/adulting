@@ -167,7 +167,7 @@ These ship enabled by default in Obsidian; named here for clarity:
 
 ## Pandoc + xelatex
 
-Used by `notes --pdf` / `--minutes` / `--agenda` to render PDFs of
+Used by `notes pdf` / `notes minutes` / `notes agenda` to render PDFs of
 meeting notes, agendas, and arbitrary notes. The renderer scripts pass
 all options inline; no per-user config required beyond having the
 binaries on `PATH`.

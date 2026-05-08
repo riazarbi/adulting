@@ -133,8 +133,6 @@ def cmd_new(args):
 
 
 def cmd_delete(args):
-    if not args.thread:
-        sys.exit("usage: threads --delete <thread>")
     try:
         match = resolve_thread(args.thread)
     except ValueError as e:
@@ -178,8 +176,6 @@ def cmd_list(args):
 
 
 def cmd_show(args):
-    if not args.thread:
-        sys.exit("usage: threads --show <thread>")
     try:
         match = resolve_thread(args.thread)
     except ValueError as e:
@@ -200,34 +196,31 @@ def cmd_show(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Manage thread files.",
-        usage="%(prog)s [--new | --delete <thread> | --list | --show <thread>] [options]")
-    parser.add_argument('--new', action='store_true')
-    parser.add_argument('--delete', action='store_true')
-    parser.add_argument('--list', action='store_true')
-    parser.add_argument('--show', action='store_true')
-    parser.add_argument('thread', nargs='?', default=None,
-                        help="Thread name or path (for --delete / --show).")
-    parser.add_argument('--kind', choices=list(KIND_DIRS), help="(for --new) kind")
-    parser.add_argument('--category', choices=CATEGORIES, help="(for --new) category")
-    parser.add_argument('--name', help="(for --new) thread name")
-    parser.add_argument('--json', action='store_true', help="(for --list / --show) JSON output")
-    parser.add_argument('-y', '--yes', action='store_true', help="Skip confirmation prompts")
+    parser = argparse.ArgumentParser(description="Manage thread files.")
+    sub = parser.add_subparsers(dest='subcommand', required=True)
+
+    p_list = sub.add_parser('list', help="List all thread files.")
+    p_list.add_argument('--json', action='store_true', help="JSON output.")
+    p_list.set_defaults(func=cmd_list)
+
+    p_show = sub.add_parser('show', help="Show a single thread file.")
+    p_show.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p_show.add_argument('--json', action='store_true', help="JSON output.")
+    p_show.set_defaults(func=cmd_show)
+
+    p_new = sub.add_parser('new', help="Create a thread file (interactive prompts for missing fields).")
+    p_new.add_argument('--name', help="Thread name (skip prompt).")
+    p_new.add_argument('--kind', choices=list(KIND_DIRS), help="Skip prompt.")
+    p_new.add_argument('--category', choices=CATEGORIES, help="Skip prompt.")
+    p_new.set_defaults(func=cmd_new)
+
+    p_delete = sub.add_parser('delete', help="Permanently delete a thread file.")
+    p_delete.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p_delete.add_argument('-y', '--yes', action='store_true', help="Skip confirmation.")
+    p_delete.set_defaults(func=cmd_delete)
+
     args = parser.parse_args()
-
-    actions = sum([args.new, args.delete, args.list, args.show])
-    if actions != 1:
-        parser.error("specify exactly one of --new, --delete, --list, --show")
-
-    if args.new:
-        cmd_new(args)
-    elif args.delete:
-        cmd_delete(args)
-    elif args.list:
-        cmd_list(args)
-    elif args.show:
-        cmd_show(args)
+    args.func(args)
 
 
 if __name__ == '__main__':

@@ -17,58 +17,35 @@ fi
 display_help() {
     cat << EOF
 
-Usage: $0 [option]
-Example: $0 --new
-
+Usage: $0 <subcommand> [filter]
+Example: $0 new
 
 CREATION:
-    --new       [DEFAULT] Create a new note and open for editing in default text editor.
-    --copy      Select and copy note contents to a new note with the current timestamp. Does not alter the timestamp in the note header - you need to do that manually
-    --strip     Select and copy note contents to a new note and remove anything that is not a header. Useful for using one note as a template for another note.
-
+    new        [DEFAULT] Create a new note and open it for editing.
+    copy       Select a note, copy contents to a new note with the current timestamp.
+    strip      Select a note, copy contents and remove the body — useful as a template.
 
 MODIFICATION:
-    --edit      Select and open a note in default text editor.
-                    Special keywords you can use in your note body:
-                        "ACTION:"   Action item — ingested into taskwarrior by `tasks` on next invocation.
-                        "TASK:"     Already-ingested action item (set by `tasks`; do not write by hand).
-                        "AGREED:"   Statement that the meeting group formally agrees on.
-                        "RESOLVED:" Statement that a meeting group resolves.
-                        "!:"        Important callout, surfaced in `notes --pdf` summary section.
-    --nano      Edit a note, but in the nano command line text editor.
-    --last      Select and open the last created note in default text editor.
+    edit       Select a note, open in default editor.
+                   Special keywords you can use in the body:
+                       "ACTION:"   Action item — ingested into taskwarrior by \`tasks\` on next invocation.
+                       "TASK:"     Already-ingested action item (set by \`tasks\`; do not write by hand).
+                       "AGREED:"   Statement the meeting formally agrees on.
+                       "RESOLVED:" Statement the meeting resolves.
+                       "!:"        Important callout, surfaced in \`notes pdf\` summary section.
+    nano       Edit in nano (CLI editor) instead.
+    last       Open the most recently-created note.
 
+DELETION:
+    delete     Select a note and permanently delete it.
 
-DELETION - permanently removes data:
-    --delete    Select and permanently delete a note.
+RENDERING (output to \$EXPORT_DIR, default ~/Downloads):
+    cat        Print the note to stdout (pipeable).
+    pdf        Render note as PDF + markdown with a summary of ACTION/TASK lines.
+    minutes    Render meeting minutes (TOC, AGREED:/RESOLVED:/ACTION: summary).
+    agenda     Render meeting agenda.
 
-
-RENDERING - does not alter original note contents. Rendered documents are saved to \$EXPORT_DIR (default ~/Downloads):
-    --cat       Print the note content to the terminal. Useful for piping.
-
-    --pdf       Select, reformat and open a selected note as PDF and markdown.
-                For --pdf, reformatting includes:
-                    - Creating a latex header from the note metadata.
-                    - Placing the location, attendees participants on the first page, if they exist.
-                    - Adds a Summary section above all content which contains:
-                        - Action items, as indicated by ACTION: / TASK: lines.
-
-    --minutes   Select, reformat and open a selected note as Meeting Minutes in PDF and markdown.
-                Saves to \$EXPORT_DIR (default ~/Downloads).
-                For --minutes, reformatting includes:
-                    - Creating a latex header from the note metadata.
-                    - Adding a table of contents, as indicated by markdown headers.
-                    - Placing the location, attendees participants on the first page, if they exist.
-                    - Adds a Summary section above all content which contains:
-                        - Minutes agreements, as indicated by the "AGREED:" keyword.
-                        - Resolutions, as indicated by the "RESOLVED:" keyword.
-                        - Action items, as indicated by ACTION: / TASK: lines.
-
-    --agenda   Select, reformat and open a selected note as Meeting Agenda in PDF and markdown.
-                Saves to \$EXPORT_DIR (default ~/Downloads).
-                For --agenda, reformatting includes:
-                    - Creating a latex header from the note metadata.
-                    - Placing the location, attendees participants on the first page, if they exist.
+Optional second argument: filter the picker list with grep (case-insensitive).
 
 EOF
 }
@@ -246,10 +223,13 @@ export -f extract_people_list
 export -f extract_threads_list
 
 
-# NEW NOTE
-if [[ $1 = "--new" ]] || [ -z "$1" ]; then
+subcommand="${1:-new}"
+
+# NEW NOTE — no pre-pass, no notes-list build needed.
+if [[ "$subcommand" = "new" ]]; then
     notes_new
-else
+    exit
+fi
 
 # Ingest any new ACTION: lines into taskwarrior. Tasks invocation is
 # tolerant of taskwarrior not being installed if there's nothing to ingest.
@@ -288,85 +268,75 @@ else
   notes_all="$notes_unfiltered"
 fi
 
-# OPEN LAST NOTE
-if [[ $1 = "--last" ]]; then
-    last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
-    note="$NOTES_DIR/$last_note"
-    open_note $note
+case "$subcommand" in
+    last)
+        last_note=$(echo "$notes_all" | tail -n 1 | awk 'BEGIN{FS="|"} {print $2}')
+        note="$NOTES_DIR/$last_note"
+        open_note $note
+        ;;
 
+    minutes)
+        select_note
+        notes_minutes $selected_note
+        ;;
 
-# COMPILE AND RENDER NOTE AS MEETING MINUTES
-elif [[ $1 = "--minutes" ]]; then
-    select_note
-    notes_minutes $selected_note
+    agenda)
+        select_note
+        notes_agenda $selected_note
+        ;;
 
-# COMPILE AND RENDER NOTE AS MEETING MINUTES
-elif [[ $1 = "--agenda" ]]; then
-    select_note
-    notes_agenda $selected_note
+    pdf)
+        select_note
+        notes_pdf $selected_note
+        ;;
 
+    delete)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        rm $note
+        ;;
 
-# COMPILE AND RENDER NOTE AS PDF
-elif [[ $1 = "--pdf" ]]; then
-    select_note
-    notes_pdf $selected_note
+    edit)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        open_note $note
+        ;;
 
+    nano)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        nano_note $note
+        ;;
 
-# DELETE NOTE
-elif [[ $1 = "--delete" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-    rm $note
+    cat)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        cat $note
+        ;;
 
+    copy)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        dt=$(date '+%Y-%m-%d-%H-%M-%S')
+        new_note="$NOTES_DIR/$dt.md"
+        cp $note $new_note
+        sed -i '' '1s/$/ COPY/' $new_note
+        echo "Copied $selected_note to $dt.md"
+        ;;
 
-# EDIT NOTE
-elif [[ $1 = "--edit" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-    open_note $note
+    strip)
+        select_note
+        note="$NOTES_DIR/$selected_note"
+        dt=$(date '+%Y-%m-%d-%H-%M-%S')
+        new_note="$NOTES_DIR/$dt.md"
+        cp $note $new_note
+        sed -i '' '1s/$/ STRIPPED/' $new_note
+        echo "Copied $selected_note to $dt.md"
+        echo "Stripping $dt.md"
+        notes_strip $dt.md
+        ;;
 
-# NANO NOTE
-elif [[ $1 = "--nano" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-    nano_note $note
-
-
-# CAT NOTE
-elif [[ $1 = "--cat" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-    cat $note
-
-
-# COPY NOTE
-elif [[ $1 = "--copy" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-	# Determine timestamp
-	dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	new_note="$NOTES_DIR/$dt.md"
-    cp $note $new_note
-    sed -i '' '1s/$/ COPY/' $new_note
-    echo "Copied $selected_note to $dt.md"
-
-
-# COPY AND STRIP NOTE
-elif [[ $1 = "--strip" ]]; then
-    select_note
-    note="$NOTES_DIR/$selected_note"
-	# Determine timestamp
-	dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	new_note="$NOTES_DIR/$dt.md"
-    cp $note $new_note
-    sed -i '' '1s/$/ STRIPPED/' $new_note
-    echo "Copied $selected_note to $dt.md"
-    echo "Stripping $dt.md"
-    notes_strip $dt.md
-
-
-# FLAG ERROR CATCHALL
-else
-    display_help
-fi
-fi
+    *)
+        display_help
+        ;;
+esac

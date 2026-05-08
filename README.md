@@ -29,7 +29,7 @@ export PATH=/Users/riaz/bin/adulting:$PATH
 ## Dependencies
 
 - `bash`, `python3`, `awk`, `sed`, `grep` — required by everything
-- `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes --pdf`, `notes --minutes`, `notes --agenda`
+- `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes pdf`, `notes minutes`, `notes agenda`
 - [`task`](https://taskwarrior.org) (taskwarrior) — required by the `tasks` bridge. Install via `brew install task` on macOS.
 - macOS `open` (or Linux `xdg-open`) — used to launch Obsidian for note editing
 
@@ -57,9 +57,9 @@ Markdown note taker. Notes live in `~/.adulting/notes/` as `<timestamp>.md` file
 |-------------|--------------------------------------------------------------------------|
 | `ACTION:`   | Action item — ingested by `tasks` into taskwarrior, then rewritten to `TASK:` |
 | `TASK:`     | Already-ingested action (set by `tasks`; don't write by hand)            |
-| `AGREED:`   | Formal agreement — surfaced in `notes --minutes`                         |
-| `RESOLVED:` | Formal resolution — surfaced in `notes --minutes`                        |
-| `!:`        | Important callout — surfaced in `notes --pdf` summary                    |
+| `AGREED:`   | Formal agreement — surfaced in `notes minutes`                         |
+| `RESOLVED:` | Formal resolution — surfaced in `notes minutes`                        |
+| `!:`        | Important callout — surfaced in `notes pdf` summary                    |
 
 `ACTION:` lines may carry an optional assignee in parens: `ACTION: (Riaz Arbi) Send the invite`. The assignee must match an existing `people/<name>.md` file or `tasks` will surface an error.
 
@@ -84,10 +84,10 @@ Skeleton management for thread files. Daily-review / tail / overdue tooling will
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `threads --new`                      | Interactive: pick kind, category, name; creates the file      |
-| `threads --delete <thread>`          | Delete a thread (with confirm)                                |
-| `threads --list [--json]`            | List all threads (kind, status, category, name)               |
-| `threads --show <thread> [--json]`   | Print frontmatter + body (or JSON of frontmatter)             |
+| `threads new`                        | Interactive: pick kind, category, name; creates the file      |
+| `threads delete <thread> [-y]`       | Delete a thread (with confirm)                                |
+| `threads list [--json]`              | List all threads (kind, status, category, name)               |
+| `threads show <thread> [--json]`     | Print frontmatter + body (or JSON of frontmatter)             |
 
 `<thread>` accepts a bare name (`SGB`) or a path (`Processes/SGB`). Bare names error if ambiguous across kinds.
 
@@ -97,10 +97,10 @@ Same skeleton shape, applied to people files.
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `people --new`                       | Interactive: pick category, name; creates the file            |
-| `people --delete <name>`             | Delete a person (with confirm)                                |
-| `people --list [--json]`             | List all people                                               |
-| `people --show <name> [--json]`      | Print the file (or JSON of frontmatter)                       |
+| `people new`                         | Interactive: pick category, name; creates the file            |
+| `people delete <name> [-y]`          | Delete a person (with confirm)                                |
+| `people list [--json]`               | List all people                                               |
+| `people show <name> [--json]`        | Print the file (or JSON of frontmatter)                       |
 
 ## tasks
 
@@ -173,7 +173,7 @@ Constraint cell DSL (single cell, semicolon-separated):
 # Vault hygiene
 
 - All `notes_*` helpers fail loudly if invoked outside `notes` (env-var guards)
-- `notes --pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD
+- `notes pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD
 
 # Obsidian roadmap
 
@@ -183,7 +183,7 @@ What's done:
 
 What remains:
 - **Topic-discoverable filenames.** Notes are timestamp-named (`2024-04-29-09-03-15.md`); the file picker is opaque without an `aliases:` field. Adding `aliases: [<topic>]` in frontmatter makes Cmd-O find notes by topic without renaming files. Unimplemented.
-- **Compiled views.** A future `threads --tail` / `--report` / `--overdue` should query notes data, not thread bodies. Skeleton today is just create / delete / list / show.
+- **Compiled views.** A future `threads tail` / `report` / `overdue` should query notes data, not thread bodies. Skeleton today is just `new` / `delete` / `list` / `show`.
 
 # Known issues
 

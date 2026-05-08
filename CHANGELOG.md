@@ -2,6 +2,34 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-08 - CLI consistency: subcommand style across all top-level tools
+
+Hard-cut rename. Convention now:
+
+1. Top-level: every tool uses subcommands. No primary verb is a `--flag`.
+2. Subcommands are single-token, hyphenated for multi-word (`add-text`, `set-description`).
+3. Within a subcommand: required args are positional; optional metadata is flagged.
+4. Shared global flags (`--quiet`, `--dry-run`) come before the subcommand.
+
+Renames:
+
+| Before                    | After                  |
+|---------------------------|------------------------|
+| `notes --new`             | `notes new`            |
+| `notes --pdf`             | `notes pdf`            |
+| `notes --minutes`         | `notes minutes`        |
+| `notes --agenda`          | `notes agenda`         |
+| `notes --edit` / `--nano` / `--cat` / `--copy` / `--strip` / `--delete` / `--last` | `notes edit` / `nano` / `cat` / `copy` / `strip` / `delete` / `last` |
+| `threads --list`          | `threads list`         |
+| `threads --show <X>`      | `threads show <X>`     |
+| `threads --new`           | `threads new`          |
+| `threads --delete <X>`    | `threads delete <X>`   |
+| `people --list/--show/--new/--delete` | `people list/show/new/delete` |
+
+`tasks` and `buffer` already followed the new convention; no changes there.
+
+README, INTEGRATIONS.md, and the help text in `notes` updated. No backward-compat shim — old `--flag` invocations now hit the help fallback.
+
 ## 2026-05-08 - Multi-threaded notes; capture-time attrs on ACTION
 
 Notes now belong to many threads instead of one. Threads behave like tags: a list of wikilinks in the note's `threads:` frontmatter, each entry resolved against `threads/<Kind>/<Name>.md`. The 1:1 link between a task and its origin is the `source:` UDA (relative path of the note); thread membership is **derived at query time** by reading the source note's `threads:` list. taskwarrior's `project:` is no longer set by ingest.

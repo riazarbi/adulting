@@ -137,6 +137,42 @@ def source_for(path):
     return str(path.relative_to(HOME).with_suffix(''))
 
 
+# ---------- taskwarrior modify wrapper ----------
+
+# Field names that `task modify` accepts as `attr:value` updates. Lowercase
+# alpha/digit/dot/underscore matches taskwarrior's attribute-name shape.
+_TW_FIELD_RE = re.compile(r'^[a-z][a-z0-9_.]*$')
+
+
+def tw_modify(uuid, **fields):
+    """Safe wrapper around `task <uuid> modify`. Every kwarg becomes one
+    `attr:value` argv element; nothing else is ever appended. Returns the
+    completed subprocess result (or None for a no-op).
+
+    Why this exists: taskwarrior treats any argv slot after `modify` that
+    isn't `attr:value` as a description override — silently replacing
+    (or, with mixed args, partially clobbering) the description field.
+    Calling `subprocess.run(['task', uuid, 'modify', some_var])` from a
+    stale code path then silently destroys the description. This wrapper
+    forces every call site to name the field, and argv construction lives
+    in one auditable place.
+
+    Pass `None` to skip a field (no-op); pass `''` to clear a tw field
+    (taskwarrior's canonical `attr:` empty form). Dynamic field names go
+    via `**{name: value}` unpacking."""
+    cmd = ['task', 'rc.confirmation:no', uuid, 'modify']
+    for key, val in fields.items():
+        if not _TW_FIELD_RE.match(key):
+            raise ValueError(
+                f"tw_modify: refusing key {key!r} — not an attr-shaped name")
+        if val is None:
+            continue
+        cmd.append(f'{key}:{val}')
+    if cmd[-1] == 'modify':
+        return None
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
 # ---------- UDA bootstrap ----------
 
 def ensure_uda():
@@ -392,6 +428,17 @@ def cmd_ingest(args):
             failed.append((prefix, [f"task add failed: {e.stderr.strip() or e.stdout.strip()}"]))
             continue
         uuid_prefix = task_uuid_after_add(result.stdout)[:8]
+        if not uuid_prefix:
+            # Refuse to rewrite the source line without an anchor — an
+            # unanchored TASK: leaves the tw record unreachable from any
+            # source-driven operation (rebuild, sync, set-description).
+            # Leave ACTION: in place so the next ingest re-attempts; the
+            # tw task already created is now an orphan that `rebuild`
+            # will surface for manual cleanup.
+            failed.append((prefix, [
+                "could not resolve uuid after `task add`; source left as "
+                "ACTION: (tw task now orphaned, see `tasks rebuild`)"]))
+            continue
         rewrite_action_to_task(note, line_no, uuid_prefix)
         succeeded += 1
         if not args.quiet:
@@ -458,14 +505,11 @@ def cmd_sync(args):
                 continue
 
             if t.get('description', '') != src_body:
-                try:
-                    subprocess.run(['task', t['uuid'], 'modify', src_body],
-                                   capture_output=True, text=True, check=True)
+                r = tw_modify(t['uuid'], description=src_body)
+                if r is not None and r.returncode == 0:
                     desc_updates += 1
                     if not args.quiet:
                         print(f"desc->tw: {note.stem}  #{t.get('id', '?')}  -> {src_body[:60]}")
-                except subprocess.CalledProcessError:
-                    pass
 
             if src_state == 'open' and tw_state == 'done':
                 lines[i] = rewrite_state_in_line(line, 'done')
@@ -589,11 +633,9 @@ def cmd_set_description(args):
     else:
         print(f"warn: no anchored source line for {full_uuid[:8]}; updating tw only", file=sys.stderr)
 
-    try:
-        subprocess.run(['task', full_uuid, 'modify', new_text],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    r = tw_modify(full_uuid, description=new_text)
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} description updated")
     return 0
 
@@ -627,11 +669,9 @@ def cmd_set_assignee(args):
     note.write_text('\n'.join(lines), encoding='utf-8')
     print(f"source: {note.stem}:{idx + 1}  -> {new_body[:60]}")
 
-    try:
-        subprocess.run(['task', full_uuid, 'modify', new_body],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    r = tw_modify(full_uuid, description=new_body)
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} description updated")
     return 0
 
@@ -648,11 +688,9 @@ def _set_date_field(uuid_arg, date_str, field):
     # Append noon so taskwarrior stores the date with enough headroom that
     # both sides of any reasonable TZ conversion stay on the same calendar
     # day. Bare YYYY-MM-DD parses as local midnight and slips a day in UTC.
-    try:
-        subprocess.run(['task', full_uuid, 'modify', f'{field}:{date_str}T12:00:00'],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    r = tw_modify(full_uuid, **{field: f'{date_str}T12:00:00'})
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} {field}:{date_str}")
     return 0
 
@@ -674,11 +712,9 @@ def cmd_set_priority(args):
     except ValueError as e:
         die(str(e))
     full_uuid = resolve_full_uuid(args.uuid)
-    try:
-        subprocess.run(['task', full_uuid, 'modify', f'priority:{prio}'],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    r = tw_modify(full_uuid, priority=prio)
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} priority:{prio}")
     return 0
 
@@ -691,11 +727,9 @@ def cmd_add_depends(args):
     dep_uuid = resolve_full_uuid(args.dep_uuid)
     if dep_uuid == full_uuid:
         die("a task cannot depend on itself")
-    try:
-        subprocess.run(['task', full_uuid, 'modify', f'depends:{dep_uuid}'],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    r = tw_modify(full_uuid, depends=dep_uuid)
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} now depends on {dep_uuid[:8]}")
     return 0
 
@@ -704,11 +738,11 @@ def cmd_rm_depends(args):
     require_task()
     full_uuid = resolve_full_uuid(args.uuid)
     dep_uuid = resolve_full_uuid(args.dep_uuid)
-    try:
-        subprocess.run(['task', full_uuid, 'modify', f'depends:-{dep_uuid}'],
-                       capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        die(f"task modify failed: {(e.stderr or e.stdout).strip()}")
+    # taskwarrior uses `depends:-<uuid>` to remove a dependency. The leading
+    # '-' is part of the value, not a flag — tw_modify passes it through.
+    r = tw_modify(full_uuid, depends=f'-{dep_uuid}')
+    if r is None or r.returncode != 0:
+        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
     print(f"taskwarrior: {full_uuid[:8]} no longer depends on {dep_uuid[:8]}")
     return 0
 
@@ -944,35 +978,32 @@ def cmd_rebuild(args):
         if not full_uuid:
             failed.append((uuid8, field, "missing full uuid in tw export"))
             continue
-        # Each command MUST be uuid + verb + attr:value tokens only. Bare
-        # words at the tail are silently appended to the description by
-        # taskwarrior. Constructed as Python lists so spaces / colons in
-        # values stay inside a single argv element.
         if field == 'source':
-            cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
-                   f'source:{new}']
+            r = tw_modify(full_uuid, source=new)
         elif field == 'status':
             if new == 'completed':
-                cmd = ['task', 'rc.confirmation:no', full_uuid, 'done']
+                # `task done` rather than `modify status:completed` so
+                # taskwarrior stamps `end:<now>` itself.
+                r = subprocess.run(
+                    ['task', 'rc.confirmation:no', full_uuid, 'done'],
+                    capture_output=True, text=True)
             elif new == 'pending':
-                # Reopen: clear end: so the task isn't shown as
-                # historically completed-but-pending.
-                cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
-                       'status:pending', 'end:']
+                # Clear end: alongside the status change so the task isn't
+                # shown as historically completed-but-pending.
+                r = tw_modify(full_uuid, status='pending', end='')
             else:
                 failed.append((uuid8, field, f"unhandled status {new!r}"))
                 continue
         elif field == 'description':
-            cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
-                   f'description:{new}']
+            r = tw_modify(full_uuid, description=new)
         else:
             failed.append((uuid8, field, f"unknown field {field!r}"))
             continue
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode == 0:
+        if r is not None and r.returncode == 0:
             applied += 1
         else:
-            failed.append((uuid8, field, ((r.stderr or r.stdout) or '').strip()))
+            err = ((r.stderr or r.stdout) if r else '').strip()
+            failed.append((uuid8, field, err or "no-op (all fields cleared)"))
 
     print(f"Applied {applied}/{len(changes)} change(s).")
     if failed:

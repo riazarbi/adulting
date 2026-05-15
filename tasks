@@ -55,6 +55,13 @@ WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 ACTION_RE = re.compile(
     r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)(?:\s*<!--(.*?)-->)?\s*$'
 )
+# Post-ingest anchor in source: TASK (pending) or DONE (completed) line
+# ending with <!--<uuid8>-->. Groups: 1=kind, 2=body, 3=uuid8. Used by
+# `tasks rebuild` to reconcile tw against source-of-truth.
+TASK_ANCHOR_RE = re.compile(
+    r'^(TASK|DONE):\s(.*?)\s*<!--([a-f0-9]{8})-->\s*$',
+    re.MULTILINE,
+)
 DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 
@@ -210,6 +217,40 @@ def threads_for_task(task, cache):
     if not src:
         return []
     return cache.get(src, [])
+
+
+def find_task_anchors():
+    """Walk all source files; yield (uuid8, source_relpath, kind, body).
+
+    kind is 'TASK' (pending) or 'DONE' (completed). source_relpath matches
+    the `source` UDA convention (relative to HOME, no .md). body is the
+    text between the kind prefix and the uuid anchor — what should match
+    the tw `description` field under source-wins. Used by `tasks rebuild`
+    to reconcile tw state against source-of-truth anchors."""
+    for f in discover_source_files():
+        text = f.read_text(encoding='utf-8')
+        rel = source_for(f)
+        for m in TASK_ANCHOR_RE.finditer(text):
+            yield m.group(3), rel, m.group(1), m.group(2).strip()
+
+
+def load_all_tw_tasks():
+    """Export every tw task (all statuses) as a uuid8 -> task dict."""
+    require_task()
+    result = subprocess.run(['task', 'rc.confirmation:no', 'export'],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"`task export` failed: {(result.stderr or '').strip()}")
+    try:
+        data = json.loads(result.stdout) if result.stdout.strip() else []
+    except json.JSONDecodeError as e:
+        die(f"failed to parse `task export`: {e}")
+    out = {}
+    for t in data:
+        uuid = t.get('uuid', '')
+        if uuid:
+            out[uuid[:8]] = t
+    return out
 
 
 def find_action_lines(note_path):
@@ -719,8 +760,6 @@ def _print_table(tasks, cache):
         uuid8 = (t.get('uuid') or '')[:8]
         thread_cell = _format_threads(threads_for_task(t, cache))
         desc = t.get('description', '')
-        if len(desc) > 64:
-            desc = desc[:61] + '...'
         due = fmt_tw_date(t.get('due', ''))
         cells = [uuid8, prio_cell, thread_cell, desc, f"due:{due}" if due else '']
         rows.append(cells)
@@ -777,6 +816,170 @@ def cmd_show(args):
         print(f"depends:     {dep_prefixes}")
     print(f"entry:       {fmt_tw_date(t.get('entry', ''))}")
     print(f"urgency:     {t.get('urgency', '-')}")
+    return 0
+
+
+def cmd_rebuild(args):
+    """Reconcile tw state with source-of-truth (TASK/DONE anchors).
+
+    Dry-run by default. Pass --apply to write; a full `task export` backup
+    is written to ~/.adulting/.tasks-backup-<ts>.json before any mutation.
+
+    Three change categories, ordered by risk:
+
+      [source]      Update the `source` UDA when the anchor's current file
+                    path differs from what tw recorded at ingest. Safe;
+                    heals drift from external file renames.
+
+      [status]      Bring tw status into line with source kind:
+                      TASK in source, completed in tw -> reopen
+                      DONE in source, pending in tw   -> complete
+                    Skips tw tasks in `recurring`, `waiting`, or `deleted`
+                    states (surfaces as warnings instead).
+
+      [description] Bring tw description into line with the source line
+                    body (assignee prefix included). Highest surprise
+                    potential: if a tw description was edited out-of-band
+                    and source wasn't, this REVERTS to source. Inspect
+                    the dry-run diff carefully.
+
+    Orphans are surfaced as warnings only:
+      - anchor in source with no matching tw record
+      - tw record with no matching anchor in any source file
+    They are left alone (separate, riskier operations)."""
+    require_task()
+
+    tw_tasks = load_all_tw_tasks()
+
+    anchors_by_uuid = {}
+    for uuid8, rel, kind, body in find_task_anchors():
+        anchors_by_uuid.setdefault(uuid8, []).append((rel, kind, body))
+
+    changes = []   # (uuid8, field, old, new)
+    warnings = []
+
+    for uuid8, hits in sorted(anchors_by_uuid.items()):
+        if len(hits) > 1:
+            paths = ', '.join(p for p, _, _ in hits)
+            warnings.append(f"{uuid8}: multiple anchors at {paths} (skipped)")
+            continue
+        new_source, kind, body = hits[0]
+        tw = tw_tasks.get(uuid8)
+        if tw is None:
+            warnings.append(f"{uuid8}: anchor at {new_source!r} but no tw record")
+            continue
+
+        old_source = tw.get('source', '')
+        if old_source != new_source:
+            changes.append((uuid8, 'source', old_source, new_source))
+
+        tw_status = tw.get('status', '')
+        if tw_status in ('recurring', 'waiting', 'deleted'):
+            warnings.append(
+                f"{uuid8}: tw status {tw_status!r} not reconciled "
+                f"(source kind: {kind})")
+        else:
+            want_status = 'pending' if kind == 'TASK' else 'completed'
+            if tw_status != want_status:
+                changes.append((uuid8, 'status', tw_status, want_status))
+
+        old_desc = tw.get('description', '')
+        if old_desc != body:
+            changes.append((uuid8, 'description', old_desc, body))
+
+    for u in sorted(tw_tasks):
+        if u in anchors_by_uuid:
+            continue
+        status = tw_tasks[u].get('status', '?')
+        warnings.append(f"{u}: in tw ({status}) but no source anchor")
+
+    if args.only:
+        before = len(changes)
+        changes = [c for c in changes if c[1] in args.only]
+        dropped = before - len(changes)
+        if dropped:
+            print(f"(--only {','.join(args.only)} filtered "
+                  f"out {dropped} change(s) in other categories)")
+
+    print(f"rebuild: {len(anchors_by_uuid)} source anchor(s), "
+          f"{len(tw_tasks)} tw task(s)")
+
+    if warnings:
+        print(f"\n{len(warnings)} warning(s):")
+        for w in warnings:
+            print(f"  {w}")
+
+    if not changes:
+        print("\nNo changes proposed.")
+        return 0
+
+    by_cat = {}
+    for uuid8, field, old, new in changes:
+        by_cat.setdefault(field, []).append((uuid8, old, new))
+
+    print(f"\nProposed changes ({len(changes)}):")
+    for cat in sorted(by_cat):
+        items = by_cat[cat]
+        print(f"\n[{cat}] {len(items)}:")
+        for uuid8, old, new in items:
+            print(f"  {uuid8}: {old!r} -> {new!r}")
+
+    if not args.apply:
+        print("\nDry run. Re-run with --apply to write.")
+        return 0
+
+    ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup_path = HOME / f'.tasks-backup-{ts}.json'
+    bk = subprocess.run(['task', 'rc.confirmation:no', 'export'],
+                        capture_output=True, text=True)
+    if bk.returncode != 0:
+        die(f"backup `task export` failed: {(bk.stderr or '').strip()}")
+    backup_path.write_text(bk.stdout, encoding='utf-8')
+    print(f"\nBackup: {backup_path}")
+
+    applied = 0
+    failed = []
+    for uuid8, field, _old, new in changes:
+        full_uuid = tw_tasks[uuid8].get('uuid', '')
+        if not full_uuid:
+            failed.append((uuid8, field, "missing full uuid in tw export"))
+            continue
+        # Each command MUST be uuid + verb + attr:value tokens only. Bare
+        # words at the tail are silently appended to the description by
+        # taskwarrior. Constructed as Python lists so spaces / colons in
+        # values stay inside a single argv element.
+        if field == 'source':
+            cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
+                   f'source:{new}']
+        elif field == 'status':
+            if new == 'completed':
+                cmd = ['task', 'rc.confirmation:no', full_uuid, 'done']
+            elif new == 'pending':
+                # Reopen: clear end: so the task isn't shown as
+                # historically completed-but-pending.
+                cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
+                       'status:pending', 'end:']
+            else:
+                failed.append((uuid8, field, f"unhandled status {new!r}"))
+                continue
+        elif field == 'description':
+            cmd = ['task', 'rc.confirmation:no', full_uuid, 'modify',
+                   f'description:{new}']
+        else:
+            failed.append((uuid8, field, f"unknown field {field!r}"))
+            continue
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0:
+            applied += 1
+        else:
+            failed.append((uuid8, field, ((r.stderr or r.stdout) or '').strip()))
+
+    print(f"Applied {applied}/{len(changes)} change(s).")
+    if failed:
+        print(f"\n{len(failed)} failure(s):", file=sys.stderr)
+        for uuid8, field, err in failed:
+            print(f"  {uuid8} ({field}): {err}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -869,6 +1072,19 @@ def main():
     p_show = sub.add_parser('show', help="Detail view of one task.")
     p_show.add_argument('uuid')
     p_show.set_defaults(func=cmd_show)
+
+    p_rebuild = sub.add_parser(
+        'rebuild',
+        help="Reconcile tw with source-of-truth anchors. Dry-run by default.")
+    p_rebuild.add_argument(
+        '--apply', action='store_true',
+        help="Write changes to tw (backup is taken first).")
+    p_rebuild.add_argument(
+        '--only', choices=['source', 'status', 'description'],
+        action='append', default=[],
+        help="Limit to one or more change categories (repeatable). "
+             "Omit to include all.")
+    p_rebuild.set_defaults(func=cmd_rebuild)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

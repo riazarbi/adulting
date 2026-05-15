@@ -40,30 +40,37 @@ an email" --due 2026-05-21` is what the system needs.
 
 ### 1.4 User experience
 
-    $ adulting ask "send bern an email next tuesday"
-    → buffer add-action Processes/SGB "send Bern Sellmeyer an email" --due 2026-05-21
+Every example below must be reachable by the §4.2 intent table —
+specifically, every example query must match a regex in `INTENTS`. If
+a future PRD edit adds an example that does not, §4.2 must be updated
+in the same change.
+
+    $ adulting ask "remind me to send bern an email next tuesday"
+    buffer add-action Processes/SGB 'send bern an email' --due 2026-05-19
     [y/N]: y
 
-When the formatter can't decide:
+When the resolver can't decide:
 
-    $ adulting ask "remind alice about the launch friday"
-    People matching "alice":
-      1. Alice Chen        (Projects/Q3-launch, 3 recent notes)
-      2. Alice Vasquez     (Projects/SGB,       0 recent notes)
-    Which one? [1/2/q]:
+    $ adulting ask "remind me to talk to alice about the launch friday"
+    Persons matching:
+      1. Alice Chen
+      2. Alice Vasquez
+      q. quit
+    Which one? [1-2/q]:
 
 When parsing fails outright:
 
     $ adulting ask "next steps on the launch"
-    Could not classify intent. Try a leading verb like "remind me to",
-    "note that", or "show me".
+    ask: could not classify intent. Try a leading verb like
+    "remind me to", "note that", or "show me".
 
 Read-only queries skip the confirmation step. The inferred command is
-printed dimmed for transparency, then its output streams through:
+printed dimmed (on stderr) for transparency, then its output streams
+through:
 
-    $ adulting ask "what's my next task"
-    [ask → tasks next]
-    abc12345 H 2026-05-18 Projects/SGB  Review the migration doc
+    $ adulting ask "what's in my buffer"
+    [ask → buffer list]
+    ...buffer contents...
 
 ### 1.5 Command coverage
 
@@ -279,6 +286,7 @@ up in body strings.
       --yes, -y         Skip confirmation (for scripting)
       --dry-run, -n     Show preview, do not execute, do not prompt
       --no-needle       Disable Phase B fallback for this invocation
+                        [accepted but no-op in alpha; Phase B is deferred]
       --explain         Print scoring details for resolver candidates
       --json            Emit machine-readable result instead of running
 
@@ -311,33 +319,68 @@ classifier, resolvers, composer, and executor are utility-agnostic and
 do not need modification when intents are added. This is the
 extensibility contract for full-coverage rollout.
 
-Example registrations for the user's "what's my next task" query and
-the v0 reference path:
+**Slot schemas are normative, not illustrative.** Each `Intent` in
+`INTENTS` MUST declare exactly the slots the alpha will emit on the
+command line — no more, no less. An implementer MUST NOT introduce a
+slot that does not appear here without an accompanying PRD edit.
+Concretely: `buffer.add-action` accepts `--due` and `--priority`; it
+does **not** accept `--scheduled` — do not add it. This is enforced by
+the slot-schema lint (PLAN S3.5) which compares each Intent's slot set
+against the underlying utility's argparse surface.
+
+Alpha intent registrations (buffer-only per §1.5):
 
 ```python
 INTENTS = [
     Intent(
-        name="tasks.next",
-        patterns=[re.compile(r"^(what'?s? )?(my )?next task")],
-        utility="tasks",
-        subcommand="next",
-        slots=[],
-        read_only=True,
-    ),
-    Intent(
         name="buffer.add-action",
-        patterns=[re.compile(r"^remind me to|^add(?: an?)? action")],
+        patterns=[re.compile(r"^remind me to|^add(?: an?)? action",
+                             re.IGNORECASE)],
         utility="buffer",
         subcommand="add-action",
         slots=[
-            Slot("thread",  SlotKind.THREAD, required=True,  cli_form=""),
-            Slot("body",    SlotKind.TEXT,   required=True,  cli_form=""),
-            Slot("due",     SlotKind.DATE,   required=False, cli_form="--due"),
-            Slot("priority",SlotKind.ENUM,   required=False, cli_form="--priority",
-                            enum_values=["H","M","L"]),
+            Slot("thread",   SlotKind.THREAD, required=True,  cli_form=""),
+            Slot("body",     SlotKind.TEXT,   required=True,  cli_form=""),
+            Slot("due",      SlotKind.DATE,   required=False, cli_form="--due"),
+            Slot("priority", SlotKind.ENUM,   required=False, cli_form="--priority",
+                             enum_values=["H","M","L"]),
         ],
     ),
-    # ...
+    Intent(
+        name="buffer.add-text",
+        patterns=[re.compile(r"^note that|^observation:?|^log that",
+                             re.IGNORECASE)],
+        utility="buffer",
+        subcommand="add-text",
+        slots=[
+            Slot("thread", SlotKind.THREAD, required=True, cli_form=""),
+            Slot("body",   SlotKind.TEXT,   required=True, cli_form=""),
+        ],
+    ),
+    Intent(
+        name="buffer.add-ref",
+        patterns=[re.compile(r"^save (?:this )?(?:link|url|ref)|^bookmark",
+                             re.IGNORECASE)],
+        utility="buffer",
+        subcommand="add-ref",
+        slots=[
+            Slot("thread",  SlotKind.THREAD, required=True,  cli_form=""),
+            Slot("target",  SlotKind.TEXT,   required=True,  cli_form=""),
+            Slot("summary", SlotKind.TEXT,   required=False, cli_form=""),
+        ],
+    ),
+    Intent(
+        name="buffer.list",
+        patterns=[re.compile(
+            r"^what'?s? (?:in (?:my |the ))?buffer"
+            r"|^show (?:me )?(?:my |the )?buffer"
+            r"|^list (?:my |the )?buffer",
+            re.IGNORECASE)],
+        utility="buffer",
+        subcommand="list",
+        slots=[],
+        read_only=True,
+    ),
 ]
 ```
 
@@ -402,8 +445,9 @@ Failed parses log with `"intent": null` and `"error": "<reason>"`.
 ```toml
 [thresholds]
 intent_confidence_min = 0.6     # below this, fall back to Phase B
-person_disambiguate   = 0.15    # max delta between top two for auto-pick
+person_disambiguate   = 0.15    # min delta between top two for auto-pick
 thread_disambiguate   = 0.15
+min_match_score       = 0.5     # absolute score floor; below this, never auto-pick
 
 [phase_b]
 enabled    = false
@@ -474,24 +518,77 @@ Each candidate file is scored using `fuzzy_score()` from
   frontmatter.tags, frontmatter.aliases}`, with a recency boost
   proportional to `log(days_since_mtime)`.
 
-The top candidate is auto-selected when:
+The top candidate is auto-selected only when **both** conditions hold:
 
-    best_score - second_best_score >= person_disambiguate (or thread_disambiguate)
+    best_score >= min_match_score                                   # absolute floor
+    (best_score - second_best_score) >= person_disambiguate         # margin over runner-up
+                                       (or thread_disambiguate)
 
-Otherwise, the resolver returns an `Ambiguity` and the caller surfaces
-a numbered prompt.
+`min_match_score` defaults to `0.5` (config key `[thresholds]
+min_match_score`). The floor is what stops a single-candidate corpus
+from auto-picking a hallucinated match: with only one open thread in
+the vault, the delta check is trivially satisfied against a 0.0
+runner-up, so the floor is the only thing keeping a base score of
+~0.18 ("send bern" fuzz-matched against `SGB`) from being committed
+to the preview.
+
+Resolver return contract:
+
+- **`SlotValue`** — top candidate is above the floor AND the margin
+  over the runner-up is at least the delta threshold. Caller commits
+  the value with no prompt.
+- **`Ambiguity`** — top candidate is above the floor but the margin
+  is below threshold (the user should pick between plausible
+  alternatives). Caller prompts in interactive mode; in
+  non-interactive mode (`--yes`, `--dry-run`, `--json`, or no TTY)
+  the caller auto-picks the top candidate, because it has already
+  cleared the absolute floor.
+- **`None`** — *no* candidate clears the floor (or the corpus is
+  empty). Caller treats the slot as unresolved: required slot → exit
+  5 with "missing required slot"; optional slot → omit the flag.
+  Below-floor candidates MUST NOT be returned in an `Ambiguity` — the
+  non-interactive auto-pick would otherwise smuggle a bad match
+  through, which is exactly what the floor exists to prevent.
 
 ### 5.4 Date resolution
 
-`dateparser.parse(query, settings={'PREFER_DATES_FROM': 'future',
-'RELATIVE_BASE': today()})` is invoked on the whole query. The matched
-span (returned via `dateparser.search.search_dates`) is recorded so it
-can be stripped from the body.
+`dateparser.search.search_dates(query, settings={'PREFER_DATES_FROM':
+'future', 'RELATIVE_BASE': today()})` is invoked on the whole query.
+Every matched span is recorded so it can be stripped from the body.
 
-If multiple date spans are found, the resolver picks the one that best
-aligns with the intent's date slot semantics (e.g. `--due` prefers
-future, `--scheduled` prefers near-future). If still ambiguous, prompt
-the user.
+**Pronoun / connective guard.** `dateparser` is known to fire on bare
+English tokens that carry no date intent — most notably the pronouns
+"me" / "us" / "you" / "him" / "her" and the connectives "to" / "on" /
+"in" / "at" / "by" / "for" / "of" / "the" / "a" / "an" / "this" /
+"next" / "last" (when matched as the *entire* span, not as part of a
+larger phrase like "next tuesday"). Concretely, `search_dates("remind
+me to send bern an email next tuesday")` returns `[('me',
+'2026-05-20')]` and entirely misses "next tuesday".
+
+To filter these false positives, the resolver MUST reject a matched
+span unless it contains **at least one of**:
+
+- a digit (any `\d`), or
+- a weekday name (`monday`–`sunday`, case-insensitive), or
+- a month name (`january`–`december`, or short forms `jan`–`dec`), or
+- one of: `today`, `tomorrow`, `yesterday`, `am`, `pm`.
+
+A span like "next tuesday" passes (contains `tuesday`); "me" fails
+(no digit, no day, no month, no anchor token). The pre-existing
+`STOPWORD_SPANS` set may remain as a belt-and-braces secondary filter,
+but the positive-anchor rule above is the primary gate.
+
+**Multi-DATE-slot dispatch.** When an Intent declares more than one
+DATE slot (e.g. an intent with both `due` and `scheduled`) and the
+query yields a single span, the **first DATE slot in `intent.slots`
+order** is filled; additional spans, if any, fill subsequent DATE
+slots in order. The resolver MUST NOT duplicate one parsed span across
+multiple slots. (For the alpha intent set, only one DATE slot is
+declared per intent — see §4.2 — so this rule is defensive but
+unambiguous when future intents add a second DATE slot.)
+
+If a single DATE slot has multiple plausible spans (e.g. "tomorrow or
+friday"), prompt the user with an `Ambiguity`.
 
 ### 5.5 Body composition
 
@@ -568,23 +665,61 @@ Triggered when `confidence < intent_confidence_min` and
 
 ### 7.2 Scenarios
 
-| #  | Query                                                  | Expected outcome                                                                |
-|----|--------------------------------------------------------|---------------------------------------------------------------------------------|
-| 1  | `remind me to call alice friday`                       | Preview: `buffer add-action <thread> "call Alice <Last>" --due <date>`; y/N    |
-| 2  | `remind alice about the launch friday`                 | Disambiguation prompt: two Alices.                                              |
-| 3  | `note that the SGB meeting went well`                  | Preview: `notes new --type meeting --thread Projects/SGB --body "..."`; y/N    |
-| 4  | `what's on my plate`                                   | Preview: `tasks list --status pending`; y/N                                     |
-| 5  | `yesterday I talked to bern about migration`           | Date past + non-action verb → classify as `notes new`, date in body, not slot   |
-| 6  | `delete the launch thread`                             | Exit 6, "ask refuses destructive ops; use `threads delete` directly."           |
-| 7  | `next steps on the launch`                             | Exit 3, "Could not classify intent. Try ..."                                    |
-| 8  | (empty string)                                         | Exit 5, usage hint.                                                             |
-| 9  | `remind me to xyz`                                     | Missing date slot — prompt or accept None? Accept None (optional), exec.        |
-| 10 | `remind me to call bern on 2026-02-30`                 | Date invalid; surface dateparser error; exit 5.                                 |
-| 11 | `add buffer entry for SGB: review the doc by tuesday`  | Preview: thread = Projects/SGB, due = next Tuesday, body = "review the doc"     |
-| 12 | `tell him to call back` (coreference)                  | No person resolves; exit 4 with hint that pronouns are not supported.           |
-| 13 | `--yes remind me to drink water at 3pm`                | No confirmation prompt; exec immediately; log records `confirmed: true (--yes)` |
-| 14 | `--dry-run` on any happy-path query                    | Preview prints, no execution, no prompt, exit 0.                                |
-| 15 | Underlying `buffer` returns exit 1                     | ask exits 1; stderr from buffer is preserved.                                   |
+The alpha acceptance gate (PLAN S11.5) runs each row in **§7.2a**
+below as `ask --dry-run "<query>"` against the fixture vault, and
+asserts that the rendered preview string matches the **Expected
+preview** column **byte-for-byte**. Failing rows block the DoD.
+
+§7.2a is the *normative* alpha gate. §7.2b lists less-mechanical
+behaviors (exit codes, prompts, dim line, log shape) that are tested
+in unit/integration tests but do not need byte-exact previews.
+
+**Anchor:** all date expectations below assume `today() = 2026-05-15`
+(a Friday). The fixture vault contains `people/Bern Sellmeyer.md`,
+`people/Alice Chen.md`, `people/Alice Vasquez.md`, and
+`threads/Processes/SGB.md` with `status: open`. See PLAN S0 fixture
+spec for the exact tree.
+
+#### 7.2a — Byte-exact preview gate (alpha DoD)
+
+| #   | Query                                                            | Expected preview (stdout, --dry-run)                                                    |
+|-----|------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| A1  | `remind me to send bern an email next tuesday`                   | `buffer add-action Processes/SGB 'send bern an email' --due 2026-05-19`                 |
+| A2  | `remind me to review the SGB doc friday`                         | `buffer add-action Processes/SGB 'review the doc' --due 2026-05-22`                     |
+| A3  | `note that the SGB meeting ran long`                             | `buffer add-text Processes/SGB 'the meeting ran long'`                                  |
+| A4  | `save this link https://example.com/x for SGB`                   | `buffer add-ref Processes/SGB https://example.com/x`                                    |
+| A5  | `what's in my buffer`                                            | `buffer list`                                                                           |
+
+Each row above MUST produce its expected preview verbatim — no extra
+flags (no spurious `--scheduled`), no un-stripped date / thread tokens
+in the body, no shell-quoting drift beyond what `shlex.quote` produces
+for the value. The S11.5 acceptance runner asserts string equality.
+
+#### 7.2b — Behavioral scenarios (exit codes, prompts, logging)
+
+| #   | Query / flags                                                    | Expected outcome                                                                |
+|-----|------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| B1  | `next steps on the launch`                                       | Exit 3, "could not classify intent. Try ..."                                    |
+| B2  | (empty string)                                                   | Exit 5, "empty query" hint.                                                     |
+| B3  | `delete the launch thread`                                       | Exit 3 in alpha (no destructive intent seeded yet) — but exit 6 if seeded.      |
+| B4  | `--yes` happy path (A1 query)                                    | No confirmation prompt; underlying `buffer` runs; log `confirmed: true`.        |
+| B5  | `--dry-run` happy path (A1 query)                                | Preview to stdout; no prompt; no execution; exit 0.                             |
+| B6  | confirm path with stdin `n\n` (A1 query)                         | Exit 2; buffer.md untouched.                                                    |
+| B7  | `--json` (A1 query)                                              | One JSON line on stdout with `intent`, `cmd`, `preview`; no execution.          |
+| B8  | `what's in my buffer` (read-only)                                | Dim `[ask → buffer list]` on stderr; auto-execute; no prompt.                   |
+| B9  | `remind me to xyz` (no thread match)                             | Exit 5, "missing required slot 'thread'". (Floor kept SGB out — score < 0.5.)   |
+| B10 | `remind me to call bern on 2026-02-30` (bad date)                | `--dry-run` does not crash; the invalid token stays in the body; exit 0.        |
+| B11 | underlying `buffer` exits non-zero (mock)                        | ask exits 1; stderr from buffer is preserved.                                   |
+| B12 | log file shape after any successful run                          | One JSONL line per PRD §4.5 keys, timestamp parseable, `intent` non-null on B4. |
+
+#### 7.2c — Out of scope for alpha (do not test)
+
+- Cross-utility scenarios (`tasks`, `notes`, `threads`, `people`,
+  `lint`) — beta/GA gate per §8.8.
+- Person-name canonicalization in the body ("bern" → "Bern Sellmeyer")
+  — `buffer.add-action` has no PERSON slot in the alpha (see §4.2).
+- Two-action composition; coreference resolution — explicit
+  non-goals per §1.3.
 
 ### 7.3 Phase B–specific scenarios
 

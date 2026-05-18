@@ -117,6 +117,48 @@ in_fm { next }
 print_lines { print }
 ' "$temp_summary" > "$temp_file"
 
+# Strip empty H3+ headers (keep H1/H2 always; keep H3+ only if there is
+# body text before the next same-or-higher-level header). A sub-header
+# does not count as body, so a chain of empty H3 -> empty H4 collapses
+# away too. H1/H2 are always preserved per the agenda template.
+awk '
+{ lines[NR] = $0; n = NR }
+function header_level(s,    k, lvl) {
+    if (s !~ /^#+[[:space:]]+/) return 0
+    lvl = 0
+    for (k = 1; k <= length(s); k++) {
+        if (substr(s, k, 1) == "#") lvl++; else break
+    }
+    return lvl
+}
+function is_hr(s,    t) {
+    # Markdown horizontal rule: 3+ of -, *, or _ only (whitespace ignored).
+    # Used as a decorative separator in the agenda template; not body.
+    t = s
+    gsub(/[[:space:]]/, "", t)
+    if (length(t) < 3) return 0
+    if (t ~ /^-+$/) return 1
+    if (t ~ /^\*+$/) return 1
+    if (t ~ /^_+$/) return 1
+    return 0
+}
+END {
+    for (i = 1; i <= n; i++) {
+        line = lines[i]
+        level = header_level(line)
+        if (level == 0 || level <= 2) { print line; continue }
+        has_body = 0
+        for (j = i + 1; j <= n; j++) {
+            nl = lines[j]
+            nlvl = header_level(nl)
+            if (nlvl > 0 && nlvl <= level) break
+            if (nlvl == 0 && nl ~ /[^[:space:]]/ && !is_hr(nl)) { has_body = 1; break }
+        }
+        if (has_body) print line
+    }
+}
+' "$temp_file" > "$temp_file.stripped" && mv "$temp_file.stripped" "$temp_file"
+
 # Re-add metadata in pandoc compatible structure
 cat "$metadata_file" "$temp_file" > "$temp_file.tmp"
 # Rename the temporary file to the original file

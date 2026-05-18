@@ -350,7 +350,7 @@ case "$subcommand" in
         dt=$(date '+%Y-%m-%d-%H-%M-%S')
         new_note="$NOTES_DIR/$dt.md"
         cp $note $new_note
-        sed -i '' '1s/$/ COPY/' $new_note
+        sed -i '' '/^topic:/s/$/ COPY/' $new_note
         echo "Copied $selected_note to $dt.md"
         ;;
 
@@ -360,7 +360,7 @@ case "$subcommand" in
         dt=$(date '+%Y-%m-%d-%H-%M-%S')
         new_note="$NOTES_DIR/$dt.md"
         cp $note $new_note
-        sed -i '' '1s/$/ STRIPPED/' $new_note
+        sed -i '' '/^topic:/s/$/ STRIPPED/' $new_note
         echo "Copied $selected_note to $dt.md"
         echo "Stripping $dt.md"
         notes_strip $dt.md

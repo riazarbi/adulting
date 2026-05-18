@@ -17,7 +17,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
-HOME = Path(os.path.expanduser('~/.adulting'))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402

@@ -43,7 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.path.expanduser('~/.adulting'))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'

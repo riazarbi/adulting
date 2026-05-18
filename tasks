@@ -41,13 +41,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.path.expanduser('~/.adulting'))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
 LOGS_DIR = HOME / 'logs'
 BUFFER_FILE = HOME / 'buffer.md'
 CONFIG_FILE = HOME / 'config.yaml'
+
+# Embedded backend: a private copy of the binary plus its isolated data
+# directory and rcfile, all under ADULTING_HOME so a global `task` install
+# (if present) operates on different state.
+TASK_BIN = HOME / 'bin' / 'task'
+TASK_DATA = HOME / 'task-data'
+TASK_RC = HOME / 'taskrc'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 # ACTION line shape (in notes/ or logs/): optional (Person), description,
@@ -68,13 +75,28 @@ ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 
 # ---------- helpers ----------
 
-def task_in_path():
-    return shutil.which('task') is not None
+def task_installed():
+    return TASK_BIN.exists()
 
 
 def require_task():
-    if not task_in_path():
-        die("'task' (taskwarrior) not in PATH")
+    if not task_installed():
+        die(f"embedded backend not installed at {TASK_BIN}; run `tasks install`")
+
+
+def task_cmd(*args):
+    """Build argv for the embedded binary. Always pair with env=task_env()
+    on the subprocess call so TASKDATA/TASKRC point at our private dirs."""
+    return [str(TASK_BIN), *args]
+
+
+def task_env():
+    """Env that pins the embedded backend at its private data dir + rcfile,
+    isolated from any global install the user may also have."""
+    env = dict(os.environ)
+    env['TASKDATA'] = str(TASK_DATA)
+    env['TASKRC'] = str(TASK_RC)
+    return env
 
 
 def die(msg, code=1):
@@ -160,7 +182,7 @@ def tw_modify(uuid, **fields):
     Pass `None` to skip a field (no-op); pass `''` to clear a tw field
     (taskwarrior's canonical `attr:` empty form). Dynamic field names go
     via `**{name: value}` unpacking."""
-    cmd = ['task', 'rc.confirmation:no', uuid, 'modify']
+    cmd = task_cmd('rc.confirmation:no', uuid, 'modify')
     for key, val in fields.items():
         if not _TW_FIELD_RE.match(key):
             raise ValueError(
@@ -170,26 +192,27 @@ def tw_modify(uuid, **fields):
         cmd.append(f'{key}:{val}')
     if cmd[-1] == 'modify':
         return None
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True, env=task_env())
 
 
 # ---------- UDA bootstrap ----------
 
 def ensure_uda():
-    """Configure the `source` UDA in taskwarrior. Idempotent. Silent no-op
-    if `task` is missing."""
-    if not task_in_path():
+    """Configure the `source` UDA on the embedded backend. Idempotent.
+    Silent no-op if the embedded binary isn't installed yet."""
+    if not task_installed():
         return
-    result = subprocess.run(['task', '_config'], capture_output=True, text=True)
+    env = task_env()
+    result = subprocess.run(task_cmd('_config'), capture_output=True, text=True, env=env)
     if 'uda.source.type' in (result.stdout or ''):
         return
     subprocess.run(
-        ['task', 'rc.confirmation:no', 'config', 'uda.source.type', 'string'],
-        capture_output=True, check=True,
+        task_cmd('rc.confirmation:no', 'config', 'uda.source.type', 'string'),
+        capture_output=True, check=True, env=env,
     )
     subprocess.run(
-        ['task', 'rc.confirmation:no', 'config', 'uda.source.label', 'Source note'],
-        capture_output=True, check=True,
+        task_cmd('rc.confirmation:no', 'config', 'uda.source.label', 'Source note'),
+        capture_output=True, check=True, env=env,
     )
 
 
@@ -271,16 +294,16 @@ def find_task_anchors():
 
 
 def load_all_tw_tasks():
-    """Export every tw task (all statuses) as a uuid8 -> task dict."""
+    """Export every backend task (all statuses) as a uuid8 -> task dict."""
     require_task()
-    result = subprocess.run(['task', 'rc.confirmation:no', 'export'],
-                            capture_output=True, text=True)
+    result = subprocess.run(task_cmd('rc.confirmation:no', 'export'),
+                            capture_output=True, text=True, env=task_env())
     if result.returncode != 0:
-        die(f"`task export` failed: {(result.stderr or '').strip()}")
+        die(f"backend export failed: {(result.stderr or '').strip()}")
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else []
     except json.JSONDecodeError as e:
-        die(f"failed to parse `task export`: {e}")
+        die(f"failed to parse backend export: {e}")
     out = {}
     for t in data:
         uuid = t.get('uuid', '')
@@ -365,8 +388,8 @@ def task_uuid_after_add(stdout):
     m = re.search(r'Created task (\d+)\.', stdout or '')
     if not m:
         return ''
-    result = subprocess.run(['task', m.group(1), 'export'],
-                            capture_output=True, text=True)
+    result = subprocess.run(task_cmd(m.group(1), 'export'),
+                            capture_output=True, text=True, env=task_env())
     if result.returncode != 0 or not result.stdout.strip():
         return ''
     try:
@@ -403,9 +426,9 @@ def cmd_ingest(args):
     if not plan:
         return 0, []
 
-    if not task_in_path():
-        print("error: 'task' (taskwarrior) not in PATH; install it or remove the ACTION: lines.", file=sys.stderr)
-        return 0, [(f"{note}:{ln}", ["task not in PATH"]) for note, ln, *_ in plan]
+    if not task_installed():
+        print(f"error: embedded backend not installed at {TASK_BIN}; run `tasks install` or remove the ACTION: lines.", file=sys.stderr)
+        return 0, [(f"{note}:{ln}", ["embedded backend not installed"]) for note, ln, *_ in plan]
 
     succeeded = 0
     failed = []
@@ -417,15 +440,15 @@ def cmd_ingest(args):
         full_desc = f'({assignee}) {description}' if assignee else description
         # No project: thread is derived at query time from the source note's
         # `threads:` frontmatter, which can list multiple threads.
-        cmd = ['task', 'add', f'source:{source_for(note)}', *attr_args, full_desc]
+        cmd = task_cmd('add', f'source:{source_for(note)}', *attr_args, full_desc)
         if args.dry_run:
             if not args.quiet:
                 print(f"would: {' '.join(repr(a) if ' ' in a else a for a in cmd)}")
             continue
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=task_env())
         except subprocess.CalledProcessError as e:
-            failed.append((prefix, [f"task add failed: {e.stderr.strip() or e.stdout.strip()}"]))
+            failed.append((prefix, [f"backend add failed: {e.stderr.strip() or e.stdout.strip()}"]))
             continue
         uuid_prefix = task_uuid_after_add(result.stdout)[:8]
         if not uuid_prefix:
@@ -436,8 +459,8 @@ def cmd_ingest(args):
             # tw task already created is now an orphan that `rebuild`
             # will surface for manual cleanup.
             failed.append((prefix, [
-                "could not resolve uuid after `task add`; source left as "
-                "ACTION: (tw task now orphaned, see `tasks rebuild`)"]))
+                "could not resolve uuid after backend add; source left as "
+                "ACTION: (backend record now orphaned, see `tasks rebuild`)"]))
             continue
         rewrite_action_to_task(note, line_no, uuid_prefix)
         succeeded += 1
@@ -477,9 +500,9 @@ def tw_status_to_state(s):
 
 
 def cmd_sync(args):
-    if not task_in_path():
+    if not task_installed():
         return 0
-    result = subprocess.run(['task', 'export'], capture_output=True, text=True)
+    result = subprocess.run(task_cmd('export'), capture_output=True, text=True, env=task_env())
     if result.returncode != 0:
         return 0
     tasks = json.loads(result.stdout) if result.stdout.strip() else []
@@ -519,8 +542,8 @@ def cmd_sync(args):
                     print(f"status->src: {note.stem}  #{t.get('id', '?')}  TASK->DONE")
             elif src_state == 'done' and tw_state == 'open':
                 try:
-                    subprocess.run(['task', t['uuid'], 'done'],
-                                   capture_output=True, text=True, check=True)
+                    subprocess.run(task_cmd(t['uuid'], 'done'),
+                                   capture_output=True, text=True, check=True, env=task_env())
                     status_updates_to_tw += 1
                     if not args.quiet:
                         print(f"status->tw: {note.stem}  #{t.get('id', '?')}  done")
@@ -571,10 +594,10 @@ def resolve_full_uuid(uuid_prefix):
     not unique or not found. taskwarrior accepts a UUID prefix as a leading
     positional filter and matches across all statuses (incl completed)."""
     require_task()
-    result = subprocess.run(['task', uuid_prefix, 'export'],
-                            capture_output=True, text=True)
+    result = subprocess.run(task_cmd(uuid_prefix, 'export'),
+                            capture_output=True, text=True, env=task_env())
     if result.returncode != 0:
-        die(f"task export failed: {result.stderr.strip() or result.stdout.strip()}")
+        die(f"backend export failed: {result.stderr.strip() or result.stdout.strip()}")
     tasks = json.loads(result.stdout) if result.stdout.strip() else []
     if not tasks:
         die(f"no task found with uuid prefix {uuid_prefix!r}")
@@ -601,14 +624,14 @@ def cmd_done(args):
             note.write_text('\n'.join(lines), encoding='utf-8')
             print(f"source: {note.stem}:{idx + 1}  TASK -> DONE")
     try:
-        subprocess.run(['task', full_uuid, 'done'],
-                       capture_output=True, text=True, check=True)
+        subprocess.run(task_cmd(full_uuid, 'done'),
+                       capture_output=True, text=True, check=True, env=task_env())
     except subprocess.CalledProcessError as e:
-        # taskwarrior already-done is fine; otherwise propagate
+        # backend already-done is fine; otherwise propagate
         msg = (e.stderr or e.stdout or '').strip()
         if 'already' not in msg.lower():
-            die(f"task done failed: {msg}")
-    print(f"taskwarrior: {full_uuid[:8]} marked done")
+            die(f"backend done failed: {msg}")
+    print(f"backend: {full_uuid[:8]} marked done")
     return 0
 
 
@@ -761,10 +784,10 @@ def fmt_tw_date(s):
 
 def _export_filtered(filter_args):
     require_task()
-    cmd = ['task'] + list(filter_args) + ['status:pending', 'export']
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    cmd = task_cmd(*filter_args, 'status:pending', 'export')
+    result = subprocess.run(cmd, capture_output=True, text=True, env=task_env())
     if result.returncode != 0:
-        die(f"task export failed: {result.stderr.strip()}")
+        die(f"backend export failed: {result.stderr.strip()}")
     tasks = json.loads(result.stdout) if result.stdout.strip() else []
     return tasks
 
@@ -823,10 +846,10 @@ def cmd_next(args):
 def cmd_show(args):
     require_task()
     full_uuid = resolve_full_uuid(args.uuid)
-    result = subprocess.run(['task', full_uuid, 'export'],
-                            capture_output=True, text=True)
+    result = subprocess.run(task_cmd(full_uuid, 'export'),
+                            capture_output=True, text=True, env=task_env())
     if result.returncode != 0:
-        die(f"task export failed: {result.stderr.strip()}")
+        die(f"backend export failed: {result.stderr.strip()}")
     data = json.loads(result.stdout) if result.stdout.strip() else []
     if not data:
         die(f"no task with uuid {full_uuid}")
@@ -964,10 +987,10 @@ def cmd_rebuild(args):
 
     ts = datetime.now().strftime('%Y%m%d-%H%M%S')
     backup_path = HOME / f'.tasks-backup-{ts}.json'
-    bk = subprocess.run(['task', 'rc.confirmation:no', 'export'],
-                        capture_output=True, text=True)
+    bk = subprocess.run(task_cmd('rc.confirmation:no', 'export'),
+                        capture_output=True, text=True, env=task_env())
     if bk.returncode != 0:
-        die(f"backup `task export` failed: {(bk.stderr or '').strip()}")
+        die(f"backup export failed: {(bk.stderr or '').strip()}")
     backup_path.write_text(bk.stdout, encoding='utf-8')
     print(f"\nBackup: {backup_path}")
 
@@ -982,11 +1005,11 @@ def cmd_rebuild(args):
             r = tw_modify(full_uuid, source=new)
         elif field == 'status':
             if new == 'completed':
-                # `task done` rather than `modify status:completed` so
-                # taskwarrior stamps `end:<now>` itself.
+                # `done` rather than `modify status:completed` so the
+                # backend stamps `end:<now>` itself.
                 r = subprocess.run(
-                    ['task', 'rc.confirmation:no', full_uuid, 'done'],
-                    capture_output=True, text=True)
+                    task_cmd('rc.confirmation:no', full_uuid, 'done'),
+                    capture_output=True, text=True, env=task_env())
             elif new == 'pending':
                 # Clear end: alongside the status change so the task isn't
                 # shown as historically completed-but-pending.

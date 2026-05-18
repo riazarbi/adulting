@@ -114,6 +114,7 @@ in_fm { next }
 }
 /--{10,}/ && print_lines == 0 { print_lines = 1; }
 /# Timesheet/ { exit }
+/# Acceptance/ { exit }
 print_lines { print }
 ' "$temp_summary" > "$temp_file"
 

@@ -25,7 +25,7 @@ A note recording email, message, or letter exchanges with one or more participan
 
 | pattern         | meaning                                                         |
 |-----------------|-----------------------------------------------------------------|
-| `ACTION: ...`   | open action item — ingested into taskwarrior by `tasks`         |
+| `ACTION: ...`   | open action item — ingested into the backend by `tasks`         |
 | `TASK: ...`     | already-ingested action item                                    |
 | `AGREED: ...`   | formal agreement — surfaced in `notes --minutes`                |
 | `RESOLVED: ...` | formal resolution — surfaced in `notes --minutes`               |

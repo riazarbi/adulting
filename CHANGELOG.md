@@ -2,6 +2,26 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-18 - Task backend goes embedded; `ADULTING_HOME` becomes configurable
+
+The task-storage backend is no longer a global system dependency. A private copy of the binary lives inside `ADULTING_HOME` with its own data dir and rcfile, isolated from any other install on the machine. User-facing surfaces (help, skills, docs) stop naming the backend so users and AI agents stop reaching for it directly.
+
+- **`ADULTING_HOME` env var honored across all tools** (default `~/.adulting`). Six Python tools (`tasks`, `buffer`, `threads`, `people`, `lint`) and three bash scripts (`notes`, `notes_pdf`, `notes_minutes`) read it on every invocation; the path was previously hardcoded in nine places (including a literal `/Users/riaz/.adulting/config.yaml` in two of the bash scripts).
+- **`tasks install` subcommand** (one-shot setup): copies a backend binary from `PATH` (e.g. one installed via `brew install task`) into `<ADULTING_HOME>/bin/task`, writes a minimal `<ADULTING_HOME>/taskrc` (`data.location` + `confirmation=no`), creates `<ADULTING_HOME>/task-data/`, and applies the `source` UDA. Flags: `--from-path` (override the source binary), `--migrate` (also copy `~/.task/*` into the new data dir; backs up any pre-existing contents; source is left in place), `--force` (overwrite an existing embedded install).
+- **`tasks` routes every subprocess call through the embedded binary** with `env={TASKDATA, TASKRC}` set, via new `task_cmd(*args)` / `task_env()` helpers. Old `task_in_path()` / `shutil.which('task')` paths replaced by `task_installed()` (checks for `<ADULTING_HOME>/bin/task`). Behavioral effect: the embedded instance is fully isolated — a different `task` install on the same machine (if any) operates on different state.
+- **User-facing strings sanitized**: `tasks --help` no longer mentions taskwarrior by name; `set-priority` / `set-due` / `done` / etc. success lines now print `backend: <uuid8> …`; sync output prints `desc->backend:` / `status->backend:` instead of `->tw:`; `tasks rebuild` warnings say "backend record" / "backend status"; module docstrings updated. Internal code comments retain `tw` shorthand for maintainer context.
+- **Docs purged of taskwarrior mentions**: `README.md` (dependency list, body-keyword table, `tasks` section, data-store tree), `INTEGRATIONS.md` (whole "Taskwarrior" section removed — it's no longer an external integration), `agent/skills/footguns.md` (the "Never call `task` directly" rule deleted — there's nothing to call), `agent/skills/task-workflow.md`, `.claude/skills/bugfix/SKILL.md`, all four `schemas/*.md` (action-line meaning updated). `CHANGELOG.md` left as history.
+- **README adds a "One-time setup" section** pointing first-time users at `tasks install`.
+
+### Operational events (data migration against `~/.adulting/`, not in this repo)
+
+- Backed up `~/.task/` to `~/.task.backup-20260518-151613/` before any change.
+- Ran `./tasks install --migrate` against the live data. New artifacts under `~/.adulting/`: `bin/task` (46MB binary copied from `/opt/homebrew/Cellar/task/3.4.2/bin/task`), `task-data/taskchampion.sqlite3` (1.2MB, full migration of 59 tasks), `taskrc`. Verified end-to-end: `tasks list`, `tasks next`, `tasks set-priority` (then cleared), `tasks --dry-run`.
+- Verified isolation: a write through the embedded backend did not mutate `~/.task/` (and vice versa during the test window).
+- Deleted `~/.task/` after migration verified.
+- `brew uninstall tasksh task` to remove the system binary and the interactive shell wrapper that depended on it. `task` is no longer on `PATH`.
+- `~/.task.backup-20260518-151613/` retained as a recovery snapshot.
+
 ## 2026-05-08 - Skills and prompt move into the repo; `agent-build` deploys all three
 
 The hand-authored agent content (one prompt file, four skill files) was previously developed in a sandbox `.adulting/` copy inside the repo, then manually copied to live. Now those sources live alongside the project as `agent/prompt/*.md` and `agent/skills/*.md` (version-controlled), and `agent-build` deploys them to the target alongside the generated `tools/*.json`.

@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
-"""Bridge ACTION: lines from notes into taskwarrior; keep source TASK:/DONE:
-lines in sync with taskwarrior state. Surface taskwarrior operations as
-opinionated subcommands so taskwarrior itself stays an internal backend.
+"""Bridge ACTION: lines from notes into the task backend; keep source
+TASK:/DONE: lines in sync with backend state. Surface backend operations
+as opinionated subcommands so the backend stays internal.
 
 No-arg invocation (used as a pre-pass by `notes`):
-  1. Configure the `source` UDA in taskwarrior if not already (idempotent).
-  2. Ingest ACTION: lines from notes into taskwarrior, anchoring the source
+  1. Configure the `source` UDA on the backend if not already (idempotent).
+  2. Ingest ACTION: lines from notes into the backend, anchoring the source
      line back with an 8-char UUID HTML comment.
-  3. Sync source <-> taskwarrior:
-     - Description drift (source body != tw description): source wins.
+  3. Sync source <-> backend:
+     - Description drift (source body != backend description): source wins.
      - Status drift: completed-state-wins.
 
 Subcommands:
+  install                        set up the embedded backend (one-shot)
   add <thread> <text>            buffer-append a structured ACTION
-  done <uuid>                    flip source TASK->DONE; tw -> done
-  set-description <uuid> <text>  rewrite source body; sync pushes to tw
+  done <uuid>                    flip source TASK->DONE; mark backend done
+  set-description <uuid> <text>  rewrite source body; sync pushes to backend
   set-assignee <uuid> <person>   rewrite source (Asg) prefix
-  set-due <uuid> <YYYY-MM-DD>    set tw due
-  set-scheduled <uuid> <YYYY-MM-DD>  set tw scheduled
-  set-priority <uuid> <H|M|L>    set tw priority
-  add-depends <uuid> <dep>       add tw depends entry
-  rm-depends <uuid> <dep>        remove tw depends entry
+  set-due <uuid> <YYYY-MM-DD>    set due date
+  set-scheduled <uuid> <YYYY-MM-DD>  set scheduled date
+  set-priority <uuid> <H|M|L>    set priority
+  add-depends <uuid> <dep>       add a depends entry
+  rm-depends <uuid> <dep>        remove a depends entry
   list [filter...]               formatted list with UUID prefix
   next                           top of queue
   show <uuid>                    detail view
 
-`task` must be on PATH for any operation that touches taskwarrior.
+Run `tasks install` once after cloning; everything thereafter goes through
+this CLI.
 """
 
 import argparse
@@ -532,7 +534,7 @@ def cmd_sync(args):
                 if r is not None and r.returncode == 0:
                     desc_updates += 1
                     if not args.quiet:
-                        print(f"desc->tw: {note.stem}  #{t.get('id', '?')}  -> {src_body[:60]}")
+                        print(f"desc->backend: {note.stem}  #{t.get('id', '?')}  -> {src_body[:60]}")
 
             if src_state == 'open' and tw_state == 'done':
                 lines[i] = rewrite_state_in_line(line, 'done')
@@ -546,7 +548,7 @@ def cmd_sync(args):
                                    capture_output=True, text=True, check=True, env=task_env())
                     status_updates_to_tw += 1
                     if not args.quiet:
-                        print(f"status->tw: {note.stem}  #{t.get('id', '?')}  done")
+                        print(f"status->backend: {note.stem}  #{t.get('id', '?')}  done")
                 except subprocess.CalledProcessError:
                     pass
 
@@ -654,12 +656,12 @@ def cmd_set_description(args):
         note.write_text('\n'.join(lines), encoding='utf-8')
         print(f"source: {note.stem}:{idx + 1}  -> {new_text[:60]}")
     else:
-        print(f"warn: no anchored source line for {full_uuid[:8]}; updating tw only", file=sys.stderr)
+        print(f"warn: no anchored source line for {full_uuid[:8]}; updating backend only", file=sys.stderr)
 
     r = tw_modify(full_uuid, description=new_text)
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} description updated")
+    print(f"backend: {full_uuid[:8]} description updated")
     return 0
 
 
@@ -695,7 +697,7 @@ def cmd_set_assignee(args):
     r = tw_modify(full_uuid, description=new_body)
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} description updated")
+    print(f"backend: {full_uuid[:8]} description updated")
     return 0
 
 
@@ -714,7 +716,7 @@ def _set_date_field(uuid_arg, date_str, field):
     r = tw_modify(full_uuid, **{field: f'{date_str}T12:00:00'})
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} {field}:{date_str}")
+    print(f"backend: {full_uuid[:8]} {field}:{date_str}")
     return 0
 
 
@@ -738,7 +740,7 @@ def cmd_set_priority(args):
     r = tw_modify(full_uuid, priority=prio)
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} priority:{prio}")
+    print(f"backend: {full_uuid[:8]} priority:{prio}")
     return 0
 
 
@@ -753,7 +755,7 @@ def cmd_add_depends(args):
     r = tw_modify(full_uuid, depends=dep_uuid)
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} now depends on {dep_uuid[:8]}")
+    print(f"backend: {full_uuid[:8]} now depends on {dep_uuid[:8]}")
     return 0
 
 
@@ -766,7 +768,7 @@ def cmd_rm_depends(args):
     r = tw_modify(full_uuid, depends=f'-{dep_uuid}')
     if r is None or r.returncode != 0:
         die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"taskwarrior: {full_uuid[:8]} no longer depends on {dep_uuid[:8]}")
+    print(f"backend: {full_uuid[:8]} no longer depends on {dep_uuid[:8]}")
     return 0
 
 
@@ -923,7 +925,7 @@ def cmd_rebuild(args):
         new_source, kind, body = hits[0]
         tw = tw_tasks.get(uuid8)
         if tw is None:
-            warnings.append(f"{uuid8}: anchor at {new_source!r} but no tw record")
+            warnings.append(f"{uuid8}: anchor at {new_source!r} but no backend record")
             continue
 
         old_source = tw.get('source', '')
@@ -933,7 +935,7 @@ def cmd_rebuild(args):
         tw_status = tw.get('status', '')
         if tw_status in ('recurring', 'waiting', 'deleted'):
             warnings.append(
-                f"{uuid8}: tw status {tw_status!r} not reconciled "
+                f"{uuid8}: backend status {tw_status!r} not reconciled "
                 f"(source kind: {kind})")
         else:
             want_status = 'pending' if kind == 'TASK' else 'completed'
@@ -948,7 +950,7 @@ def cmd_rebuild(args):
         if u in anchors_by_uuid:
             continue
         status = tw_tasks[u].get('status', '?')
-        warnings.append(f"{u}: in tw ({status}) but no source anchor")
+        warnings.append(f"{u}: in backend ({status}) but no source anchor")
 
     if args.only:
         before = len(changes)
@@ -1037,6 +1039,73 @@ def cmd_rebuild(args):
     return 0
 
 
+# ---------- subcommand: install ----------
+
+def cmd_install(args):
+    """One-shot setup of the embedded backend under ADULTING_HOME.
+
+    Workflow:
+      1. Locate a source binary (--from-path, else `task` on PATH, else error).
+      2. Copy it to <ADULTING_HOME>/bin/task (skips if present unless --force).
+      3. Create <ADULTING_HOME>/task-data and <ADULTING_HOME>/taskrc.
+      4. With --migrate, copy ~/.task/* into task-data (backs up any
+         existing task-data contents first).
+      5. Apply the source-UDA config on the new install.
+
+    Never deletes from ~/.task; migration is copy-only."""
+    src = args.from_path or shutil.which('task')
+    if not src:
+        die("no `task` binary found on PATH and no --from-path given; "
+            "install one (e.g. `brew install task`) then rerun, "
+            "or pass --from-path <binary>")
+    src_path = Path(src).resolve()  # follow symlinks (brew uses one)
+    if not src_path.is_file():
+        die(f"source binary {src_path} does not exist or is not a regular file")
+
+    if TASK_BIN.exists() and not args.force:
+        die(f"{TASK_BIN} already exists; pass --force to overwrite")
+
+    TASK_BIN.parent.mkdir(parents=True, exist_ok=True)
+    TASK_DATA.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(src_path, TASK_BIN)
+    TASK_BIN.chmod(0o755)
+    print(f"binary: {src_path} -> {TASK_BIN}")
+
+    # Minimal rcfile. data.location duplicates the TASKDATA env var so
+    # any direct invocation of the embedded binary (without our env)
+    # still lands in the private dir.
+    if not TASK_RC.exists() or args.force:
+        TASK_RC.write_text(f"data.location={TASK_DATA}\nconfirmation=no\n")
+        print(f"rc:     {TASK_RC}")
+
+    if args.migrate:
+        src_data = Path.home() / '.task'
+        if not src_data.is_dir():
+            print(f"migrate: no data at {src_data}; skipping")
+        else:
+            # Back up any existing contents of TASK_DATA before overwriting.
+            existing = [p for p in TASK_DATA.iterdir()] if TASK_DATA.exists() else []
+            if existing:
+                ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+                bkp = TASK_DATA.with_name(f'task-data.backup-{ts}')
+                shutil.move(str(TASK_DATA), str(bkp))
+                TASK_DATA.mkdir(parents=True)
+                print(f"migrate: backed up existing task-data -> {bkp}")
+            for item in src_data.iterdir():
+                dst = TASK_DATA / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dst)
+                else:
+                    shutil.copy2(item, dst)
+            print(f"migrate: {src_data} -> {TASK_DATA} (source left in place)")
+
+    ensure_uda()
+    print(f"data:   {TASK_DATA}")
+    print("done.")
+    return 0
+
+
 # ---------- main ----------
 
 def cmd_default(args):
@@ -1059,7 +1128,7 @@ def cmd_default(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Bridge ACTION lines to taskwarrior; surface task ops as subcommands.")
+        description="Bridge ACTION lines into the task backend; surface ops as subcommands.")
     parser.add_argument('--dry-run', action='store_true',
                         help="(default invocation only) Show what would be ingested.")
     parser.add_argument('--quiet', action='store_true',
@@ -1076,11 +1145,11 @@ def main():
                        help='8-char UUID prefix; repeatable for multiple deps.')
     p_add.set_defaults(func=cmd_add)
 
-    p_done = sub.add_parser('done', help="Mark a task complete (source + tw).")
+    p_done = sub.add_parser('done', help="Mark a task complete (source + backend).")
     p_done.add_argument('uuid')
     p_done.set_defaults(func=cmd_done)
 
-    p_sd = sub.add_parser('set-description', help="Rewrite source body and tw description.")
+    p_sd = sub.add_parser('set-description', help="Rewrite source body and backend description.")
     p_sd.add_argument('uuid')
     p_sd.add_argument('text')
     p_sd.set_defaults(func=cmd_set_description)
@@ -1090,33 +1159,33 @@ def main():
     p_sa.add_argument('person')
     p_sa.set_defaults(func=cmd_set_assignee)
 
-    p_sdue = sub.add_parser('set-due', help="Set tw due date (YYYY-MM-DD).")
+    p_sdue = sub.add_parser('set-due', help="Set due date (YYYY-MM-DD).")
     p_sdue.add_argument('uuid')
     p_sdue.add_argument('date')
     p_sdue.set_defaults(func=cmd_set_due)
 
-    p_ssch = sub.add_parser('set-scheduled', help="Set tw scheduled date (YYYY-MM-DD).")
+    p_ssch = sub.add_parser('set-scheduled', help="Set scheduled date (YYYY-MM-DD).")
     p_ssch.add_argument('uuid')
     p_ssch.add_argument('date')
     p_ssch.set_defaults(func=cmd_set_scheduled)
 
-    p_sp = sub.add_parser('set-priority', help="Set tw priority H|M|L.")
+    p_sp = sub.add_parser('set-priority', help="Set priority H|M|L.")
     p_sp.add_argument('uuid')
     p_sp.add_argument('priority')
     p_sp.set_defaults(func=cmd_set_priority)
 
-    p_ad = sub.add_parser('add-depends', help="Add a depends entry on tw.")
+    p_ad = sub.add_parser('add-depends', help="Add a depends entry.")
     p_ad.add_argument('uuid')
     p_ad.add_argument('dep_uuid', metavar='dep-uuid')
     p_ad.set_defaults(func=cmd_add_depends)
 
-    p_rd = sub.add_parser('rm-depends', help="Remove a depends entry on tw.")
+    p_rd = sub.add_parser('rm-depends', help="Remove a depends entry.")
     p_rd.add_argument('uuid')
     p_rd.add_argument('dep_uuid', metavar='dep-uuid')
     p_rd.set_defaults(func=cmd_rm_depends)
 
     p_list = sub.add_parser('list', help="List pending tasks (formatted).")
-    p_list.add_argument('filter', nargs='*', help="Optional taskwarrior filter args.")
+    p_list.add_argument('filter', nargs='*', help="Optional backend filter args.")
     p_list.add_argument('--thread', help="Filter to tasks whose source note has this thread (e.g. Processes/SGB).")
     p_list.set_defaults(func=cmd_list)
 
@@ -1129,16 +1198,30 @@ def main():
 
     p_rebuild = sub.add_parser(
         'rebuild',
-        help="Reconcile tw with source-of-truth anchors. Dry-run by default.")
+        help="Reconcile backend state with source-of-truth anchors. Dry-run by default.")
     p_rebuild.add_argument(
         '--apply', action='store_true',
-        help="Write changes to tw (backup is taken first).")
+        help="Write changes to the backend (backup is taken first).")
     p_rebuild.add_argument(
         '--only', choices=['source', 'status', 'description'],
         action='append', default=[],
         help="Limit to one or more change categories (repeatable). "
              "Omit to include all.")
     p_rebuild.set_defaults(func=cmd_rebuild)
+
+    p_install = sub.add_parser(
+        'install',
+        help="Set up the embedded backend under ADULTING_HOME (one-shot).")
+    p_install.add_argument(
+        '--from-path',
+        help="Source binary to copy. Default: first `task` on PATH.")
+    p_install.add_argument(
+        '--migrate', action='store_true',
+        help="Also copy ~/.task/* into the new data dir (source left in place).")
+    p_install.add_argument(
+        '--force', action='store_true',
+        help="Overwrite an existing embedded binary / rcfile.")
+    p_install.set_defaults(func=cmd_install)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

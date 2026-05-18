@@ -11,7 +11,7 @@ A per-thread per-day log of activity, derived from the buffer by `buffer flush`.
 
 Logs are *output* of the buffer-flush ritual — not authored by hand in the way notes are. Each line is one buffer entry: a free-text observation (`TEXT:`), a reference to another file (`REF:`), or an action item (`ACTION:` / `TASK:` / `DONE:`). The day is the resolution; sub-day timestamps are not preserved.
 
-`tasks` ingest scans `logs/` in addition to `notes/`, so ACTION lines in a log become taskwarrior tasks just like ACTION lines in a note. The log file is the action's source for sync purposes.
+`tasks` ingest scans `logs/` in addition to `notes/`, so ACTION lines in a log become backend tasks just like ACTION lines in a note. The log file is the action's source for sync purposes.
 
 ## Fields
 

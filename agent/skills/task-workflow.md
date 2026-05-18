@@ -5,9 +5,8 @@ a task query, or a completed-action report.
 
 The single creation path is **`tasks add`** (delegates to
 `buffer add-action`, which buffers a structured ACTION line that
-becomes a real taskwarrior task on next ingest). All other lifecycle
-operations go through `tasks <subcommand>`. Do not invoke `task`
-directly.
+becomes a real backend task on next ingest). All other lifecycle
+operations go through `tasks <subcommand>`.
 
 ## Add a task
 
@@ -45,14 +44,14 @@ On confirm, run two tools in sequence (one confirm covers both):
 
 1. `tasks ["add", "<thread>", "<text>", "--due", "<date>", ...]` — buffers the action.
 2. `buffer ["flush"]` — writes to logs/, auto-runs ingest, creates the
-   tw task. The output of this call contains the new 8-char uuid on
-   the `ingested: <uuid>  ...` line.
+   backend task. The output of this call contains the new 8-char uuid
+   on the `ingested: <uuid>  ...` line.
 
 Parse the uuid from the flush output and relay: `Added abcd1234.`
 
 Why two steps: `tasks add` is the validated capture (returns
 "buffered: ..."); `buffer flush` is the commit (writes to logs/ and
-ingests into taskwarrior). The buffer is a queue you can review with
+ingests into the backend). The buffer is a queue you can review with
 `buffer list` and amend with `buffer rm` before flushing.
 
 ### Examples
@@ -91,7 +90,7 @@ stable; numeric IDs aren't — always use 8-char uuid prefix.
 
 ### Hold vs. block
 
-- **Time-based hold** — currently no `set-wait` (taskwarrior has
+- **Time-based hold** — currently no `set-wait` (the backend has
   `wait:` but we don't expose it yet). Use `set-scheduled` instead;
   the task hides from `next` until that date.
 - **Blocked on another task** — `tasks add-depends`. If "I can't do

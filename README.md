@@ -7,7 +7,7 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 - **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/.adulting/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
 - **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/.adulting/threads/{Projects,Processes,Topics}/`.
 - **Person** — a contact you track. People live in `~/.adulting/people/` and are link targets — never threads themselves.
-- **Action** — a task. Notes contain `ACTION:` lines that get ingested into [taskwarrior](https://taskwarrior.org) by the `tasks` bridge, then rewritten in place to `TASK:`.
+- **Action** — a task. Notes contain `ACTION:` lines that get ingested into the task backend by the `tasks` bridge, then rewritten in place to `TASK:`.
 
 # Installation
 
@@ -30,8 +30,19 @@ export PATH=/Users/riaz/bin/adulting:$PATH
 
 - `bash`, `python3`, `awk`, `sed`, `grep` — required by everything
 - `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes pdf`, `notes minutes`, `notes agenda`
-- [`task`](https://taskwarrior.org) (taskwarrior) — required by the `tasks` bridge. Install via `brew install task` on macOS.
 - macOS `open` (or Linux `xdg-open`) — used to launch Obsidian for note editing
+
+## One-time setup
+
+After cloning, set up the task backend (private to this install, lives under `~/.adulting/`):
+
+```zsh
+tasks install
+```
+
+`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
+
+The data location follows `ADULTING_HOME` if set (default `~/.adulting`).
 
 # Scripts
 
@@ -55,7 +66,7 @@ Markdown note taker. Notes live in `~/.adulting/notes/` as `<timestamp>.md` file
 
 | Keyword     | Meaning                                                                  |
 |-------------|--------------------------------------------------------------------------|
-| `ACTION:`   | Action item — ingested by `tasks` into taskwarrior, then rewritten to `TASK:` |
+| `ACTION:`   | Action item — ingested by `tasks` into the backend, then rewritten to `TASK:` |
 | `TASK:`     | Already-ingested action (set by `tasks`; don't write by hand)            |
 | `AGREED:`   | Formal agreement — surfaced in `notes minutes`                         |
 | `RESOLVED:` | Formal resolution — surfaced in `notes minutes`                        |
@@ -104,21 +115,23 @@ Same skeleton shape, applied to people files.
 
 ## tasks
 
-Bridge from `ACTION:` lines in notes into taskwarrior.
+Bridge from `ACTION:` lines in notes into the task backend. Run `tasks install` once before first use (see *One-time setup* above).
 
 | Command                  | What it does                                                                                |
 |--------------------------|---------------------------------------------------------------------------------------------|
-| `tasks`                  | Walk notes, validate every `ACTION:` line, ingest valid ones via `task add`, rewrite to `TASK:` |
-| `tasks --dry-run`        | Show what would be ingested without calling `task` or modifying files                       |
+| `tasks`                  | Walk notes, validate every `ACTION:` line, ingest valid ones into the backend, rewrite to `TASK:` |
+| `tasks --dry-run`        | Show what would be ingested without modifying backend state or files                        |
 | `tasks --quiet`          | Suppress per-action output                                                                  |
+| `tasks install`          | Set up the embedded backend (one-shot; `--migrate` to copy existing `~/.task/` data)        |
+| `tasks <subcommand>`     | See `tasks --help` for the full list of mutating / read operations on the backend           |
 
 Validation rules:
 - Each entry in the note's `threads:` list must resolve to an existing thread file.
 - If the action has `(Assignee)`, that name must resolve to `people/<name>.md`.
 - Description must be non-empty.
-- Any inline attrs (in the trailing HTML comment, e.g. `due:2026-05-08 priority:H`) are validated and applied to the new taskwarrior task at create time.
+- Any inline attrs (in the trailing HTML comment, e.g. `due:2026-05-08 priority:H`) are validated and applied to the new task at create time.
 
-Failures are printed; the source line is left as `ACTION:` so you can fix it and re-run. `task` (taskwarrior) is checked lazily — only errors when there's something to ingest.
+Failures are printed; the source line is left as `ACTION:` so you can fix it and re-run. The backend is checked lazily — only errors when there's something to ingest.
 
 ## lint
 
@@ -135,7 +148,7 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 # Data store
 
 ```
-~/.adulting/
+~/.adulting/                    # ADULTING_HOME (override via env var)
 ├── .obsidian/                  # Obsidian vault config
 ├── notes/                      # markdown notes (one file per note)
 ├── threads/
@@ -144,6 +157,9 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 │   └── Topics/                 # interest areas / catchalls
 ├── people/                     # people files (relationship link targets)
 ├── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
+├── bin/task                    # embedded backend binary (written by `tasks install`)
+├── task-data/                  # embedded backend's private data dir
+├── taskrc                      # embedded backend's rcfile
 └── actions_log.json            # legacy, no longer maintained — delete when you're done with cross-checks
 ```
 

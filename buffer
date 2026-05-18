@@ -2,7 +2,7 @@
 """Operate on the buffer queue at ~/.adulting/buffer.md.
 
 The buffer is the staging area for captured items. Three line types:
-    ACTION:  action item that becomes a taskwarrior task after flush
+    ACTION:  action item that becomes a backend task after flush
     TEXT:    free-text observation
     REF:     reference to another file in the vault
 
@@ -14,7 +14,7 @@ Single line format (no multi-line entries; one capture per line):
 
 where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
 wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry the
-taskwarrior metadata that ingest applies on task creation:
+backend metadata that ingest applies on task creation:
 
     due:YYYY-MM-DD     scheduled:YYYY-MM-DD
     priority:H|M|L     depends:<uuid8>

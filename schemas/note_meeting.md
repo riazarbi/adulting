@@ -27,7 +27,7 @@ A note recording a meeting with one or more counterparties. Lives in `~/.adultin
 
 | pattern         | meaning                                                         |
 |-----------------|-----------------------------------------------------------------|
-| `ACTION: ...`   | open action item — ingested into taskwarrior by `tasks`         |
+| `ACTION: ...`   | open action item — ingested into the backend by `tasks`         |
 | `TASK: ...`     | already-ingested action item (after `tasks` has run)            |
 | `AGREED: ...`   | formal agreement — surfaced in `notes --minutes`                |
 | `RESOLVED: ...` | formal resolution — surfaced in `notes --minutes`               |

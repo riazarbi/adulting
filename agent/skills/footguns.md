@@ -3,17 +3,6 @@
 Common mistakes to avoid. Read once at session start and again
 whenever something feels off.
 
-## Never call `task` directly
-
-The taskwarrior binary is the storage backend; it's not your
-interface. Use `tasks <subcommand>`. `task add`, `task <id> modify`,
-`task <id> done` skip the validation gates that ensure source notes
-and tw stay in sync. The source-wins sync policy specifically
-assumes nothing else is mutating tw description fields.
-
-If you find yourself reaching for `task`, stop. There's a `tasks`
-subcommand for what you want.
-
 ## UUIDs over IDs
 
 Numeric IDs (`#42`, `#185`) are unstable — they shift as tasks

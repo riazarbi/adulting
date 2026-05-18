@@ -59,7 +59,7 @@ CREATION:
 MODIFICATION:
     edit       Select a note, open in default editor.
                    Special keywords you can use in the body:
-                       "ACTION:"   Action item — ingested into taskwarrior by \`tasks\` on next invocation.
+                       "ACTION:"   Action item — ingested into the backend by \`tasks\` on next invocation.
                        "TASK:"     Already-ingested action item (set by \`tasks\`; do not write by hand).
                        "AGREED:"   Statement the meeting formally agrees on.
                        "RESOLVED:" Statement the meeting resolves.

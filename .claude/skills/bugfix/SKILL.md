@@ -53,13 +53,13 @@ not by guessing what a fix would look like.
 Cheapest first:
 
 - Inspect the live data: read the actual on-disk records the bug
-  involves (e.g., the taskwarrior export, the source note
-  frontmatter, the buffer line). Confirm field B holds what you
-  think and field A is empty (or vice versa).
+  involves (e.g., `tasks show <uuid>`, the source note frontmatter,
+  the buffer line). Confirm field B holds what you think and field A
+  is empty (or vice versa).
 - If on-disk inspection is ambiguous, add a temporary `print` or
   small probe script and run it. **Mark probes clearly** so you
   can delete them in cleanup.
-- Run a focused command (`tasks list`, `task <id> export`,
+- Run a focused command (`tasks list`, `tasks show <uuid>`,
   `buffer list`) that surfaces the relevant fields.
 
 If observation contradicts the theory: discard it, return to
@@ -150,9 +150,10 @@ When relaying back:
   out of scope.
 - **Skipping repro because the cause looks obvious.** Code reading
   is theory; running the command is fact.
-- **Editing tw tasks directly with `task` to "fix" bad data.** The
-  source of truth is the note (`ACTION:`/`TASK:` lines) and the
-  buffer; mutating tw bypasses ingest and creates fresh drift.
-  See `agent/skills/footguns.md` — *Never call `task` directly*.
+- **Editing backend state directly to "fix" bad data.** The source
+  of truth is the note (`ACTION:`/`TASK:` lines) and the buffer;
+  mutating the backend out-of-band bypasses ingest and creates fresh
+  drift. Use `tasks <subcommand>` (or `tasks rebuild`) to drive
+  changes from source.
 - **Leaving probes behind.** A stray `print(...)` in committed
   code is a sign the bugfix loop didn't finish.

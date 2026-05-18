@@ -1,101 +1,11 @@
 # External integrations
 
-This codebase relies on three external applications. Each section
+This codebase relies on two external applications. Each section
 documents what we use it for, the configuration the integration
 needs, and the steps a fresh install requires.
 
-## Taskwarrior (internal backend)
-
-Taskwarrior is **not user-facing in this system**. It's the backend that
-stores task state; the `tasks` script is the only sanctioned interface
-to it. Treat `task` (the binary) the way you'd treat a database driver:
-nobody calls it directly.
-
-### What this means in practice
-
-- **Don't run `task add` / `task <id> modify` / `task <id> done`** by
-  hand or from any agent tool. Use the `tasks` subcommands:
-
-  | Operation                        | Use                                          |
-  |----------------------------------|----------------------------------------------|
-  | Capture a new action             | `tasks add <thread> "<text>"` (writes buffer) |
-  | Mark complete                    | `tasks done <uuid>`                          |
-  | Edit description                 | `tasks set-description <uuid> "<text>"`      |
-  | Reassign person                  | `tasks set-assignee <uuid> <person>`         |
-  | Set due / scheduled              | `tasks set-due <uuid> YYYY-MM-DD` etc.       |
-  | Set priority                     | `tasks set-priority <uuid> H\|M\|L`          |
-  | Add / remove dependency          | `tasks add-depends`, `tasks rm-depends`      |
-  | List / next / show               | `tasks list`, `tasks next`, `tasks show`     |
-
-- **No new tasks are created by `tasks add` directly.** It buffers a
-  conformant ACTION line; tasks are created when buffer entries flush
-  to notes and the regular `tasks` ingest pre-pass picks up the ACTION.
-  This keeps a single creation path: ACTION-line-in-a-note → ingest.
-
-- The only programmatic access to taskwarrior state for callers
-  (humans, scripts, agent tools) is via `tasks` and the markdown source
-  notes themselves. Read access via `task list` is fine if you want to
-  query interactively; for automation, use `tasks list` so you get
-  UUID prefixes in the output.
-
-### Why this matters
-
-`tasks` enforces format and validation at write time:
-- Threads must resolve to a real `threads/<Kind>/<Name>.md` file.
-- Assignees must resolve to a real `people/<Name>.md` file.
-- Dates must be `YYYY-MM-DD`. Relative terms like "tomorrow" / "friday"
-  are rejected so the agent can't fudge time arithmetic.
-- Priority must be `H`, `M`, or `L`.
-
-Bypassing `tasks` to call `task` directly skips these gates and creates
-the source-vs-tw drift this whole architecture is designed to prevent.
-The `cmd_sync` source-wins policy specifically assumes nobody else is
-mutating task descriptions.
-
-### Required UDA
-
-The bridge needs one taskwarrior UDA configured:
-
-```
-uda.source.type=string
-uda.source.label=Source note
-```
-
-Every task created by ingest gets `source:<relative-path>` populated
-(e.g. `notes/2026-05-07-09-15-22` or `logs/Processes/SGB/2026-05-07`).
-This is the 1:1 link between a task and the file that produced it. The
-bridge calls `ensure_uda()` on every invocation, so **no manual setup
-is required** — running `tasks` once configures it.
-
-### `project:` is not used
-
-`project:` is **not** set by ingest. Thread membership is many-to-many
-on notes (a note can belong to multiple threads via its `threads:`
-frontmatter list), so a single tw `project` would lose information.
-Instead, `tasks list` / `next` / `show` derive thread(s) at query time
-by reading the source note's `threads:` field.
-
-This means **third-party taskwarrior filters like `task project:SGB
-list` won't work** — you have to query via `tasks list --thread
-Processes/SGB`. By design: it nudges all task interaction through the
-opinionated wrapper rather than direct `task` CLI use.
-
-### Default locations
-
-- Data: `~/.task/`
-- Config: `~/.taskrc`
-
-Both can be relocated via `TASKDATA` / `TASKRC`. This codebase doesn't
-relocate them today — vendoring the taskwarrior binary inside the vault
-is a future option that would point these at vault-internal paths.
-
-### User-editable
-
-The user's own `.taskrc` content (themes, custom reports, contexts,
-hooks, other UDAs) is none of this codebase's business. Only the
-`source` UDA is required.
-
----
+(The task backend is no longer listed here: it's an embedded internal
+component, set up via `tasks install`. See README.md for usage.)
 
 ## Obsidian
 

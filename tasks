@@ -49,14 +49,24 @@ THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
 LOGS_DIR = HOME / 'logs'
 BUFFER_FILE = HOME / 'buffer.md'
-CONFIG_FILE = HOME / 'config.yaml'
 
-# Embedded backend: a private copy of the binary plus its isolated data
-# directory and rcfile, all under ADULTING_HOME so a global `task` install
-# (if present) operates on different state.
-TASK_BIN = HOME / 'bin' / 'task'
-TASK_DATA = HOME / 'task-data'
-TASK_RC = HOME / 'taskrc'
+# Internal/operational state lives in a hidden subdir alongside the user
+# content, the same way .git and .obsidian do. Keeps the visible top
+# level limited to vault content (notes/, threads/, people/, logs/,
+# buffer.md) so file browsers and Obsidian don't show tooling cruft.
+INTERNAL_DIR = HOME / '.adulting'
+CONFIG_FILE = INTERNAL_DIR / 'config.yaml'
+TASK_BIN = INTERNAL_DIR / 'bin' / 'task'
+TASK_DATA = INTERNAL_DIR / 'task-data'
+TASK_RC = INTERNAL_DIR / 'taskrc'
+
+# Legacy (pre-2026-05-19) layout had these at HOME directly. Kept for
+# detection so we can route the user to `tasks migrate-layout` instead
+# of the wrong-looking "run tasks install" message.
+_LEGACY_TASK_BIN = HOME / 'bin' / 'task'
+_LEGACY_TASK_DATA = HOME / 'task-data'
+_LEGACY_TASK_RC = HOME / 'taskrc'
+_LEGACY_CONFIG_FILE = HOME / 'config.yaml'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 # ACTION line shape (in notes/ or logs/): optional (Person), description,
@@ -81,9 +91,20 @@ def task_installed():
     return TASK_BIN.exists()
 
 
+def _on_legacy_layout():
+    """True when the legacy (pre-.adulting/ subdir) backend is present at
+    HOME directly but the new INTERNAL_DIR version isn't. Used to give a
+    targeted error instead of the generic 'run tasks install' message."""
+    return _LEGACY_TASK_BIN.exists() and not TASK_BIN.exists()
+
+
 def require_task():
-    if not task_installed():
-        die(f"embedded backend not installed at {TASK_BIN}; run `tasks install`")
+    if task_installed():
+        return
+    if _on_legacy_layout():
+        die("legacy layout detected; run `tasks migrate-layout` to relocate "
+            "the embedded backend into .adulting/")
+    die(f"embedded backend not installed at {TASK_BIN}; run `tasks install`")
 
 
 def task_cmd(*args):
@@ -1042,12 +1063,13 @@ def cmd_rebuild(args):
 # ---------- subcommand: install ----------
 
 def cmd_install(args):
-    """One-shot setup of the embedded backend under ADULTING_HOME.
+    """One-shot setup of the embedded backend under ADULTING_HOME/.adulting/.
 
     Workflow:
       1. Locate a source binary (--from-path, else `task` on PATH, else error).
-      2. Copy it to <ADULTING_HOME>/bin/task (skips if present unless --force).
-      3. Create <ADULTING_HOME>/task-data and <ADULTING_HOME>/taskrc.
+      2. Copy it to <ADULTING_HOME>/.adulting/bin/task (skips if present
+         unless --force).
+      3. Create <ADULTING_HOME>/.adulting/task-data and the rcfile.
       4. With --migrate, copy ~/.task/* into task-data (backs up any
          existing task-data contents first).
       5. Apply the source-UDA config on the new install.
@@ -1103,6 +1125,108 @@ def cmd_install(args):
     ensure_uda()
     print(f"data:   {TASK_DATA}")
     print("done.")
+    return 0
+
+
+# ---------- subcommand: migrate-layout ----------
+
+def cmd_migrate_layout(args):
+    """One-shot relocation of operational state into <ADULTING_HOME>/.adulting/.
+
+    Old layout had bin/, task-data/, taskrc, config.yaml at the top level,
+    cluttering the Obsidian sidebar and Finder view. New layout tucks them
+    into a hidden subdir so only user content (notes/, threads/, people/,
+    logs/, buffer.md) remains visible.
+
+    Safety:
+      - Tarball backup of the whole ADULTING_HOME is written outside the
+        directory before anything moves. Refuses to proceed without it.
+      - Uses mv (atomic per-file on same FS) rather than copy + verify +
+        delete; the tarball is the recovery path if anything goes wrong.
+      - --dry-run prints the planned moves without touching anything.
+      - Refuses to overwrite items that already exist in the new layout."""
+
+    legacy_items = [
+        (_LEGACY_TASK_BIN.parent, INTERNAL_DIR / 'bin', 'dir',
+         lambda: _LEGACY_TASK_BIN.exists()),
+        (_LEGACY_TASK_DATA, TASK_DATA, 'dir',
+         lambda: _LEGACY_TASK_DATA.exists()),
+        (_LEGACY_TASK_RC, TASK_RC, 'file',
+         lambda: _LEGACY_TASK_RC.exists()),
+        (_LEGACY_CONFIG_FILE, CONFIG_FILE, 'file',
+         lambda: _LEGACY_CONFIG_FILE.exists()),
+    ]
+    plan = [(s, d, k) for s, d, k, present in legacy_items if present()]
+
+    cruft_dir = HOME / 'config'
+    cruft_present = cruft_dir.is_dir()
+
+    if not plan and not cruft_present:
+        if INTERNAL_DIR.exists() and TASK_BIN.exists():
+            print("already migrated; nothing to do.")
+            return 0
+        die("no legacy layout detected and embedded backend not installed; "
+            "run `tasks install` first")
+
+    print(f"ADULTING_HOME: {HOME}")
+    print(f"Target subdir: {INTERNAL_DIR}")
+    print()
+    print("Planned moves:")
+    for src, dst, kind in plan:
+        print(f"  [{kind}] {src} -> {dst}")
+    if cruft_present:
+        print(f"  [del] {cruft_dir} (cruft from abandoned ask.toml feature)")
+
+    if args.dry_run:
+        print("\nDry run. Re-run without --dry-run to apply.")
+        return 0
+
+    # ------ pre-flight: nothing in the way ------
+    for src, dst, _kind in plan:
+        if dst.exists():
+            die(f"refusing to overwrite existing {dst}")
+
+    # ------ tarball backup (outside HOME so a botched migration can't eat it) ------
+    ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup_path = HOME.parent / f'{HOME.name}.backup-{ts}.tar.gz'
+    print(f"\nBacking up: {HOME} -> {backup_path}")
+    bk = subprocess.run(
+        ['tar', '-czf', str(backup_path), '-C', str(HOME.parent), HOME.name],
+        capture_output=True, text=True)
+    if bk.returncode != 0:
+        die(f"tarball backup failed: {(bk.stderr or '').strip()}")
+    if not backup_path.exists() or backup_path.stat().st_size < 1024:
+        die(f"backup tarball suspiciously small or missing; aborting")
+    print(f"backup: {backup_path} ({backup_path.stat().st_size:,} bytes)")
+
+    # ------ moves ------
+    INTERNAL_DIR.mkdir(parents=True, exist_ok=True)
+    for src, dst, _kind in plan:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        print(f"moved: {src} -> {dst}")
+
+    # ------ delete cruft ------
+    if cruft_present:
+        shutil.rmtree(cruft_dir)
+        print(f"deleted: {cruft_dir}")
+
+    # ------ regenerate taskrc absolute paths ------
+    if TASK_RC.exists():
+        # The old rcfile pinned data.location at the old absolute path; the
+        # backend would still find the data via TASKDATA env var, but a
+        # direct invocation of the binary (without our env) would land on a
+        # ghost path. Rewrite to canonicalize.
+        TASK_RC.write_text(f"data.location={TASK_DATA}\nconfirmation=no\n")
+        print(f"regenerated: {TASK_RC}")
+        # Re-apply UDA config (the previous rcfile had uda.source.* lines
+        # that we just truncated; ensure_uda detects this and re-adds them).
+        ensure_uda()
+
+    print()
+    print("done. To roll back:")
+    print(f"  rm -rf {HOME}")
+    print(f"  tar -xzf {backup_path} -C {HOME.parent}")
     return 0
 
 
@@ -1222,6 +1346,14 @@ def main():
         '--force', action='store_true',
         help="Overwrite an existing embedded binary / rcfile.")
     p_install.set_defaults(func=cmd_install)
+
+    p_migrate = sub.add_parser(
+        'migrate-layout',
+        help="Relocate operational state into ADULTING_HOME/.adulting/ (one-shot).")
+    p_migrate.add_argument(
+        '--dry-run', action='store_true', dest='dry_run',
+        help="Print the planned moves without touching anything.")
+    p_migrate.set_defaults(func=cmd_migrate_layout)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

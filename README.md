@@ -40,7 +40,9 @@ After cloning, set up the task backend (private to this install, lives under `~/
 tasks install
 ```
 
-`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
+`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/.adulting/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
+
+If you're upgrading from an earlier layout that had `bin/`, `task-data/`, `taskrc`, and `config.yaml` at the top level, run `tasks migrate-layout` once to relocate them into `.adulting/` (atomic moves, with a tarball backup written outside the vault and a one-line rollback printed at the end).
 
 The data location follows `ADULTING_HOME` if set (default `~/.adulting`).
 
@@ -150,18 +152,21 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 ```
 ~/.adulting/                    # ADULTING_HOME (override via env var)
 ├── .obsidian/                  # Obsidian vault config
+├── .adulting/                  # this codebase's operational state (hidden, like .git or .obsidian)
+│   ├── bin/task                # embedded backend binary (written by `tasks install`)
+│   ├── task-data/              # embedded backend's private data dir
+│   ├── taskrc                  # embedded backend's rcfile
+│   └── config.yaml             # vault-wide config (owner, etc.)
 ├── notes/                      # markdown notes (one file per note)
 ├── threads/
 │   ├── Projects/               # bounded efforts
 │   ├── Processes/              # ongoing operations
 │   └── Topics/                 # interest areas / catchalls
 ├── people/                     # people files (relationship link targets)
-├── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
-├── bin/task                    # embedded backend binary (written by `tasks install`)
-├── task-data/                  # embedded backend's private data dir
-├── taskrc                      # embedded backend's rcfile
-└── actions_log.json            # legacy, no longer maintained — delete when you're done with cross-checks
+└── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
 ```
+
+The visible top level (what Obsidian shows in its sidebar) is only user content: notes, threads, people, logs, and the buffer. Tooling state lives in the hidden `.adulting/` subdir, the same pattern `.git/` and `.obsidian/` use in the same directory.
 
 # Schemas
 

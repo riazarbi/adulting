@@ -2,6 +2,27 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-19 - Operational state moves into `.adulting/` so the Obsidian view stays clean
+
+The vault root used to mix three categories at one level: user content (`notes/`, `threads/`, `people/`, `logs/`, `buffer.md`), tooling state (`bin/`, `task-data/`), and config (`taskrc`, `config.yaml`). Obsidian's sidebar showed all of it, and so did Finder. Following the pattern `.git/` and `.obsidian/` already use in this same directory, tooling state now lives in a hidden subdir.
+
+- **`<ADULTING_HOME>/.adulting/`** is the new home for `bin/task`, `task-data/`, `taskrc`, and `config.yaml`. The visible top level is now only user content + Obsidian artifacts.
+- **`tasks` path constants re-rooted** under `INTERNAL_DIR = HOME / '.adulting'`. Four constants change (`TASK_BIN`, `TASK_DATA`, `TASK_RC`, `CONFIG_FILE`); the rest of the file is unchanged. `task_installed()` now checks the new path, and `require_task()` detects the legacy layout and prompts for `tasks migrate-layout` rather than the wrong-looking `tasks install`.
+- **`tasks migrate-layout` subcommand** (one-shot): detects old vs new layout; `--dry-run` previews the planned moves. Real run writes a tarball backup at `<ADULTING_HOME>/../<name>.backup-<ts>.tar.gz` *outside* the vault (so a botched migration can't eat its own rollback), then uses `shutil.move` (atomic per-file on the same filesystem) for each of `bin/`, `task-data/`, `taskrc`, `config.yaml`. Regenerates `taskrc` with the new absolute `data.location`. Re-applies the `source` UDA via `ensure_uda()`. Prints a one-line `rm -rf + tar -xzf` rollback at the end. Also deletes the top-level `config/` directory (cruft from an abandoned ask.toml feature).
+- **`notes_pdf` and `notes_minutes`** updated to read `${ADULTING_HOME:-…}/.adulting/config.yaml` for the `owner:` lookup.
+- **README data-store tree** redrawn to show the hidden subdir; the "One-time setup" section now mentions `tasks migrate-layout` for users upgrading from the previous layout.
+
+What deliberately stays at the root: `.obsidian/` (Obsidian's own), `.git/` / `.gitignore` (the user's VCS of their vault), `.agent/` (external agent runtime), `.claude/` (Claude Code's settings), `.env` (consumed by the external agent runtime, not by this codebase), `.DS_Store` (Finder cruft). And of course every user-content dir.
+
+### Operational events (data migration against `~/.adulting/`, not in this repo)
+
+- Captured `task export` snapshot before any change: 353 records (55 pending, 282 completed, 16 in other statuses).
+- Ran `./tasks migrate-layout --dry-run`; reviewed plan.
+- Ran for real. Tarball backup `~/.adulting.backup-20260519-084331.tar.gz` (16.9 MB). Moved `bin/`, `task-data/`, `taskrc`, `config.yaml`; regenerated `taskrc`; deleted top-level `config/`.
+- Post-migration snapshot: 353 records, same status counts, all uuids preserved. The only field deltas across the two snapshots were `urgency` floats drifting by ~0.001 across 17 records — taskwarrior recomputes urgency relative to "now" at export time, so the two snapshots taken a few seconds apart differ trivially. No real data divergence.
+- Round-trip write test: `tasks set-priority` → `tasks show` reflects change → cleared via direct binary call.
+- `~/.adulting.backup-20260519-084331.tar.gz` retained as a recovery snapshot; delete once you've trusted the new layout for a few days.
+
 ## 2026-05-18 - Task backend goes embedded; `ADULTING_HOME` becomes configurable
 
 The task-storage backend is no longer a global system dependency. A private copy of the binary lives inside `ADULTING_HOME` with its own data dir and rcfile, isolated from any other install on the machine. User-facing surfaces (help, skills, docs) stop naming the backend so users and AI agents stop reaching for it directly.

@@ -31,7 +31,7 @@ selected_note=$1
         # `participants:` (both rendered identically here as a bullet list).
         people=$(extract_people_list "$note")
         # Owner from config, used as the assignee when an action has none.
-        owner=$(awk '/^owner:[[:space:]]*/{sub(/^owner:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}' "${ADULTING_HOME:-$HOME/.adulting}/config.yaml" 2>/dev/null)
+        owner=$(awk '/^owner:[[:space:]]*/{sub(/^owner:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}' "${ADULTING_HOME:-$HOME/.adulting}/.adulting/config.yaml" 2>/dev/null)
 
 
 # Write the metadata to the temporary file

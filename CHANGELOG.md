@@ -2,6 +2,17 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-19 - `UNKNOWN` buffer type for shape-later quick capture
+
+Adds a fourth buffer line type for moments when picking a thread or line shape is the wrong cost to pay — the input gets parked as-is and surfaces as a tend violation until it's converted. Lets capture happen at the speed of thought; defers the routing decision to a focused session later.
+
+- **`buffer add <text>`** appends `- UNKNOWN: <text> <!--<TS>-->`. No thread, no body shaping, no attrs — the only structure is the line marker and the timestamp. Empty text is rejected at write time.
+- **`tend` flags every UNKNOWN as a violation** (`"UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass"`) and exits 1. UNKNOWN lines are otherwise preserved verbatim — tend does *not* drop or modify them.
+- **`flush` is gated by tend**, so any UNKNOWN present blocks the log write, buffer clear, and downstream `tasks` ingest. No partial flushes.
+- **Regroup places UNKNOWNs in their own section at the bottom of the buffer**, between the structured entries and any UNPARSED tail: `<!-- UNKNOWN ENTRIES BELOW: convert via 'buffer rm <n>' + the matching 'buffer add-*'. tend will fail until cleared. -->`. UNKNOWNs sort by timestamp. The separator comment is recognised on the next parse and skipped, so tend stays idempotent and the comment is removed once the last UNKNOWN is cleared.
+- **Conversion flow**: `buffer rm <n>` then re-add via `buffer add-text|add-ref|add-action …`. Once no UNKNOWNs remain, the next `tend` exits 0 and `flush` proceeds normally.
+- **`UNKNOWN_LINE_RE`** added alongside the existing `BUFFER_LINE_RE`; `parse_buffer_entries` now returns `(entries, unknowns, unparsed)`; `regroup_lines` and `cmd_tend` updated for the new signature. `cmd_flush` unchanged in spirit — it still delegates to tend first.
+
 ## 2026-05-19 - Operational state moves into `.adulting/` so the Obsidian view stays clean
 
 The vault root used to mix three categories at one level: user content (`notes/`, `threads/`, `people/`, `logs/`, `buffer.md`), tooling state (`bin/`, `task-data/`), and config (`taskrc`, `config.yaml`). Obsidian's sidebar showed all of it, and so did Finder. Following the pattern `.git/` and `.obsidian/` already use in this same directory, tooling state now lives in a hidden subdir.

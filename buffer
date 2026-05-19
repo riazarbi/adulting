@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Operate on the buffer queue at ~/.adulting/buffer.md.
 
-The buffer is the staging area for captured items. Three line types:
+The buffer is the staging area for captured items. Four line types:
     ACTION:  action item that becomes a backend task after flush
     TEXT:    free-text observation
     REF:     reference to another file in the vault
+    UNKNOWN: raw quick-capture; must be converted before tend will pass
 
 Single line format (no multi-line entries; one capture per line):
 
     - [[<Kind>/<Name>]] ACTION: [(<Person>)] <body> <!--<TS> [<attr> ...]-->
     - [[<Kind>/<Name>]] TEXT:   <body>                                <!--<TS>-->
     - [[<Kind>/<Name>]] REF:    [[<target>]] <summary>                <!--<TS>-->
+    - UNKNOWN: <body>                                                 <!--<TS>-->
 
 where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
 wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry the
@@ -19,7 +21,14 @@ backend metadata that ingest applies on task creation:
     due:YYYY-MM-DD     scheduled:YYYY-MM-DD
     priority:H|M|L     depends:<uuid8>
 
+UNKNOWN entries have no thread and carry the input string verbatim.
+They are intentionally invalid: `tend` reports them as violations so
+they block `flush` until they're removed and re-added via the matching
+`buffer add-*` command. This lets you capture something quickly when
+you don't have time to pick a thread or shape.
+
 Subcommands:
+    add        <text>                    (UNKNOWN; convert later)
     add-text   <thread> <text>
     add-ref    <thread> <target> [<summary>]
     add-action <thread> <text>          (also reachable as `tasks add`)
@@ -57,6 +66,11 @@ WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
 # The comment carries the timestamp and (for ACTION lines) optional attrs.
 BUFFER_LINE_RE = re.compile(
     r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF):\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})((?:\s+\S+)*)-->\s*$'
+)
+
+# UNKNOWN entries have no thread; just a body and a timestamp.
+UNKNOWN_LINE_RE = re.compile(
+    r'^-\s+UNKNOWN:\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})-->\s*$'
 )
 
 DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -172,6 +186,18 @@ def append_line(line):
         lines.pop()
     lines.append(line)
     write_buffer(lines)
+
+
+# ---------- subcommand: add (UNKNOWN) ----------
+
+def cmd_add(args):
+    text = args.text.strip()
+    if not text:
+        die("text is empty")
+    line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
+    append_line(line)
+    print(f"buffered: {line}")
+    return 0
 
 
 # ---------- subcommand: add-text ----------
@@ -295,37 +321,49 @@ def cmd_rm(args):
 
 def parse_buffer_entries(lines):
     """Walk buffer lines, classify each. Returns:
-        entries: list of {line_no, kind, thread, type, body, ts, raw}
-                 for parseable lines.
+        entries:  parseable structured entries (ACTION/TEXT/REF).
+        unknowns: list of {line_no, body, ts, raw} for UNKNOWN entries.
         unparsed: list of (line_no, raw) for non-empty lines that don't
-                  match the buffer line regex.
+                  match any known shape.
+    Separator comment lines for UNKNOWN/UNPARSED sections are skipped.
     """
     entries = []
+    unknowns = []
     unparsed = []
     for i, line in enumerate(lines, start=1):
         if not line.strip():
             continue
         # Skip HTML comment marker lines used as separators in the file.
         if line.lstrip().startswith('<!--') and line.rstrip().endswith('-->') \
-           and 'UNPARSED' in line:
+           and ('UNPARSED' in line or 'UNKNOWN ENTRIES' in line):
             continue
         m = BUFFER_LINE_RE.match(line)
-        if not m:
-            unparsed.append((i, line))
+        if m:
+            thread, type_, body, ts, attr_block = m.groups()
+            attr_tokens = (attr_block or '').split()
+            entries.append({
+                'line_no': i,
+                'thread': thread,
+                'type': type_,
+                'body': body.strip(),
+                'ts': ts,
+                'date': ts[:10],
+                'attr_tokens': attr_tokens,
+                'raw': line,
+            })
             continue
-        thread, type_, body, ts, attr_block = m.groups()
-        attr_tokens = (attr_block or '').split()
-        entries.append({
-            'line_no': i,
-            'thread': thread,
-            'type': type_,
-            'body': body.strip(),
-            'ts': ts,
-            'date': ts[:10],
-            'attr_tokens': attr_tokens,
-            'raw': line,
-        })
-    return entries, unparsed
+        mu = UNKNOWN_LINE_RE.match(line)
+        if mu:
+            body, ts = mu.groups()
+            unknowns.append({
+                'line_no': i,
+                'body': body.strip(),
+                'ts': ts,
+                'raw': line,
+            })
+            continue
+        unparsed.append((i, line))
+    return entries, unknowns, unparsed
 
 
 def validate_entry(e):
@@ -371,11 +409,11 @@ def validate_entry(e):
             yield "TEXT body is empty"
 
 
-def regroup_lines(entries, unparsed):
+def regroup_lines(entries, unknowns, unparsed):
     """Rewrite the buffer in canonical order:
-        - Parseable entries grouped by (thread, date), sorted by timestamp.
-        - Group order: thread asc, then date asc.
-        - Unparsed lines preserved at the end with a separator comment.
+        - Structured entries grouped by (thread, date), sorted by timestamp.
+        - UNKNOWN entries in their own section at the bottom, sorted by ts.
+        - Unparsed lines after that with their own separator comment.
     Returns the new list of buffer lines.
     """
     by_group = {}
@@ -387,6 +425,11 @@ def regroup_lines(entries, unparsed):
         group = sorted(by_group[key], key=lambda e: e['ts'])
         for e in group:
             out.append(e['raw'])
+    if unknowns:
+        out.append('')
+        out.append('<!-- UNKNOWN ENTRIES BELOW: convert via `buffer rm <n>` + the matching `buffer add-*`. tend will fail until cleared. -->')
+        for u in sorted(unknowns, key=lambda u: u['ts']):
+            out.append(u['raw'])
     if unparsed:
         out.append('')
         out.append('<!-- UNPARSED ENTRIES BELOW: tend cannot regroup these. Fix or remove via `buffer rm`. -->')
@@ -399,24 +442,28 @@ def regroup_lines(entries, unparsed):
 
 def cmd_tend(args):
     """Regroup and validate. Idempotent. Returns 0 if clean, 1 if any
-    violations or unparsed lines remain."""
+    violations, UNKNOWN entries, or unparsed lines remain."""
     lines = read_buffer()
-    entries, unparsed = parse_buffer_entries(lines)
-    new_lines = regroup_lines(entries, unparsed)
+    entries, unknowns, unparsed = parse_buffer_entries(lines)
+    new_lines = regroup_lines(entries, unknowns, unparsed)
     write_buffer(new_lines)
 
     # Re-parse so line numbers refer to the rewritten file.
     lines2 = read_buffer()
-    entries2, unparsed2 = parse_buffer_entries(lines2)
+    entries2, unknowns2, unparsed2 = parse_buffer_entries(lines2)
 
     violations = []
     for e in entries2:
         for v in validate_entry(e):
             violations.append((e['line_no'], v, e['raw']))
+    for u in unknowns2:
+        violations.append((u['line_no'],
+                           "UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass",
+                           u['raw']))
     for ln, raw in unparsed2:
         violations.append((ln, "line does not match buffer entry shape", raw))
 
-    if not violations and not unparsed2:
+    if not violations:
         groups = sorted({(e['thread'], e['date']) for e in entries2})
         if not args.quiet:
             print(f"buffer tended: {len(entries2)} entries, "
@@ -443,7 +490,7 @@ def cmd_flush(args):
         return rc
 
     lines = read_buffer()
-    entries, _unparsed = parse_buffer_entries(lines)
+    entries, _unknowns, _unparsed = parse_buffer_entries(lines)
     if not entries:
         if not args.quiet:
             print("buffer is empty; nothing to flush.")
@@ -521,6 +568,10 @@ def main():
         description="Buffer queue operations: capture, regroup, validate, flush.")
     parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
+
+    p_a = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
+    p_a.add_argument('text')
+    p_a.set_defaults(func=cmd_add)
 
     p_at = sub.add_parser('add-text', help="Append a TEXT entry.")
     p_at.add_argument('thread')

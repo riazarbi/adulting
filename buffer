@@ -32,6 +32,7 @@ Subcommands:
     add-text   <thread> <text>
     add-ref    <thread> <target> [<summary>]
     add-action <thread> <text>          (also reachable as `tasks add`)
+    suggest    <text> [-y]               (rules suggester → accept/reject)
     list       [<grep>]
     rm         <line-number>
     tend                                 (regroup + validate; idempotent)
@@ -561,6 +562,95 @@ def cmd_flush(args):
     return 0
 
 
+# ---------- subcommand: suggest ----------
+
+def _shquote(s):
+    """Minimal shell-quoting so the suggested command is paste-safe."""
+    if s and re.match(r'^[A-Za-z0-9_./:@=+-]+$', s):
+        return s
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def format_suggestion(proposal):
+    """Render a proposal dict as the shell command a user would type."""
+    sub = proposal['subcmd']
+    if sub == 'add':
+        return f"buffer add {_shquote(proposal['body'])}"
+    if sub == 'add-text':
+        return f"buffer add-text {_shquote(proposal['thread'])} {_shquote(proposal['body'])}"
+    if sub == 'add-ref':
+        target = proposal.get('ref_target') or ''
+        summary = proposal.get('ref_summary') or ''
+        return f"buffer add-ref {_shquote(proposal['thread'])} {_shquote(target)} {_shquote(summary)}"
+    if sub == 'add-action':
+        parts = ['buffer', 'add-action', _shquote(proposal['thread']), _shquote(proposal['body'])]
+        if proposal.get('due'):
+            parts += ['--due', proposal['due']]
+        if proposal.get('scheduled'):
+            parts += ['--scheduled', proposal['scheduled']]
+        if proposal.get('priority'):
+            parts += ['--priority', proposal['priority']]
+        return ' '.join(parts)
+    return f"buffer add {_shquote(proposal.get('body', ''))}"
+
+
+def dispatch_proposal(proposal, raw_text):
+    """Invoke the matching cmd_* with a synthesized argparse.Namespace."""
+    sub = proposal['subcmd']
+    if sub == 'add':
+        return cmd_add(argparse.Namespace(text=raw_text))
+    if sub == 'add-text':
+        return cmd_add_text(argparse.Namespace(
+            thread=proposal['thread'], text=proposal['body']))
+    if sub == 'add-ref':
+        return cmd_add_ref(argparse.Namespace(
+            thread=proposal['thread'],
+            target=proposal.get('ref_target') or '',
+            summary=proposal.get('ref_summary') or ''))
+    if sub == 'add-action':
+        return cmd_add_action(argparse.Namespace(
+            thread=proposal['thread'],
+            text=proposal['body'],
+            due=proposal.get('due'),
+            scheduled=proposal.get('scheduled'),
+            priority=proposal.get('priority'),
+            depends=[]))
+    die(f"internal error: unknown subcmd {sub!r}")
+
+
+def cmd_suggest(args):
+    """Propose a structured `buffer add-*` for raw text, then prompt to
+    accept (run it) or reject (fall back to `buffer add` UNKNOWN)."""
+    from _suggester import suggest
+    proposal = suggest(args.text)
+    if proposal['subcmd'] == 'add':
+        if not args.quiet:
+            print("no structured suggestion; storing as UNKNOWN.")
+        return cmd_add(argparse.Namespace(text=args.text))
+
+    cmd_str = format_suggestion(proposal)
+    print(f"suggested:\n  {cmd_str}")
+
+    accept = args.yes
+    if not accept:
+        if not sys.stdin.isatty():
+            # Non-interactive without --yes: safe default is to drop to
+            # UNKNOWN rather than silently auto-running a suggestion.
+            print("rejected (no tty, no --yes); storing as UNKNOWN.")
+            return cmd_add(argparse.Namespace(text=args.text))
+        try:
+            reply = input("accept? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\naborted; nothing added.", file=sys.stderr)
+            return 1
+        accept = reply in ('', 'y', 'yes')
+
+    if not accept:
+        print("rejected; storing as UNKNOWN.")
+        return cmd_add(argparse.Namespace(text=args.text))
+    return dispatch_proposal(proposal, args.text)
+
+
 # ---------- main ----------
 
 def main():
@@ -572,6 +662,11 @@ def main():
     p_a = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
     p_a.add_argument('text')
     p_a.set_defaults(func=cmd_add)
+
+    p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; prompt to accept or fall back to UNKNOWN.")
+    p_s.add_argument('text')
+    p_s.add_argument('-y', '--yes', action='store_true', help="Auto-accept the suggestion without prompting.")
+    p_s.set_defaults(func=cmd_suggest)
 
     p_at = sub.add_parser('add-text', help="Append a TEXT entry.")
     p_at.add_argument('thread')

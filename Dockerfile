@@ -22,7 +22,11 @@
 
 FROM agent:local AS agent_bin
 
-FROM debian:trixie-slim
+# sid (not trixie) because trixie ships taskwarrior 2.6.2, which uses the
+# legacy flat-file DB and can't read the taskchampion sqlite3 store written
+# by 3.x. The host runs 3.x (brew); the container must match or the agent's
+# `tasks` calls silently return zero rows against the wrong DB format.
+FROM debian:sid-slim
 
 # python3 runs the adulting CLIs (stdlib only). taskwarrior provides the
 # `task` binary that `tasks install` copies into ADULTING_HOME/.adulting/bin/.
@@ -47,6 +51,7 @@ RUN mkdir -p /opt/adulting /state /workspace && chmod 0777 /state /workspace
 # directly. ADULTING_HOME points at the bind-mounted vault.
 ENV PATH=/opt/adulting:$PATH \
     ADULTING_HOME=/vault \
+    ADULTING_TASK_BIN=/usr/bin/task \
     AGENT_STATE_DIR=/state \
     HOME=/tmp
 

@@ -56,7 +56,9 @@ BUFFER_FILE = HOME / 'buffer.md'
 # buffer.md) so file browsers and Obsidian don't show tooling cruft.
 INTERNAL_DIR = HOME / '.adulting'
 CONFIG_FILE = INTERNAL_DIR / 'config.yaml'
-TASK_BIN = INTERNAL_DIR / 'bin' / 'task'
+# Container override: vault is bind-mounted, so host and container would
+# otherwise share one binary file with conflicting architectures.
+TASK_BIN = Path(os.environ['ADULTING_TASK_BIN']) if 'ADULTING_TASK_BIN' in os.environ else INTERNAL_DIR / 'bin' / 'task'
 TASK_DATA = INTERNAL_DIR / 'task-data'
 TASK_RC = INTERNAL_DIR / 'taskrc'
 

@@ -16,6 +16,7 @@ thread is None — i.e. the suggester correctly bailed.
 """
 
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -74,7 +75,7 @@ def main():
     df = build_idf(thread_index)
     lengths = build_thread_lengths(thread_index)
     if not threads:
-        print(f"warning: no threads found under {Path('~/.adulting/threads').expanduser()} "
+        print(f"warning: no threads found under {Path(os.environ.get('ADULTING_HOME', '~/vault')).expanduser() / 'threads'} "
               f"(set ADULTING_HOME if vault is elsewhere)", file=sys.stderr)
 
     cases = [json.loads(line) for line in EVAL_FILE.read_text().splitlines() if line.strip()]

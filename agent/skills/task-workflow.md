@@ -19,7 +19,7 @@ Compose:
   arg). Don't put bare `key:value` colons in the description.
 - **`(Full Name)` prefix** — only when the actor isn't Riaz. Default
   actor is Riaz (no prefix). Full name must match an existing
-  `~/.adulting/people/<Name>.md`. If no match, see `create-person`
+  `~/vault/people/<Name>.md`. If no match, see `create-person`
   skill before adding.
 - **`--due` / `--scheduled`** — ISO date `YYYY-MM-DD` only. Resolve
   any named/relative phrase yourself first using today's system date.

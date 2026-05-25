@@ -1,7 +1,7 @@
 # Skill: create person file
 
 Triggered when an action item or buffer entry references a person
-who doesn't yet have a `~/.adulting/people/<Full Name>.md` file.
+who doesn't yet have a `~/vault/people/<Full Name>.md` file.
 Capture the salient metadata, propose the compound plan, then create
 on confirm.
 

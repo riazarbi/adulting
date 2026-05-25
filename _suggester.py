@@ -21,7 +21,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
 LOGS_DIR = HOME / 'logs'

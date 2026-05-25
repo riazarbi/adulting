@@ -43,7 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
@@ -903,7 +903,7 @@ def cmd_rebuild(args):
     """Reconcile tw state with source-of-truth (TASK/DONE anchors).
 
     Dry-run by default. Pass --apply to write; a full `task export` backup
-    is written to ~/.adulting/.tasks-backup-<ts>.json before any mutation.
+    is written to ~/vault/.tasks-backup-<ts>.json before any mutation.
 
     Three change categories, ordered by risk:
 

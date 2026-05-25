@@ -7,7 +7,7 @@ filename: ^\d{4}-\d{2}-\d{2}\.md$
 
 # Log file
 
-A per-thread per-day log of activity, derived from the buffer by `buffer flush`. Lives at `~/.adulting/logs/<Kind>/<Name>/<YYYY-MM-DD>.md`.
+A per-thread per-day log of activity, derived from the buffer by `buffer flush`. Lives at `~/vault/logs/<Kind>/<Name>/<YYYY-MM-DD>.md`.
 
 Logs are *output* of the buffer-flush ritual — not authored by hand in the way notes are. Each line is one buffer entry: a free-text observation (`TEXT:`), a reference to another file (`REF:`), or an action item (`ACTION:` / `TASK:` / `DONE:`). The day is the resolution; sub-day timestamps are not preserved.
 

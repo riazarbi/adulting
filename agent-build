@@ -14,13 +14,14 @@ they're synced verbatim. Files in the target that don't have a source
 Usage:
     agent-build [--target <dir>] [--check] [--quiet]
 
-Default target: $HOME/.adulting/.agent
+Default target: $ADULTING_HOME/.agent (defaults to ~/vault/.agent)
 With --check: diff the would-be-generated content against what's on
               disk; non-zero exit if any drift. No writes. Useful in CI.
 """
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -161,8 +162,9 @@ def sync_authored(source_dir, target_dir, check_only, quiet):
 def main():
     parser = argparse.ArgumentParser(
         description="Generate agent tool JSON from each binary's --help-json.")
-    parser.add_argument('--target', default=str(Path.home() / '.adulting' / '.agent'),
-                        help='Directory to write tools/ into (default: ~/.adulting/.agent).')
+    parser.add_argument('--target',
+                        default=str(Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault'))) / '.agent'),
+                        help='Directory to write tools/ into (default: $ADULTING_HOME/.agent, i.e. ~/vault/.agent).')
     parser.add_argument('--check', action='store_true',
                         help='Diff-only mode. Exit 1 if any drift. No writes.')
     parser.add_argument('--quiet', action='store_true', help='Suppress unchanged lines.')

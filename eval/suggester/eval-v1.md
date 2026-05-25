@@ -2,7 +2,7 @@
 
 Raw capture strings + ground-truth structured commands, for evaluating the
 `buffer suggest "..."` feature. ~20 in-scope + 5 out-of-scope cases drawn
-from real `~/.adulting/logs/` content and reverse-engineered into plausible
+from real `~/vault/logs/` content and reverse-engineered into plausible
 "what Riaz would actually type" raw input.
 
 **Edit me freely.** Reject any case that doesn't match how you'd capture in
@@ -42,7 +42,7 @@ Topics/Relationships
 
 `Alec Little, Bern Sellmeyer, Chris Storey, Eddie van der Weide, Lexi Van Kets, Nick Hudson, Ralph van Niekerk, Riaz Arbi, Sylvia Klopper`
 
-(Full list in `~/.adulting/people/`.)
+(Full list in `~/vault/people/`.)
 
 ---
 

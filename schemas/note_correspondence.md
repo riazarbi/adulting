@@ -7,7 +7,7 @@ filename: \d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md
 
 # Correspondence note
 
-A note recording email, message, or letter exchanges with one or more participants. Lives in `~/.adulting/notes/`.
+A note recording email, message, or letter exchanges with one or more participants. Lives in `~/vault/notes/`.
 
 ## Fields
 

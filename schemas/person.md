@@ -7,7 +7,7 @@ filename: ^[^.]+\.md$
 
 # Person file
 
-A markdown file for someone you track — a contact you want to maintain a relationship with. Lives in `~/.adulting/people/`. People are link targets (`[[people/<name>]]`) for `note.people` and action `assignee:`. They are *not* threads — they cannot be the value of `note.thread`.
+A markdown file for someone you track — a contact you want to maintain a relationship with. Lives in `~/vault/people/`. People are link targets (`[[people/<name>]]`) for `note.people` and action `assignee:`. They are *not* threads — they cannot be the value of `note.thread`.
 
 ## Fields
 

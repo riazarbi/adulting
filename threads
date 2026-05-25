@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage thread files in ~/.adulting/threads/{Projects,Processes,Topics}/.
+"""Manage thread files in ~/vault/threads/{Projects,Processes,Topics}/.
 
 Skeleton: just create / delete / list / show. The richer reporting tools
 (daily review, tail, overdue, report) are intentionally omitted — they'll
@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 THREADS_DIR = HOME / 'threads'
 KIND_DIRS = {
     'project': 'Projects',

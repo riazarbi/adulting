@@ -7,7 +7,7 @@ filename: \d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md
 
 # Meeting note
 
-A note recording a meeting with one or more counterparties. Lives in `~/.adulting/notes/`.
+A note recording a meeting with one or more counterparties. Lives in `~/vault/notes/`.
 
 ## Fields
 

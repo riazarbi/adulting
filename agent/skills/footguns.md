@@ -31,7 +31,7 @@ regex enforces it. Bare names won't resolve and the call will fail.
 
 ## Don't fabricate person files
 
-If the actor doesn't exist as `~/.adulting/people/<Name>.md`, **don't
+If the actor doesn't exist as `~/vault/people/<Name>.md`, **don't
 just write the file from a tool call**. Load the `create-person`
 skill, follow its protocol (capture metadata, propose the compound
 plan, confirm), then create.

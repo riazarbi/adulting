@@ -1,12 +1,12 @@
 # adulting
 
-Scripts to help me organise my day-to-day life. Everything stores plain-text state under `~/.adulting/` so the data outlives any one tool — you can grep it, back it up, sync it, or browse the whole directory as an Obsidian vault.
+Scripts to help me organise my day-to-day life. Everything stores plain-text state under `~/vault/` so the data outlives any one tool — you can grep it, back it up, sync it, or browse the whole directory as an Obsidian vault.
 
 ## Conceptual model
 
-- **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/.adulting/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
-- **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/.adulting/threads/{Projects,Processes,Topics}/`.
-- **Person** — a contact you track. People live in `~/.adulting/people/` and are link targets — never threads themselves.
+- **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/vault/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
+- **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/vault/threads/{Projects,Processes,Topics}/`.
+- **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
 - **Action** — a task. Notes contain `ACTION:` lines that get ingested into the task backend by the `tasks` bridge, then rewritten in place to `TASK:`.
 
 # Installation
@@ -34,13 +34,13 @@ export PATH=/Users/riaz/bin/adulting:$PATH
 
 ## One-time setup
 
-After cloning, set up the task backend (private to this install, lives under `~/.adulting/`):
+After cloning, set up the task backend (private to this install, lives under `~/vault/`):
 
 ```zsh
 tasks install
 ```
 
-`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/.adulting/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
+`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/vault/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
 
 If you're upgrading from an earlier layout that had `bin/`, `task-data/`, `taskrc`, and `config.yaml` at the top level, run `tasks migrate-layout` once to relocate them into `.adulting/` (atomic moves, with a tarball backup written outside the vault and a one-line rollback printed at the end).
 
@@ -50,7 +50,7 @@ The data location follows `ADULTING_HOME` if set (default `~/.adulting`).
 
 ## notes
 
-Markdown note taker. Notes live in `~/.adulting/notes/` as `<timestamp>.md` files with YAML frontmatter and a free-form body.
+Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files with YAML frontmatter and a free-form body.
 
 ### Frontmatter
 
@@ -137,7 +137,7 @@ Failures are printed; the source line is left as `ACTION:` so you can fix it and
 
 ## lint
 
-Validates everything in `~/.adulting/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
+Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
 
 | Command          | What it does                                              |
 |------------------|-----------------------------------------------------------|
@@ -150,7 +150,7 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 # Data store
 
 ```
-~/.adulting/                    # ADULTING_HOME (override via env var)
+~/vault/                    # ADULTING_HOME (override via env var)
 ├── .obsidian/                  # Obsidian vault config
 ├── .adulting/                  # this codebase's operational state (hidden, like .git or .obsidian)
 │   ├── bin/task                # embedded backend binary (written by `tasks install`)
@@ -189,7 +189,7 @@ Constraint cell DSL (single cell, semicolon-separated):
 
 # Buffer / agent ritual (deferred)
 
-`~/.adulting/buffer.md` is an append-only inbox for quick-capture entries. Routing those entries to notes (resolving threads, fixing references, applying schemas) is intended as a periodic ritual run by an AI agent against a tool-call API; the routing logic is not yet automated.
+`~/vault/buffer.md` is an append-only inbox for quick-capture entries. Routing those entries to notes (resolving threads, fixing references, applying schemas) is intended as a periodic ritual run by an AI agent against a tool-call API; the routing logic is not yet automated.
 
 # Vault hygiene
 
@@ -217,4 +217,4 @@ What remains:
 - Require no Python libraries beyond the standard library; no pip installs.
 - Be operated from the command line.
 - Maintain state in simple text-based file formats.
-- Maintain all state under the `~/.adulting/` hidden directory.
+- Maintain all state under a single vault directory (default `~/vault/`, override with `ADULTING_HOME`).

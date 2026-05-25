@@ -2,6 +2,44 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-25 - `Dockerfile` — package adulting for the agent container
+
+To let the in-container agent (separate repo; image `agent-offline:local`) drive the vault directly, adulting's CLIs need to be reachable from inside that container with `ADULTING_HOME` pointing at the bind-mounted vault. The new `Dockerfile` here is the layer that gives the upstream agent image those affordances; the rest of the wiring lives in the agent project's compose file and the staging vault's `.agent/` state.
+
+- **New `Dockerfile`** at the repo root, derived `FROM agent-offline:local`. Apt-installs `python3` (CLIs are stdlib-only Python) and `taskwarrior` (so an in-container `tasks install` can copy a working Linux `task` binary into `<vault>/.adulting/bin/`, replacing whatever host-built `task` got rsynced in). Pre-creates `/opt/adulting` as the bind-mount target. Sets `PATH=/opt/adulting:$PATH` and `ADULTING_HOME=/vault`. Drops back to user `1000:0` to match the base image.
+- **Bind-mount, not `COPY`.** The repo isn't baked into the image — the agent container mounts the host checkout at `/opt/adulting:ro` at runtime. Edits to a script on the host take effect on the next invocation in the container; no rebuild required.
+- **`pandoc` + a LaTeX engine** deliberately omitted. Would add ~1 GB and `notes pdf|minutes|agenda` aren't on the agent's expected paths. Add later if PDF rendering becomes necessary.
+
+### Operational events (compose + vault wiring, not in this repo)
+
+The agent project's compose file (now at `/Users/riaz/vault/docker-compose.yml`, moved from `/Users/riaz/projects/agent/docker-compose.yml`) was updated to consume this Dockerfile:
+
+- New `agent-base` service under a `build` profile that builds `agent-offline:local` from the upstream agent project (so the `FROM` resolves locally). Built once with `docker compose --profile build build agent-base`.
+- `agent` service now builds `adulting-agent:local` from this repo's `Dockerfile`, with three bind mounts: `<vault>/.agent:/state` (agent runtime state), `<vault>:/vault` (the obsidian content — `ADULTING_HOME` inside), `~/projects/adulting:/opt/adulting:ro` (the CLI tree). Telegram-bridge and timer services repointed at `<vault>/.agent` and `<vault>/.env`.
+- **Tool registrations rewritten.** `<vault>/.agent/tools/{buffer,lint,notes,people,tasks,threads}.json` `"command"` fields changed from the host path `/Users/riaz/bin/adulting/<name>` to bare `<name>`. The agent's shell-tool loader runs `exec.LookPath` at startup and silently drops any tool whose path doesn't resolve — host paths don't exist in the container, so without this fix the tools were never registered with the model. Bare names resolve through container `$PATH`.
+- `/Users/riaz/.adulting` rsynced to `/Users/riaz/vault` as a staging copy so the agent can be exercised end-to-end without touching production.
+
+## 2026-05-25 - Default vault root moves from `~/.adulting` to `~/vault`
+
+The vault root was previously a hidden directory (`~/.adulting`), which made it invisible in Finder/most file managers by default and made the "open my vault" muscle memory awkward. The default is now `~/vault`, a plain visible directory. `ADULTING_HOME` continues to override (same env var name, same semantics) — only the fallback changed. The inner hidden `.adulting/` subdir for operational state (introduced 2026-05-19, like `.git`/`.obsidian`) is unchanged.
+
+- **Default fallback in all tools** flipped from `os.path.expanduser('~/.adulting')` to `os.path.expanduser('~/vault')` (Python: `_suggester.py`, `buffer`, `people`, `threads`, `tasks`, `lint`; bash: `notes`, `notes_minutes`, `notes_pdf`). The env-var override pattern is unchanged in every file — `ADULTING_HOME` set in your shell still wins.
+- **`agent-build` now honors `ADULTING_HOME`** like every other tool. Previously hardcoded `Path.home() / '.adulting' / '.agent'`, ignoring the env var; now `Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault'))) / '.agent'`. Closes a small consistency gap — "set the var once and all commands respect it" is now actually true.
+- **`eval/suggester/score.py`** missing-threads warning resolves its example path through `ADULTING_HOME` instead of hardcoding `~/.adulting/threads`.
+- **Docstrings, `--help` text, and inline comments** in the same files updated to quote `~/vault/...` instead of `~/.adulting/...` (e.g. `tasks rebuild`'s backup-path comment, `lint`'s argparse help, the module docstrings on `buffer`/`people`/`threads`).
+- **Docs swept**: `README.md`, `INTEGRATIONS.md`, `schemas/*.md` (6 files), `agent/prompt/00-role.md`, `agent/skills/{buffer-workflow,create-person,footguns,task-workflow}.md`, `eval/suggester/eval-v1.md`. Mechanical `~/.adulting/` → `~/vault/` substitution; the inner `.adulting/` subdir references (the operational state dir at `<vault>/.adulting/`) are left intact.
+- **README design-goals wording** updated: "Maintain all state under the `~/.adulting/` hidden directory" → "Maintain all state under a single vault directory (default `~/vault/`, override with `ADULTING_HOME`)" — `~/vault` is not hidden, and pinning the default name in the design goal was misleading anyway.
+- **`Dockerfile`** unchanged: the in-container `ADULTING_HOME=/vault` was already set; the host path is whatever you bind-mount, so the host-side default is now consistent with the container-side default.
+- **`CHANGELOG.md`** unchanged below this entry. The historical `~/.adulting/` references in prior entries are accurate as of when they were written; rewriting history is worse than letting old paths read as "old paths".
+- **`.claude/worktrees/python-refactor/**`** unchanged (separate worktree, not part of the main tree).
+
+### Operational events (pending, against `~/.adulting/`, not in this repo)
+
+Code now expects `~/vault`; the actual data is still at `~/.adulting`. Two follow-ups are needed before the new default lights up cleanly:
+
+- `mv ~/.adulting ~/vault` (or set `export ADULTING_HOME=$HOME/.adulting` in your shell rc and leave the data where it is). The `.adulting/` operational subdir inside moves with the rest — no internal restructure required.
+- `.claude/settings.local.json` has ~9 hardcoded `/Users/riaz/.adulting/...` permission rules (Read paths, `rm` paths, `agent-build --target` paths). These will stop matching after the data move; update to `/Users/riaz/vault/...` when you do the move, or before if you want to keep auto-approval working during the transition.
+
 ## 2026-05-20 - `buffer suggest` — explicit-thread override, month dates, case-insensitive fixes
 
 User testing surfaced two failure modes. The fixable one is now fixed; the other is documented as the rules ceiling.

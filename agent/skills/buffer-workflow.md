@@ -4,7 +4,7 @@ Loaded when an inbox message is a non-action capture — observation,
 status update, half-formed thought, info to remember, reference to a
 file. Anything that's *not* an action item.
 
-The buffer is the staging area at `~/.adulting/buffer.md`. Entries
+The buffer is the staging area at `~/vault/buffer.md`. Entries
 land as one structured line each, get grouped on `buffer tend` by
 `(thread, date)`, and flush into per-thread per-day Log files at
 `logs/<Kind>/<Name>/<date>.md`.
@@ -24,7 +24,7 @@ land as one structured line each, get grouped on `buffer tend` by
 ## Steps
 
 1. **Identify the thread.** Resolve abbreviations against
-   `~/.adulting/threads/{Projects,Processes,Topics}/`. If the message
+   `~/vault/threads/{Projects,Processes,Topics}/`. If the message
    doesn't clearly belong to a thread, ask which one — don't guess.
 2. **Rewrite the message minimally** per the rules below.
 3. **Propose**:

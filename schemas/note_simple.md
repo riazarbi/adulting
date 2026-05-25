@@ -7,7 +7,7 @@ filename: \d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md
 
 # Simple note
 
-A note for any of the bare-shape types: Workshop, Report, Log, Research, or Recipe. No type-specific fields beyond the common four. Lives in `~/.adulting/notes/`.
+A note for any of the bare-shape types: Workshop, Report, Log, Research, or Recipe. No type-specific fields beyond the common four. Lives in `~/vault/notes/`.
 
 ## Fields
 

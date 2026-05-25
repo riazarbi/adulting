@@ -7,7 +7,7 @@ filename: ^[^.]+\.md$
 
 # Thread file
 
-Markdown file holding a chronological log of an ongoing project, process, or relationship. One file per thread. Lives in `~/.adulting/threads/` (top-level for projects/processes; commonly under `~/.adulting/threads/People/` for relationships, but flat layouts are also valid).
+Markdown file holding a chronological log of an ongoing project, process, or relationship. One file per thread. Lives in `~/vault/threads/` (top-level for projects/processes; commonly under `~/vault/threads/People/` for relationships, but flat layouts are also valid).
 
 ## Fields
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operate on the buffer queue at ~/.adulting/buffer.md.
+"""Operate on the buffer queue at ~/vault/buffer.md.
 
 The buffer is the staging area for captured items. Four line types:
     ACTION:  action item that becomes a backend task after flush
@@ -53,7 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 NOTES_DIR = HOME / 'notes'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'

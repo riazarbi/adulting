@@ -9,12 +9,12 @@ component, set up via `tasks install`. See README.md for usage.)
 
 ## Obsidian
 
-Used as the markdown editor and vault browser for `~/.adulting/`. Notes,
+Used as the markdown editor and vault browser for `~/vault/`. Notes,
 threads, and people files are written/read as plain markdown; Obsidian
 provides Properties UI, backlinks, graph view, and Bases queries against
 the YAML frontmatter.
 
-### Required `~/.adulting/.obsidian/app.json`
+### Required `~/vault/.obsidian/app.json`
 
 ```json
 {
@@ -33,7 +33,7 @@ the YAML frontmatter.
 
 Set both via Obsidian: **Settings → Files & Links → New link format → Absolute path in vault** and **Use [[Wikilinks]] → on**. Or write the JSON directly.
 
-### Recommended `~/.adulting/.obsidian/types.json`
+### Recommended `~/vault/.obsidian/types.json`
 
 ```json
 {

@@ -2,7 +2,7 @@
 """Validate adulting files against schemas in schemas/.
 
 Usage:
-    lint                        # walk ~/.adulting/ and validate everything
+    lint                        # walk ~/vault/ and validate everything
     lint <path> [<path> ...]    # validate specific files
 
 Exit code 0 if clean, 1 if any violations. Errors print as
@@ -17,7 +17,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
@@ -473,7 +473,7 @@ def discover_files():
 def main():
     parser = argparse.ArgumentParser(description="Validate adulting files against schemas.")
     parser.add_argument('paths', nargs='*',
-                        help='Files to validate (default: walk ~/.adulting/).')
+                        help='Files to validate (default: walk ~/vault/).')
     parser.add_argument('--schemas', default=str(SCHEMAS_DIR),
                         help=f'Schemas directory (default: {SCHEMAS_DIR}).')
     parser.add_argument('--quiet', action='store_true',

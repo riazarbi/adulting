@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage people files in ~/.adulting/people/.
+"""Manage people files in ~/vault/people/.
 
 People are link targets (`[[people/<name>]]`) for `note.people` and
 action `assignee:`. They are not threads — they cannot be the value of
@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/.adulting')))
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 PEOPLE_DIR = HOME / 'people'
 CATEGORIES = ['professional', 'personal', 'voluntary']
 

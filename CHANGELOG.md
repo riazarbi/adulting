@@ -2,6 +2,21 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-25 - `Dockerfile` rewritten for the new distroless agent base
+
+The upstream agent project dropped its bundled llama.cpp backend and switched the container base to `gcr.io/distroless/static-debian12`, taking the image from multi-GB down to ~15 MB. Distroless has no shell and no `apt`, so the prior layering — `FROM agent-offline:local` then `apt-get install python3 taskwarrior` — stops building on first `RUN`. The fix inverts the dependency: pull just the agent binary out of the upstream image and build adulting's runtime on debian-slim, where we control the package set.
+
+- **Multistage `Dockerfile`.** Stage 1 is `FROM agent:local AS agent_bin` (the upstream image tag also renamed from `agent-offline:local`). Stage 2 is `FROM debian:trixie-slim` with `apt-get install python3 taskwarrior ca-certificates`, then `COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent`. `ENTRYPOINT ["/usr/local/bin/agent"]` and `USER 1000:0` carried over, plus the env vars (`AGENT_STATE_DIR=/state`, `HOME=/tmp`) and writable mount-point dirs (`/state`, `/workspace`, chmod 0777) that the upstream distroless image used to provide implicitly.
+- **`ca-certificates` added explicitly.** Distroless bakes it in; debian-slim doesn't. Without it the agent's outbound TLS to the LLM API would fail with `x509: certificate signed by unknown authority`.
+- **No change to `python3` / `taskwarrior` install** — same package list, same justification (stdlib Python CLIs; `tasks install` copies a Linux `task` binary into `<vault>/.adulting/bin/`).
+- **`/opt/adulting` bind-mount unchanged.** The CLI tree still lives on the host and edit-and-rerun continues to work without a rebuild.
+
+### Operational events (compose + upstream image, not in this repo)
+
+- Upstream agent project: `model` + `llama` build stages and every `LLAMA_*` env var removed from `docker/Dockerfile`; runtime base switched to `gcr.io/distroless/static-debian12`; `tini` dropped (Go runtime handles signals as PID 1); image tag default changed from `agent-offline:latest` to `agent:latest`. `docker/entrypoint.sh`, `docs/offline.md`, and `scripts/smoke/docker_offline.sh` deleted. See that repo's changelog for the full entry.
+- `/Users/riaz/vault/docker-compose.yml`: `agent-base.image` and `agent` service references retagged `agent-offline:local` → `agent:local`; `env_file: /Users/riaz/vault/.env-agent` added to the `agent` service for `AGENT_API_KEY` / `AGENT_BASE_URL` / `AGENT_MODEL` (mirrors the existing `.env-telegram` pattern, keeps the secret out of the compose file); dead `LLAMA_*` / loopback comments removed.
+- `/Users/riaz/vault/.env-agent`: already contained the same `AGENT_API_KEY` / `AGENT_BASE_URL` / `AGENT_MODEL` values as the agent repo's `.env`, with `AGENT_STATE_DIR=/state` and `ADULTING_HOME=/vault` for the container — left unchanged.
+
 ## 2026-05-25 - `Dockerfile` — package adulting for the agent container
 
 To let the in-container agent (separate repo; image `agent-offline:local`) drive the vault directly, adulting's CLIs need to be reachable from inside that container with `ADULTING_HOME` pointing at the bind-mounted vault. The new `Dockerfile` here is the layer that gives the upstream agent image those affordances; the rest of the wiring lives in the agent project's compose file and the staging vault's `.agent/` state.

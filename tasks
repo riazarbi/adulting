@@ -1,43 +1,38 @@
 #!/usr/bin/env python3
-"""Bridge ACTION: lines from notes into the task backend; keep source
-TASK:/DONE: lines in sync with backend state. Surface backend operations
-as opinionated subcommands so the backend stays internal.
+"""Bridge ACTION: lines from notes/logs into anchored TASK: lines, and
+expose source-line mutations as subcommands. Source notes ARE the store;
+there is no backend.
 
 No-arg invocation (used as a pre-pass by `notes`):
-  1. Configure the `source` UDA on the backend if not already (idempotent).
-  2. Ingest ACTION: lines from notes into the backend, anchoring the source
-     line back with an 8-char UUID HTML comment.
-  3. Sync source <-> backend:
-     - Description drift (source body != backend description): source wins.
-     - Status drift: completed-state-wins.
+  Walk notes/ + logs/, find every ACTION: line, validate it (thread
+  resolves, assignee resolves, attrs well-formed), and rewrite each in
+  place to a `TASK: [#X] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD
+  ...-->` anchor. The uuid8 is freshly generated and checked against
+  the existing vault for uniqueness.
 
 Subcommands:
-  install                        set up the embedded backend (one-shot)
   add <thread> <text>            buffer-append a structured ACTION
-  done <uuid>                    flip source TASK->DONE; mark backend done
-  set-description <uuid> <text>  rewrite source body; sync pushes to backend
-  set-assignee <uuid> <person>   rewrite source (Asg) prefix
+  done <uuid>                    flip source TASK->DONE; stamp end:<today>
+  set-description <uuid> <text>  rewrite body
+  set-assignee <uuid> <person>   rewrite (Assignee) prefix
   set-due <uuid> <YYYY-MM-DD>    set due date
   set-scheduled <uuid> <YYYY-MM-DD>  set scheduled date
-  set-priority <uuid> <H|M|L>    set priority
+  set-priority <uuid> <H|M|L>    set priority (writes [#X] in visible portion)
   add-depends <uuid> <dep>       add a depends entry
   rm-depends <uuid> <dep>        remove a depends entry
-  list [filter...]               formatted list with UUID prefix
-  next                           top of queue
+  list [--priority H|M|L] [--thread T] [--assignee A] [--overdue]
+  next                           top 5 pending by (priority, due, entry)
   show <uuid>                    detail view
-
-Run `tasks install` once after cloning; everything thereafter goes through
-this CLI.
 """
 
 import argparse
-import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-from datetime import datetime
+import uuid as _uuid
+from dataclasses import dataclass, field, replace
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,100 +40,174 @@ from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
 HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 NOTES_DIR = HOME / 'notes'
+LOGS_DIR = HOME / 'logs'
 THREADS_DIR = HOME / 'threads'
 PEOPLE_DIR = HOME / 'people'
-LOGS_DIR = HOME / 'logs'
-BUFFER_FILE = HOME / 'buffer.md'
-
-# Internal/operational state lives in a hidden subdir alongside the user
-# content, the same way .git and .obsidian do. Keeps the visible top
-# level limited to vault content (notes/, threads/, people/, logs/,
-# buffer.md) so file browsers and Obsidian don't show tooling cruft.
 INTERNAL_DIR = HOME / '.adulting'
-CONFIG_FILE = INTERNAL_DIR / 'config.yaml'
-# Container override: vault is bind-mounted, so host and container would
-# otherwise share one binary file with conflicting architectures.
-TASK_BIN = Path(os.environ['ADULTING_TASK_BIN']) if 'ADULTING_TASK_BIN' in os.environ else INTERNAL_DIR / 'bin' / 'task'
-TASK_DATA = INTERNAL_DIR / 'task-data'
-TASK_RC = INTERNAL_DIR / 'taskrc'
-
-# Legacy (pre-2026-05-19) layout had these at HOME directly. Kept for
-# detection so we can route the user to `tasks migrate-layout` instead
-# of the wrong-looking "run tasks install" message.
-_LEGACY_TASK_BIN = HOME / 'bin' / 'task'
-_LEGACY_TASK_DATA = HOME / 'task-data'
-_LEGACY_TASK_RC = HOME / 'taskrc'
-_LEGACY_CONFIG_FILE = HOME / 'config.yaml'
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
-# ACTION line shape (in notes/ or logs/): optional (Person), description,
-# and optional trailing HTML comment carrying ingest-time attrs.
 ACTION_RE = re.compile(
     r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)(?:\s*<!--(.*?)-->)?\s*$'
 )
-# Post-ingest anchor in source: TASK (pending) or DONE (completed) line
-# ending with <!--<uuid8>-->. Groups: 1=kind, 2=body, 3=uuid8. Used by
-# `tasks rebuild` to reconcile tw against source-of-truth.
-TASK_ANCHOR_RE = re.compile(
-    r'^(TASK|DONE):\s(.*?)\s*<!--([a-f0-9]{8})-->\s*$',
-    re.MULTILINE,
+# Mirror of schemas/task_anchor.md `shape`. The two regexes are kept in
+# lockstep — if you change one, change the other.
+ANCHOR_RE = re.compile(
+    r'^(?P<kind>TASK|DONE):\s+'
+    r'(?:\[#(?P<priority>[^\]]+)\]\s+)?'
+    r'(?:\((?P<assignee>[^)]+)\)\s+)?'
+    r'(?P<body>.+?)\s+'
+    r'<!--\s*(?P<uuid>[a-f0-9]{8})'
+    r'\s+entry:(?P<entry>\d{4}-\d{2}-\d{2})'
+    r'(?:\s+end:(?P<end>\d{4}-\d{2}-\d{2}))?'
+    r'(?:\s+due:(?P<due>\d{4}-\d{2}-\d{2}))?'
+    r'(?:\s+scheduled:(?P<scheduled>\d{4}-\d{2}-\d{2}))?'
+    r'(?:\s+depends:(?P<depends>[a-f0-9,]+))?'
+    r'\s*-->\s*$'
 )
 DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
+UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
+
+PRIORITY_ORDER = {'H': 0, 'M': 1, 'L': 2}
+
+
+# ---------- anchor model ----------
+
+@dataclass
+class Anchor:
+    kind: str               # 'TASK' or 'DONE'
+    priority: str | None    # 'H'/'M'/'L' or None
+    assignee: str | None
+    body: str
+    uuid: str               # 8-char hex
+    entry: str              # YYYY-MM-DD
+    end: str | None = None
+    due: str | None = None
+    scheduled: str | None = None
+    depends: tuple = ()
+    path: Path | None = None
+    line_no: int | None = None  # 0-indexed within file
+
+
+def parse_anchor(line: str, path=None, line_no=None) -> Anchor | None:
+    m = ANCHOR_RE.match(line)
+    if not m:
+        return None
+    d = m.groupdict()
+    deps_raw = d.get('depends') or ''
+    deps = tuple(x for x in deps_raw.split(',') if x)
+    return Anchor(
+        kind=d['kind'],
+        priority=d.get('priority') or None,
+        assignee=(d.get('assignee') or None),
+        body=d['body'].strip(),
+        uuid=d['uuid'],
+        entry=d['entry'],
+        end=d.get('end') or None,
+        due=d.get('due') or None,
+        scheduled=d.get('scheduled') or None,
+        depends=deps,
+        path=path,
+        line_no=line_no,
+    )
+
+
+def format_anchor(a: Anchor) -> str:
+    head = [f"{a.kind}:"]
+    if a.priority:
+        head.append(f"[#{a.priority}]")
+    if a.assignee:
+        head.append(f"({a.assignee})")
+    head.append(a.body)
+    attrs = [a.uuid, f"entry:{a.entry}"]
+    if a.end:
+        attrs.append(f"end:{a.end}")
+    if a.due:
+        attrs.append(f"due:{a.due}")
+    if a.scheduled:
+        attrs.append(f"scheduled:{a.scheduled}")
+    if a.depends:
+        attrs.append(f"depends:{','.join(a.depends)}")
+    return f"{' '.join(head)} <!--{' '.join(attrs)}-->"
+
+
+# ---------- walking / locating ----------
+
+def discover_source_files():
+    """Yield .md files in notes/ (flat) and logs/ (recursive). Sorted
+    for deterministic ordering. Skips dotfiles."""
+    if NOTES_DIR.is_dir():
+        for f in sorted(NOTES_DIR.iterdir()):
+            if f.suffix == '.md' and not f.name.startswith('.'):
+                yield f
+    if LOGS_DIR.is_dir():
+        for root, dirs, files in os.walk(LOGS_DIR):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for fname in sorted(files):
+                if fname.endswith('.md') and not fname.startswith('.'):
+                    yield Path(root) / fname
+
+
+def walk_anchors():
+    """Yield every parsed Anchor in the vault."""
+    for path in discover_source_files():
+        try:
+            text = path.read_text(encoding='utf-8')
+        except OSError:
+            continue
+        for i, line in enumerate(text.split('\n')):
+            a = parse_anchor(line, path, i)
+            if a:
+                yield a
+
+
+def find_anchor(uuid_prefix: str) -> Anchor:
+    """Resolve a uuid prefix to a single anchor. die() on not-found or
+    ambiguous. Prefix matches against the 8-char uuid stored in the
+    anchor — any prefix length is accepted (1..8)."""
+    p = uuid_prefix.lower()
+    hits = [a for a in walk_anchors() if a.uuid.startswith(p)]
+    if not hits:
+        die(f"no task found with uuid prefix {uuid_prefix!r}")
+    if len(hits) > 1:
+        joined = ', '.join(f"{a.uuid} ({a.path.name}:{a.line_no + 1})"
+                           for a in hits)
+        die(f"uuid prefix {uuid_prefix!r} is ambiguous: {joined}")
+    return hits[0]
+
+
+def write_anchor(anchor: Anchor, new_line: str) -> None:
+    """Rewrite a single line in the anchor's source file. Atomic via
+    tmp + os.replace."""
+    lines = anchor.path.read_text(encoding='utf-8').split('\n')
+    lines[anchor.line_no] = new_line
+    tmp = anchor.path.with_suffix(anchor.path.suffix + '.tmp')
+    tmp.write_text('\n'.join(lines), encoding='utf-8')
+    os.replace(tmp, anchor.path)
+
+
+def mutate_anchor(anchor: Anchor, **changes) -> Anchor:
+    """Apply field updates to an Anchor, rewrite its source line, and
+    return the updated Anchor."""
+    new = replace(anchor, **changes)
+    write_anchor(anchor, format_anchor(new))
+    return new
 
 
 # ---------- helpers ----------
-
-def task_installed():
-    return TASK_BIN.exists()
-
-
-def _on_legacy_layout():
-    """True when the legacy (pre-.adulting/ subdir) backend is present at
-    HOME directly but the new INTERNAL_DIR version isn't. Used to give a
-    targeted error instead of the generic 'run tasks install' message."""
-    return _LEGACY_TASK_BIN.exists() and not TASK_BIN.exists()
-
-
-def require_task():
-    if task_installed():
-        return
-    if _on_legacy_layout():
-        die("legacy layout detected; run `tasks migrate-layout` to relocate "
-            "the embedded backend into .adulting/")
-    die(f"embedded backend not installed at {TASK_BIN}; run `tasks install`")
-
-
-def task_cmd(*args):
-    """Build argv for the embedded binary. Always pair with env=task_env()
-    on the subprocess call so TASKDATA/TASKRC point at our private dirs."""
-    return [str(TASK_BIN), *args]
-
-
-def task_env():
-    """Env that pins the embedded backend at its private data dir + rcfile,
-    isolated from any global install the user may also have."""
-    env = dict(os.environ)
-    env['TASKDATA'] = str(TASK_DATA)
-    env['TASKRC'] = str(TASK_RC)
-    return env
-
 
 def die(msg, code=1):
     print(f"error: {msg}", file=sys.stderr)
     sys.exit(code)
 
 
+def today_iso() -> str:
+    return date.today().isoformat()
+
+
 def validate_date(s):
-    """Caller-format YYYY-MM-DD. Returns the same string if valid;
-    raises ValueError otherwise. taskwarrior accepts this form natively
-    so no conversion is needed at the boundary."""
     if not DATE_RE.match(s):
         raise ValueError(f"date must be YYYY-MM-DD, got {s!r}")
-    try:
-        datetime.strptime(s, '%Y-%m-%d')
-    except ValueError as e:
-        raise ValueError(f"invalid date {s!r}: {e}")
     return s
 
 
@@ -157,99 +226,27 @@ def assignee_resolves(name):
 def thread_resolves(target):
     if not target or '/' not in target:
         return False
-    kind_dir, name = target.split('/', 1)
-    if kind_dir not in ('Projects', 'Processes', 'Topics'):
+    kind, name = target.split('/', 1)
+    if kind not in ('Projects', 'Processes', 'Topics'):
         return False
-    return (THREADS_DIR / kind_dir / f"{name}.md").exists()
+    return (THREADS_DIR / kind / f"{name}.md").exists()
 
 
-def discover_source_files():
-    """Yield .md files from both notes/ (flat) and logs/ (recursive). These
-    are the input domains for ACTION lines / TASK anchors. Skips dotfiles."""
-    if NOTES_DIR.is_dir():
-        for f in sorted(NOTES_DIR.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
-                yield f
-    if LOGS_DIR.is_dir():
-        for root, dirs, files in os.walk(LOGS_DIR):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            for fname in sorted(files):
-                if fname.endswith('.md') and not fname.startswith('.'):
-                    yield Path(root) / fname
+def gen_uuid8(existing: set) -> str:
+    """Generate an 8-char hex uuid that doesn't collide with `existing`."""
+    while True:
+        u = _uuid.uuid4().hex[:8]
+        if u not in existing:
+            return u
 
 
-def source_for(path):
-    """Compute the `source:` UDA value: relative path from HOME, no .md.
-    e.g. 'notes/2026-05-07-09-15-22' or 'logs/Projects/SGB/2026-05-07'."""
-    return str(path.relative_to(HOME).with_suffix(''))
-
-
-# ---------- taskwarrior modify wrapper ----------
-
-# Field names that `task modify` accepts as `attr:value` updates. Lowercase
-# alpha/digit/dot/underscore matches taskwarrior's attribute-name shape.
-_TW_FIELD_RE = re.compile(r'^[a-z][a-z0-9_.]*$')
-
-
-def tw_modify(uuid, **fields):
-    """Safe wrapper around `task <uuid> modify`. Every kwarg becomes one
-    `attr:value` argv element; nothing else is ever appended. Returns the
-    completed subprocess result (or None for a no-op).
-
-    Why this exists: taskwarrior treats any argv slot after `modify` that
-    isn't `attr:value` as a description override — silently replacing
-    (or, with mixed args, partially clobbering) the description field.
-    Calling `subprocess.run(['task', uuid, 'modify', some_var])` from a
-    stale code path then silently destroys the description. This wrapper
-    forces every call site to name the field, and argv construction lives
-    in one auditable place.
-
-    Pass `None` to skip a field (no-op); pass `''` to clear a tw field
-    (taskwarrior's canonical `attr:` empty form). Dynamic field names go
-    via `**{name: value}` unpacking."""
-    cmd = task_cmd('rc.confirmation:no', uuid, 'modify')
-    for key, val in fields.items():
-        if not _TW_FIELD_RE.match(key):
-            raise ValueError(
-                f"tw_modify: refusing key {key!r} — not an attr-shaped name")
-        if val is None:
-            continue
-        cmd.append(f'{key}:{val}')
-    if cmd[-1] == 'modify':
-        return None
-    return subprocess.run(cmd, capture_output=True, text=True, env=task_env())
-
-
-# ---------- UDA bootstrap ----------
-
-def ensure_uda():
-    """Configure the `source` UDA on the embedded backend. Idempotent.
-    Silent no-op if the embedded binary isn't installed yet."""
-    if not task_installed():
-        return
-    env = task_env()
-    result = subprocess.run(task_cmd('_config'), capture_output=True, text=True, env=env)
-    if 'uda.source.type' in (result.stdout or ''):
-        return
-    subprocess.run(
-        task_cmd('rc.confirmation:no', 'config', 'uda.source.type', 'string'),
-        capture_output=True, check=True, env=env,
-    )
-    subprocess.run(
-        task_cmd('rc.confirmation:no', 'config', 'uda.source.label', 'Source note'),
-        capture_output=True, check=True, env=env,
-    )
-
-
-# ---------- frontmatter parsing ----------
+# ---------- frontmatter parsing (used for thread cache) ----------
 
 def parse_frontmatter_threads(text):
     """Return the list of thread targets from a file's frontmatter.
 
     Notes use `threads:` (list of wikilinks); log files use `thread:`
-    (singular wikilink). Returns a list of bare targets like
-    ['Processes/SGB', 'Projects/AXA DORA']. Empty list if neither
-    field is present."""
+    (singular wikilink)."""
     lines = text.split('\n')
     if not lines or lines[0].strip() != '---':
         return []
@@ -279,104 +276,43 @@ def parse_frontmatter_threads(text):
     return targets
 
 
-# Cache built per-invocation by callers that need many lookups.
-_threads_cache = None
-
-
 def build_threads_cache():
     """Walk all source files once, return {source_relpath: [threads]}."""
     cache = {}
     for f in discover_source_files():
-        text = f.read_text(encoding='utf-8')
-        threads = parse_frontmatter_threads(text)
+        try:
+            text = f.read_text(encoding='utf-8')
+        except OSError:
+            continue
         rel = str(f.relative_to(HOME).with_suffix(''))
-        cache[rel] = threads
+        cache[rel] = parse_frontmatter_threads(text)
     return cache
 
 
-def threads_for_task(task, cache):
-    """Look up thread list for a task via its source UDA. Returns
-    a list of bare targets, possibly empty."""
-    src = task.get('source', '')
-    if not src:
-        return []
-    return cache.get(src, [])
-
-
-def find_task_anchors():
-    """Walk all source files; yield (uuid8, source_relpath, kind, body).
-
-    kind is 'TASK' (pending) or 'DONE' (completed). source_relpath matches
-    the `source` UDA convention (relative to HOME, no .md). body is the
-    text between the kind prefix and the uuid anchor — what should match
-    the tw `description` field under source-wins. Used by `tasks rebuild`
-    to reconcile tw state against source-of-truth anchors."""
-    for f in discover_source_files():
-        text = f.read_text(encoding='utf-8')
-        rel = source_for(f)
-        for m in TASK_ANCHOR_RE.finditer(text):
-            yield m.group(3), rel, m.group(1), m.group(2).strip()
-
-
-def load_all_tw_tasks():
-    """Export every backend task (all statuses) as a uuid8 -> task dict."""
-    require_task()
-    result = subprocess.run(task_cmd('rc.confirmation:no', 'export'),
-                            capture_output=True, text=True, env=task_env())
-    if result.returncode != 0:
-        die(f"backend export failed: {(result.stderr or '').strip()}")
-    try:
-        data = json.loads(result.stdout) if result.stdout.strip() else []
-    except json.JSONDecodeError as e:
-        die(f"failed to parse backend export: {e}")
-    out = {}
-    for t in data:
-        uuid = t.get('uuid', '')
-        if uuid:
-            out[uuid[:8]] = t
-    return out
-
-
-def find_action_lines(note_path):
-    text = note_path.read_text(encoding='utf-8')
-    for idx, line in enumerate(text.split('\n'), start=1):
-        m = ACTION_RE.match(line)
-        if m:
-            assignee = (m.group(1) or '').strip()
-            description = m.group(2).strip()
-            attr_block = (m.group(3) or '').strip()
-            yield idx, line, assignee, description, attr_block
+def threads_for(anchor: Anchor, cache: dict) -> list:
+    rel = str(anchor.path.relative_to(HOME).with_suffix(''))
+    return cache.get(rel, [])
 
 
 # ---------- ingest ----------
 
-def rewrite_action_to_task(note_path, line_no, uuid_prefix=''):
-    """Rewrite source line `ACTION: <body> [<!--attrs-->]` to
-    `TASK: <body> <!--<uuid8>-->`. The attrs comment (if any) is dropped
-    — those attributes were already applied to the tw task at create
-    time and engine-plane state lives in tw from here on."""
-    lines = note_path.read_text(encoding='utf-8').split('\n')
-    idx = line_no - 1
-    if idx < 0 or idx >= len(lines) or not lines[idx].startswith('ACTION:'):
-        return False
-    line = lines[idx]
-    # Strip trailing HTML comment (the attrs block) so the body is clean.
-    line_no_comment = re.sub(r'\s*<!--.*?-->\s*$', '', line)
-    body = line_no_comment[len('ACTION:'):].strip()
-    if uuid_prefix:
-        lines[idx] = f'TASK: {body} <!--{uuid_prefix}-->'
-    else:
-        lines[idx] = f'TASK: {body}'
-    note_path.write_text('\n'.join(lines), encoding='utf-8')
-    return True
+def find_action_lines(path: Path):
+    """Yield (line_no, raw_line, assignee, body, attr_block) for each
+    ACTION: in a source file."""
+    text = path.read_text(encoding='utf-8')
+    for i, line in enumerate(text.split('\n')):
+        m = ACTION_RE.match(line)
+        if m:
+            assignee = (m.group(1) or '').strip()
+            body = m.group(2).strip()
+            attr_block = (m.group(3) or '').strip()
+            yield i, line, assignee, body, attr_block
 
 
-def parse_action_attrs_for_ingest(block):
-    """Parse an ACTION line's HTML-comment attr block. Returns
-    (task_args, errors). task_args is a list of `task add`-flavored
-    tokens ready to splat into the command. Dates get T12:00:00
-    appended to avoid local-vs-UTC date slippage."""
-    args = []
+def parse_action_attrs(block: str):
+    """Parse `due:... priority:... depends:...` tokens from an ACTION's
+    trailing HTML comment. Returns (attrs_dict, errors_list)."""
+    attrs = {'depends': []}
     errors = []
     for tok in (block or '').split():
         if not tok:
@@ -384,57 +320,41 @@ def parse_action_attrs_for_ingest(block):
         if ':' not in tok:
             errors.append(f"unknown attr token {tok!r}")
             continue
-        key, _, val = tok.partition(':')
-        if key in ('due', 'scheduled'):
-            if not DATE_RE.match(val):
-                errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
+        k, _, v = tok.partition(':')
+        if k in ('due', 'scheduled'):
+            if not DATE_RE.match(v):
+                errors.append(f"{k} must be YYYY-MM-DD; got {v!r}")
                 continue
-            args.append(f"{key}:{val}T12:00:00")
-        elif key == 'priority':
-            if val not in ('H', 'M', 'L'):
-                errors.append(f"priority must be H, M, or L; got {val!r}")
+            attrs[k] = v
+        elif k == 'priority':
+            if v not in ('H', 'M', 'L'):
+                errors.append(f"priority must be H, M, or L; got {v!r}")
                 continue
-            args.append(f"priority:{val}")
-        elif key == 'depends':
-            if not re.match(r'^[a-f0-9]{8}$', val):
-                errors.append(f"depends must be 8 hex chars; got {val!r}")
+            attrs[k] = v
+        elif k == 'depends':
+            if not UUID8_RE.match(v):
+                errors.append(f"depends must be 8 hex chars; got {v!r}")
                 continue
-            args.append(f"depends:{val}")
+            attrs['depends'].append(v)
         else:
-            errors.append(f"unknown attr {key!r}")
-    return args, errors
+            # Tolerate buffer's leading timestamp token (now_ts). Anything
+            # else with an unknown key is an error.
+            if re.match(r'^\d{4}-\d{2}-\d{2}T', tok):
+                continue
+            errors.append(f"unknown attr {k!r}")
+    return attrs, errors
 
 
-def task_uuid_after_add(stdout):
-    """Parse 'Created task N.' from `task add` stdout, resolve to UUID.
-    Uses `task <id> export` rather than `_uuid` because the latter is a
-    *report*, and reports filter by status — a freshly-created scheduled
-    task is in +SCHEDULED state and excluded from the default report."""
-    m = re.search(r'Created task (\d+)\.', stdout or '')
-    if not m:
-        return ''
-    result = subprocess.run(task_cmd(m.group(1), 'export'),
-                            capture_output=True, text=True, env=task_env())
-    if result.returncode != 0 or not result.stdout.strip():
-        return ''
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return ''
-    if data and isinstance(data, list):
-        return data[0].get('uuid', '')
-    return ''
-
-
-def cmd_ingest(args):
-    """Returns (succeeded, failed_list)."""
+def cmd_default(args):
+    """No subcommand: walk notes/logs and ingest each ACTION: line."""
+    existing = {a.uuid for a in walk_anchors()}
     plan = []
-    for note in discover_source_files():
-        text = note.read_text(encoding='utf-8')
+    for path in discover_source_files():
+        text = path.read_text(encoding='utf-8')
         threads = parse_frontmatter_threads(text)
-        for line_no, _line, assignee, description, attr_block in find_action_lines(note):
+        for i, raw_line, assignee, body, attr_block in find_action_lines(path):
             errors = []
-            if not description:
+            if not body:
                 errors.append("missing description")
             if not threads:
                 errors.append("note has no threads:")
@@ -443,150 +363,70 @@ def cmd_ingest(args):
                     if not thread_resolves(t):
                         errors.append(f"thread {t!r} does not resolve")
             if assignee and not assignee_resolves(assignee):
-                errors.append(f"assignee {assignee!r} does not resolve to people/{assignee}.md")
-            attr_args, attr_errs = parse_action_attrs_for_ingest(attr_block)
+                errors.append(
+                    f"assignee {assignee!r} does not resolve to "
+                    f"people/{assignee}.md")
+            attrs, attr_errs = parse_action_attrs(attr_block)
             errors.extend(attr_errs)
-            plan.append((note, line_no, assignee, description, attr_args, errors))
+            plan.append((path, i, assignee, body, attrs, errors))
 
     if not plan:
-        return 0, []
-
-    if not task_installed():
-        print(f"error: embedded backend not installed at {TASK_BIN}; run `tasks install` or remove the ACTION: lines.", file=sys.stderr)
-        return 0, [(f"{note}:{ln}", ["embedded backend not installed"]) for note, ln, *_ in plan]
+        if not args.quiet:
+            print("Ingested: 0.  Failed: 0.")
+        return 0
 
     succeeded = 0
     failed = []
-    for note, line_no, assignee, description, attr_args, errors in plan:
-        prefix = f"{note}:{line_no}"
+    for path, i, assignee, body, attrs, errors in plan:
+        prefix = f"{path}:{i + 1}"
         if errors:
             failed.append((prefix, errors))
             continue
-        full_desc = f'({assignee}) {description}' if assignee else description
-        # No project: thread is derived at query time from the source note's
-        # `threads:` frontmatter, which can list multiple threads.
-        cmd = task_cmd('add', f'source:{source_for(note)}', *attr_args, full_desc)
+        u = gen_uuid8(existing)
+        existing.add(u)
+        anchor = Anchor(
+            kind='TASK',
+            priority=attrs.get('priority'),
+            assignee=assignee or None,
+            body=body,
+            uuid=u,
+            entry=today_iso(),
+            due=attrs.get('due'),
+            scheduled=attrs.get('scheduled'),
+            depends=tuple(attrs.get('depends', [])),
+        )
+        new_line = format_anchor(anchor)
         if args.dry_run:
             if not args.quiet:
-                print(f"would: {' '.join(repr(a) if ' ' in a else a for a in cmd)}")
+                print(f"would: {new_line}")
             continue
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=task_env())
-        except subprocess.CalledProcessError as e:
-            failed.append((prefix, [f"backend add failed: {e.stderr.strip() or e.stdout.strip()}"]))
-            continue
-        uuid_prefix = task_uuid_after_add(result.stdout)[:8]
-        if not uuid_prefix:
-            # Refuse to rewrite the source line without an anchor — an
-            # unanchored TASK: leaves the tw record unreachable from any
-            # source-driven operation (rebuild, sync, set-description).
-            # Leave ACTION: in place so the next ingest re-attempts; the
-            # tw task already created is now an orphan that `rebuild`
-            # will surface for manual cleanup.
-            failed.append((prefix, [
-                "could not resolve uuid after backend add; source left as "
-                "ACTION: (backend record now orphaned, see `tasks rebuild`)"]))
-            continue
-        rewrite_action_to_task(note, line_no, uuid_prefix)
+        lines = path.read_text(encoding='utf-8').split('\n')
+        lines[i] = new_line
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        tmp.write_text('\n'.join(lines), encoding='utf-8')
+        os.replace(tmp, path)
         succeeded += 1
         if not args.quiet:
-            short = description[:60] + ('...' if len(description) > 60 else '')
-            print(f"ingested: {uuid_prefix}  {prefix}  {short}")
-    return succeeded, failed
+            short = body[:60] + ('...' if len(body) > 60 else '')
+            print(f"ingested: {u}  {prefix}  {short}")
+
+    if failed:
+        print(file=sys.stderr)
+        print(f"{len(failed)} action(s) NOT ingested (left as ACTION: in "
+              f"source):", file=sys.stderr)
+        for p, errs in failed:
+            for e in errs:
+                print(f"  {p}: {e}", file=sys.stderr)
+        print(file=sys.stderr)
+    if not args.quiet:
+        if succeeded or failed:
+            print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
+    return 1 if failed else 0
 
 
-# ---------- sync (source <-> taskwarrior) ----------
-
-TASK_COMMENT_RE = re.compile(r'^(TASK|DONE):\s+(.+?)\s*<!--([a-f0-9]{8})-->\s*$')
-
-
-def parse_task_line(line):
-    m = TASK_COMMENT_RE.match(line)
-    if not m:
-        return None
-    keyword, body, uuid_prefix = m.group(1), m.group(2).strip(), m.group(3)
-    state = 'open' if keyword == 'TASK' else 'done'
-    return state, uuid_prefix, body
-
-
-def rewrite_state_in_line(line, new_state):
-    if new_state == 'done':
-        return re.sub(r'^TASK:', 'DONE:', line, count=1)
-    else:
-        return re.sub(r'^DONE:', 'TASK:', line, count=1)
-
-
-def tw_status_to_state(s):
-    if s == 'completed':
-        return 'done'
-    if s in ('pending', 'waiting', 'recurring'):
-        return 'open'
-    return None
-
-
-def cmd_sync(args):
-    if not task_installed():
-        return 0
-    result = subprocess.run(task_cmd('export'), capture_output=True, text=True, env=task_env())
-    if result.returncode != 0:
-        return 0
-    tasks = json.loads(result.stdout) if result.stdout.strip() else []
-    by_prefix = {t['uuid'][:8]: t for t in tasks if t.get('uuid')}
-
-    desc_updates = 0
-    status_updates_to_tw = 0
-    status_updates_to_src = 0
-    for note in discover_source_files():
-        text = note.read_text(encoding='utf-8')
-        lines = text.split('\n')
-        file_changed = False
-        for i, line in enumerate(lines):
-            parsed = parse_task_line(line)
-            if not parsed:
-                continue
-            src_state, prefix, src_body = parsed
-            t = by_prefix.get(prefix)
-            if not t:
-                continue
-            tw_state = tw_status_to_state(t.get('status'))
-            if tw_state is None:
-                continue
-
-            if t.get('description', '') != src_body:
-                r = tw_modify(t['uuid'], description=src_body)
-                if r is not None and r.returncode == 0:
-                    desc_updates += 1
-                    if not args.quiet:
-                        print(f"desc->backend: {note.stem}  #{t.get('id', '?')}  -> {src_body[:60]}")
-
-            if src_state == 'open' and tw_state == 'done':
-                lines[i] = rewrite_state_in_line(line, 'done')
-                file_changed = True
-                status_updates_to_src += 1
-                if not args.quiet:
-                    print(f"status->src: {note.stem}  #{t.get('id', '?')}  TASK->DONE")
-            elif src_state == 'done' and tw_state == 'open':
-                try:
-                    subprocess.run(task_cmd(t['uuid'], 'done'),
-                                   capture_output=True, text=True, check=True, env=task_env())
-                    status_updates_to_tw += 1
-                    if not args.quiet:
-                        print(f"status->backend: {note.stem}  #{t.get('id', '?')}  done")
-                except subprocess.CalledProcessError:
-                    pass
-
-        if file_changed:
-            note.write_text('\n'.join(lines), encoding='utf-8')
-
-    return desc_updates + status_updates_to_tw + status_updates_to_src
-
-
-# ---------- subcommand: add (delegates to `buffer add-action`) ----------
+# ---------- subcommand: add (delegates to buffer add-action) ----------
 
 def cmd_add(args):
-    """Capture an action item to the buffer. This is a convenience for
-    callers thinking in task-flow; it forwards to `buffer add-action`,
-    which is the canonical write path. All validation is done by buffer."""
     cmd = ['buffer', 'add-action', args.thread, args.text]
     if args.due:
         cmd += ['--due', args.due]
@@ -599,227 +439,116 @@ def cmd_add(args):
     return subprocess.run(cmd).returncode
 
 
-# ---------- subcommand helpers: source-line locator ----------
-
-def find_source_line_by_uuid(uuid_prefix):
-    """Walk notes/ and logs/, return (path, line_index, parsed) for the
-    first TASK/DONE line whose anchor matches the 8-char uuid prefix."""
-    short = uuid_prefix[:8]
-    for note in discover_source_files():
-        lines = note.read_text(encoding='utf-8').split('\n')
-        for i, line in enumerate(lines):
-            parsed = parse_task_line(line)
-            if parsed and parsed[1] == short:
-                return note, i, parsed
-    return None
-
-
-def resolve_full_uuid(uuid_prefix):
-    """Resolve any prefix to the full UUID via taskwarrior. Errors out if
-    not unique or not found. taskwarrior accepts a UUID prefix as a leading
-    positional filter and matches across all statuses (incl completed)."""
-    require_task()
-    result = subprocess.run(task_cmd(uuid_prefix, 'export'),
-                            capture_output=True, text=True, env=task_env())
-    if result.returncode != 0:
-        die(f"backend export failed: {result.stderr.strip() or result.stdout.strip()}")
-    tasks = json.loads(result.stdout) if result.stdout.strip() else []
-    if not tasks:
-        die(f"no task found with uuid prefix {uuid_prefix!r}")
-    # Filter to exact-prefix matches in case taskwarrior returned more.
-    tasks = [t for t in tasks if (t.get('uuid') or '').startswith(uuid_prefix)]
-    if not tasks:
-        die(f"no task found with uuid prefix {uuid_prefix!r}")
-    if len(tasks) > 1:
-        die(f"uuid prefix {uuid_prefix!r} is ambiguous ({len(tasks)} matches)")
-    return tasks[0]['uuid']
-
-
 # ---------- subcommand: done ----------
 
 def cmd_done(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
-    located = find_source_line_by_uuid(full_uuid[:8])
-    if located:
-        note, idx, parsed = located
-        if parsed[0] == 'open':
-            lines = note.read_text(encoding='utf-8').split('\n')
-            lines[idx] = rewrite_state_in_line(lines[idx], 'done')
-            note.write_text('\n'.join(lines), encoding='utf-8')
-            print(f"source: {note.stem}:{idx + 1}  TASK -> DONE")
-    try:
-        subprocess.run(task_cmd(full_uuid, 'done'),
-                       capture_output=True, text=True, check=True, env=task_env())
-    except subprocess.CalledProcessError as e:
-        # backend already-done is fine; otherwise propagate
-        msg = (e.stderr or e.stdout or '').strip()
-        if 'already' not in msg.lower():
-            die(f"backend done failed: {msg}")
-    print(f"backend: {full_uuid[:8]} marked done")
+    anchor = find_anchor(args.uuid)
+    if anchor.kind == 'DONE':
+        print(f"{anchor.uuid} already done")
+        return 0
+    today = today_iso()
+    new = mutate_anchor(anchor, kind='DONE', end=today)
+    print(f"done: {new.uuid}  {new.body[:60]}")
     return 0
 
 
 # ---------- subcommand: set-description ----------
 
 def cmd_set_description(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
+    anchor = find_anchor(args.uuid)
     new_text = args.text.strip()
     if not new_text:
         die("description is empty")
-
-    located = find_source_line_by_uuid(full_uuid[:8])
-    if located:
-        note, idx, parsed = located
-        state = parsed[0]
-        keyword = 'TASK' if state == 'open' else 'DONE'
-        lines = note.read_text(encoding='utf-8').split('\n')
-        lines[idx] = f"{keyword}: {new_text} <!--{full_uuid[:8]}-->"
-        note.write_text('\n'.join(lines), encoding='utf-8')
-        print(f"source: {note.stem}:{idx + 1}  -> {new_text[:60]}")
-    else:
-        print(f"warn: no anchored source line for {full_uuid[:8]}; updating backend only", file=sys.stderr)
-
-    r = tw_modify(full_uuid, description=new_text)
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} description updated")
+    mutate_anchor(anchor, body=new_text)
+    print(f"updated: {anchor.uuid}  body={new_text[:60]}")
     return 0
 
 
 # ---------- subcommand: set-assignee ----------
 
 def cmd_set_assignee(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
+    anchor = find_anchor(args.uuid)
     person = args.person.strip()
-    # Accept either bare name or wikilink-style 'people/<Name>'.
     if person.startswith('people/'):
         person = person[len('people/'):]
     if not assignee_resolves(person):
         die(f"person {person!r} does not resolve to people/{person}.md")
-
-    located = find_source_line_by_uuid(full_uuid[:8])
-    if not located:
-        die(f"no anchored source line for {full_uuid[:8]} — can't reassign without source")
-
-    note, idx, parsed = located
-    state, uuid_prefix, body = parsed
-    keyword = 'TASK' if state == 'open' else 'DONE'
-
-    am = ASSIGNEE_PREFIX_RE.match(body)
-    naked_body = am.group(2).strip() if am else body
-    new_body = f"({person}) {naked_body}"
-
-    lines = note.read_text(encoding='utf-8').split('\n')
-    lines[idx] = f"{keyword}: {new_body} <!--{uuid_prefix}-->"
-    note.write_text('\n'.join(lines), encoding='utf-8')
-    print(f"source: {note.stem}:{idx + 1}  -> {new_body[:60]}")
-
-    r = tw_modify(full_uuid, description=new_body)
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} description updated")
+    mutate_anchor(anchor, assignee=person)
+    print(f"updated: {anchor.uuid}  assignee={person}")
     return 0
 
 
 # ---------- subcommand: set-due / set-scheduled ----------
 
-def _set_date_field(uuid_arg, date_str, field):
-    require_task()
+def _set_date(uuid_prefix, date_str, field_name):
     try:
-        date_str = validate_date(date_str)
+        validate_date(date_str)
     except ValueError as e:
         die(str(e))
-    full_uuid = resolve_full_uuid(uuid_arg)
-    # Append noon so taskwarrior stores the date with enough headroom that
-    # both sides of any reasonable TZ conversion stay on the same calendar
-    # day. Bare YYYY-MM-DD parses as local midnight and slips a day in UTC.
-    r = tw_modify(full_uuid, **{field: f'{date_str}T12:00:00'})
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} {field}:{date_str}")
+    anchor = find_anchor(uuid_prefix)
+    mutate_anchor(anchor, **{field_name: date_str})
+    print(f"updated: {anchor.uuid}  {field_name}={date_str}")
     return 0
 
 
 def cmd_set_due(args):
-    return _set_date_field(args.uuid, args.date, 'due')
+    return _set_date(args.uuid, args.date, 'due')
 
 
 def cmd_set_scheduled(args):
-    return _set_date_field(args.uuid, args.date, 'scheduled')
+    return _set_date(args.uuid, args.date, 'scheduled')
 
 
 # ---------- subcommand: set-priority ----------
 
 def cmd_set_priority(args):
-    require_task()
     try:
         prio = validate_priority(args.priority)
     except ValueError as e:
         die(str(e))
-    full_uuid = resolve_full_uuid(args.uuid)
-    r = tw_modify(full_uuid, priority=prio)
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} priority:{prio}")
+    anchor = find_anchor(args.uuid)
+    mutate_anchor(anchor, priority=prio)
+    print(f"updated: {anchor.uuid}  priority={prio}")
     return 0
 
 
 # ---------- subcommand: add-depends / rm-depends ----------
 
 def cmd_add_depends(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
-    dep_uuid = resolve_full_uuid(args.dep_uuid)
-    if dep_uuid == full_uuid:
+    anchor = find_anchor(args.uuid)
+    dep = find_anchor(args.dep_uuid)
+    if dep.uuid == anchor.uuid:
         die("a task cannot depend on itself")
-    r = tw_modify(full_uuid, depends=dep_uuid)
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} now depends on {dep_uuid[:8]}")
+    if dep.uuid in anchor.depends:
+        print(f"{anchor.uuid} already depends on {dep.uuid}")
+        return 0
+    new_deps = anchor.depends + (dep.uuid,)
+    mutate_anchor(anchor, depends=new_deps)
+    print(f"{anchor.uuid} now depends on {dep.uuid}")
     return 0
 
 
 def cmd_rm_depends(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
-    dep_uuid = resolve_full_uuid(args.dep_uuid)
-    # taskwarrior uses `depends:-<uuid>` to remove a dependency. The leading
-    # '-' is part of the value, not a flag — tw_modify passes it through.
-    r = tw_modify(full_uuid, depends=f'-{dep_uuid}')
-    if r is None or r.returncode != 0:
-        die(f"task modify failed: {((r.stderr or r.stdout) if r else '').strip()}")
-    print(f"backend: {full_uuid[:8]} no longer depends on {dep_uuid[:8]}")
+    anchor = find_anchor(args.uuid)
+    dep = find_anchor(args.dep_uuid)
+    new_deps = tuple(d for d in anchor.depends if d != dep.uuid)
+    if new_deps == anchor.depends:
+        print(f"{anchor.uuid} did not depend on {dep.uuid}")
+        return 0
+    mutate_anchor(anchor, depends=new_deps)
+    print(f"{anchor.uuid} no longer depends on {dep.uuid}")
     return 0
 
 
 # ---------- subcommand: list / next / show ----------
 
-def fmt_tw_date(s):
-    """taskwarrior emits dates as compact ISO `20260512T120000Z`. Render as
-    YYYY-MM-DD."""
-    if not s:
-        return ''
-    if len(s) >= 8 and 'T' in s:
-        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
-    return s[:10]
-
-
-def _export_filtered(filter_args):
-    require_task()
-    cmd = task_cmd(*filter_args, 'status:pending', 'export')
-    result = subprocess.run(cmd, capture_output=True, text=True, env=task_env())
-    if result.returncode != 0:
-        die(f"backend export failed: {result.stderr.strip()}")
-    tasks = json.loads(result.stdout) if result.stdout.strip() else []
-    return tasks
-
-
-def _filter_by_thread(tasks, thread, cache):
-    """Keep tasks whose source note's threads list includes `thread`."""
-    return [t for t in tasks if thread in threads_for_task(t, cache)]
+def _sort_key(a: Anchor):
+    return (
+        PRIORITY_ORDER.get(a.priority, 3),
+        a.due or '9999-99-99',
+        a.entry,
+        a.uuid,
+    )
 
 
 def _format_threads(threads):
@@ -830,452 +559,99 @@ def _format_threads(threads):
     return f"{threads[0]} +{len(threads) - 1}"
 
 
-def _print_table(tasks, cache):
-    if not tasks:
+def _print_table(anchors, cache):
+    if not anchors:
         print("(no tasks)")
         return
-    tasks = sorted(tasks, key=lambda t: t.get('urgency', 0), reverse=True)
     rows = []
-    for t in tasks:
-        prio = t.get('priority', '')
-        prio_cell = f"[{prio}]" if prio else "   "
-        uuid8 = (t.get('uuid') or '')[:8]
-        thread_cell = _format_threads(threads_for_task(t, cache))
-        desc = t.get('description', '')
-        due = fmt_tw_date(t.get('due', ''))
-        cells = [uuid8, prio_cell, thread_cell, desc, f"due:{due}" if due else '']
+    for a in anchors:
+        prio = f"[#{a.priority}]" if a.priority else "    "
+        thread_cell = _format_threads(threads_for(a, cache))
+        cells = [a.uuid, prio, thread_cell, a.body,
+                 f"due:{a.due}" if a.due else '']
         rows.append(cells)
-
     widths = [max(len(r[c]) for r in rows) for c in range(len(rows[0]))]
     for r in rows:
         print('  '.join(c.ljust(widths[i]) for i, c in enumerate(r)).rstrip())
 
 
 def cmd_list(args):
-    tasks = _export_filtered(args.filter)
+    anchors = [a for a in walk_anchors() if a.kind == 'TASK']
+    if args.priority:
+        anchors = [a for a in anchors if a.priority == args.priority]
+    if args.assignee:
+        anchors = [a for a in anchors if a.assignee == args.assignee]
+    if args.overdue:
+        today = today_iso()
+        anchors = [a for a in anchors if a.due and a.due < today]
     cache = build_threads_cache()
     if args.thread:
-        tasks = _filter_by_thread(tasks, args.thread, cache)
-    _print_table(tasks, cache)
+        anchors = [a for a in anchors if args.thread in threads_for(a, cache)]
+    anchors.sort(key=_sort_key)
+    _print_table(anchors, cache)
     return 0
 
 
 def cmd_next(args):
-    tasks = _export_filtered([])
-    cache = build_threads_cache()
-    tasks = sorted(tasks, key=lambda t: t.get('urgency', 0), reverse=True)[:5]
-    _print_table(tasks, cache)
+    anchors = [a for a in walk_anchors() if a.kind == 'TASK']
+    anchors.sort(key=_sort_key)
+    _print_table(anchors[:5], build_threads_cache())
     return 0
 
 
 def cmd_show(args):
-    require_task()
-    full_uuid = resolve_full_uuid(args.uuid)
-    result = subprocess.run(task_cmd(full_uuid, 'export'),
-                            capture_output=True, text=True, env=task_env())
-    if result.returncode != 0:
-        die(f"backend export failed: {result.stderr.strip()}")
-    data = json.loads(result.stdout) if result.stdout.strip() else []
-    if not data:
-        die(f"no task with uuid {full_uuid}")
-    t = data[0]
+    anchor = find_anchor(args.uuid)
     cache = build_threads_cache()
-    threads = threads_for_task(t, cache)
-    print(f"uuid:        {t['uuid']}  ({t['uuid'][:8]})")
-    print(f"id:          {t.get('id', '-')}")
-    print(f"status:      {t.get('status', '-')}")
-    print(f"priority:    {t.get('priority', '-')}")
+    threads = threads_for(anchor, cache)
+    print(f"uuid:        {anchor.uuid}")
+    print(f"kind:        {anchor.kind}")
+    print(f"priority:    {anchor.priority or '-'}")
+    print(f"assignee:    {anchor.assignee or '-'}")
     print(f"threads:     {', '.join(threads) if threads else '-'}")
-    print(f"source:      {t.get('source', '-')}")
-    print(f"description: {t.get('description', '')}")
-    print(f"due:         {fmt_tw_date(t.get('due', ''))}")
-    print(f"scheduled:   {fmt_tw_date(t.get('scheduled', ''))}")
-    deps = t.get('depends', '')
-    if isinstance(deps, list):
-        deps = ','.join(deps)
-    if deps:
-        dep_prefixes = ' '.join(d[:8] for d in deps.split(',') if d)
-        print(f"depends:     {dep_prefixes}")
-    print(f"entry:       {fmt_tw_date(t.get('entry', ''))}")
-    print(f"urgency:     {t.get('urgency', '-')}")
-    return 0
-
-
-def cmd_rebuild(args):
-    """Reconcile tw state with source-of-truth (TASK/DONE anchors).
-
-    Dry-run by default. Pass --apply to write; a full `task export` backup
-    is written to ~/vault/.tasks-backup-<ts>.json before any mutation.
-
-    Three change categories, ordered by risk:
-
-      [source]      Update the `source` UDA when the anchor's current file
-                    path differs from what tw recorded at ingest. Safe;
-                    heals drift from external file renames.
-
-      [status]      Bring tw status into line with source kind:
-                      TASK in source, completed in tw -> reopen
-                      DONE in source, pending in tw   -> complete
-                    Skips tw tasks in `recurring`, `waiting`, or `deleted`
-                    states (surfaces as warnings instead).
-
-      [description] Bring tw description into line with the source line
-                    body (assignee prefix included). Highest surprise
-                    potential: if a tw description was edited out-of-band
-                    and source wasn't, this REVERTS to source. Inspect
-                    the dry-run diff carefully.
-
-    Orphans are surfaced as warnings only:
-      - anchor in source with no matching tw record
-      - tw record with no matching anchor in any source file
-    They are left alone (separate, riskier operations)."""
-    require_task()
-
-    tw_tasks = load_all_tw_tasks()
-
-    anchors_by_uuid = {}
-    for uuid8, rel, kind, body in find_task_anchors():
-        anchors_by_uuid.setdefault(uuid8, []).append((rel, kind, body))
-
-    changes = []   # (uuid8, field, old, new)
-    warnings = []
-
-    for uuid8, hits in sorted(anchors_by_uuid.items()):
-        if len(hits) > 1:
-            paths = ', '.join(p for p, _, _ in hits)
-            warnings.append(f"{uuid8}: multiple anchors at {paths} (skipped)")
-            continue
-        new_source, kind, body = hits[0]
-        tw = tw_tasks.get(uuid8)
-        if tw is None:
-            warnings.append(f"{uuid8}: anchor at {new_source!r} but no backend record")
-            continue
-
-        old_source = tw.get('source', '')
-        if old_source != new_source:
-            changes.append((uuid8, 'source', old_source, new_source))
-
-        tw_status = tw.get('status', '')
-        if tw_status in ('recurring', 'waiting', 'deleted'):
-            warnings.append(
-                f"{uuid8}: backend status {tw_status!r} not reconciled "
-                f"(source kind: {kind})")
-        else:
-            want_status = 'pending' if kind == 'TASK' else 'completed'
-            if tw_status != want_status:
-                changes.append((uuid8, 'status', tw_status, want_status))
-
-        old_desc = tw.get('description', '')
-        if old_desc != body:
-            changes.append((uuid8, 'description', old_desc, body))
-
-    for u in sorted(tw_tasks):
-        if u in anchors_by_uuid:
-            continue
-        status = tw_tasks[u].get('status', '?')
-        warnings.append(f"{u}: in backend ({status}) but no source anchor")
-
-    if args.only:
-        before = len(changes)
-        changes = [c for c in changes if c[1] in args.only]
-        dropped = before - len(changes)
-        if dropped:
-            print(f"(--only {','.join(args.only)} filtered "
-                  f"out {dropped} change(s) in other categories)")
-
-    print(f"rebuild: {len(anchors_by_uuid)} source anchor(s), "
-          f"{len(tw_tasks)} tw task(s)")
-
-    if warnings:
-        print(f"\n{len(warnings)} warning(s):")
-        for w in warnings:
-            print(f"  {w}")
-
-    if not changes:
-        print("\nNo changes proposed.")
-        return 0
-
-    by_cat = {}
-    for uuid8, field, old, new in changes:
-        by_cat.setdefault(field, []).append((uuid8, old, new))
-
-    print(f"\nProposed changes ({len(changes)}):")
-    for cat in sorted(by_cat):
-        items = by_cat[cat]
-        print(f"\n[{cat}] {len(items)}:")
-        for uuid8, old, new in items:
-            print(f"  {uuid8}: {old!r} -> {new!r}")
-
-    if not args.apply:
-        print("\nDry run. Re-run with --apply to write.")
-        return 0
-
-    ts = datetime.now().strftime('%Y%m%d-%H%M%S')
-    backup_path = HOME / f'.tasks-backup-{ts}.json'
-    bk = subprocess.run(task_cmd('rc.confirmation:no', 'export'),
-                        capture_output=True, text=True, env=task_env())
-    if bk.returncode != 0:
-        die(f"backup export failed: {(bk.stderr or '').strip()}")
-    backup_path.write_text(bk.stdout, encoding='utf-8')
-    print(f"\nBackup: {backup_path}")
-
-    applied = 0
-    failed = []
-    for uuid8, field, _old, new in changes:
-        full_uuid = tw_tasks[uuid8].get('uuid', '')
-        if not full_uuid:
-            failed.append((uuid8, field, "missing full uuid in tw export"))
-            continue
-        if field == 'source':
-            r = tw_modify(full_uuid, source=new)
-        elif field == 'status':
-            if new == 'completed':
-                # `done` rather than `modify status:completed` so the
-                # backend stamps `end:<now>` itself.
-                r = subprocess.run(
-                    task_cmd('rc.confirmation:no', full_uuid, 'done'),
-                    capture_output=True, text=True, env=task_env())
-            elif new == 'pending':
-                # Clear end: alongside the status change so the task isn't
-                # shown as historically completed-but-pending.
-                r = tw_modify(full_uuid, status='pending', end='')
-            else:
-                failed.append((uuid8, field, f"unhandled status {new!r}"))
-                continue
-        elif field == 'description':
-            r = tw_modify(full_uuid, description=new)
-        else:
-            failed.append((uuid8, field, f"unknown field {field!r}"))
-            continue
-        if r is not None and r.returncode == 0:
-            applied += 1
-        else:
-            err = ((r.stderr or r.stdout) if r else '').strip()
-            failed.append((uuid8, field, err or "no-op (all fields cleared)"))
-
-    print(f"Applied {applied}/{len(changes)} change(s).")
-    if failed:
-        print(f"\n{len(failed)} failure(s):", file=sys.stderr)
-        for uuid8, field, err in failed:
-            print(f"  {uuid8} ({field}): {err}", file=sys.stderr)
-        return 1
-    return 0
-
-
-# ---------- subcommand: install ----------
-
-def cmd_install(args):
-    """One-shot setup of the embedded backend under ADULTING_HOME/.adulting/.
-
-    Workflow:
-      1. Locate a source binary (--from-path, else `task` on PATH, else error).
-      2. Copy it to <ADULTING_HOME>/.adulting/bin/task (skips if present
-         unless --force).
-      3. Create <ADULTING_HOME>/.adulting/task-data and the rcfile.
-      4. With --migrate, copy ~/.task/* into task-data (backs up any
-         existing task-data contents first).
-      5. Apply the source-UDA config on the new install.
-
-    Never deletes from ~/.task; migration is copy-only."""
-    src = args.from_path or shutil.which('task')
-    if not src:
-        die("no `task` binary found on PATH and no --from-path given; "
-            "install one (e.g. `brew install task`) then rerun, "
-            "or pass --from-path <binary>")
-    src_path = Path(src).resolve()  # follow symlinks (brew uses one)
-    if not src_path.is_file():
-        die(f"source binary {src_path} does not exist or is not a regular file")
-
-    if TASK_BIN.exists() and not args.force:
-        die(f"{TASK_BIN} already exists; pass --force to overwrite")
-
-    TASK_BIN.parent.mkdir(parents=True, exist_ok=True)
-    TASK_DATA.mkdir(parents=True, exist_ok=True)
-
-    shutil.copy2(src_path, TASK_BIN)
-    TASK_BIN.chmod(0o755)
-    print(f"binary: {src_path} -> {TASK_BIN}")
-
-    # Minimal rcfile. data.location duplicates the TASKDATA env var so
-    # any direct invocation of the embedded binary (without our env)
-    # still lands in the private dir.
-    if not TASK_RC.exists() or args.force:
-        TASK_RC.write_text(f"data.location={TASK_DATA}\nconfirmation=no\n")
-        print(f"rc:     {TASK_RC}")
-
-    if args.migrate:
-        src_data = Path.home() / '.task'
-        if not src_data.is_dir():
-            print(f"migrate: no data at {src_data}; skipping")
-        else:
-            # Back up any existing contents of TASK_DATA before overwriting.
-            existing = [p for p in TASK_DATA.iterdir()] if TASK_DATA.exists() else []
-            if existing:
-                ts = datetime.now().strftime('%Y%m%d-%H%M%S')
-                bkp = TASK_DATA.with_name(f'task-data.backup-{ts}')
-                shutil.move(str(TASK_DATA), str(bkp))
-                TASK_DATA.mkdir(parents=True)
-                print(f"migrate: backed up existing task-data -> {bkp}")
-            for item in src_data.iterdir():
-                dst = TASK_DATA / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dst)
-                else:
-                    shutil.copy2(item, dst)
-            print(f"migrate: {src_data} -> {TASK_DATA} (source left in place)")
-
-    ensure_uda()
-    print(f"data:   {TASK_DATA}")
-    print("done.")
-    return 0
-
-
-# ---------- subcommand: migrate-layout ----------
-
-def cmd_migrate_layout(args):
-    """One-shot relocation of operational state into <ADULTING_HOME>/.adulting/.
-
-    Old layout had bin/, task-data/, taskrc, config.yaml at the top level,
-    cluttering the Obsidian sidebar and Finder view. New layout tucks them
-    into a hidden subdir so only user content (notes/, threads/, people/,
-    logs/, buffer.md) remains visible.
-
-    Safety:
-      - Tarball backup of the whole ADULTING_HOME is written outside the
-        directory before anything moves. Refuses to proceed without it.
-      - Uses mv (atomic per-file on same FS) rather than copy + verify +
-        delete; the tarball is the recovery path if anything goes wrong.
-      - --dry-run prints the planned moves without touching anything.
-      - Refuses to overwrite items that already exist in the new layout."""
-
-    legacy_items = [
-        (_LEGACY_TASK_BIN.parent, INTERNAL_DIR / 'bin', 'dir',
-         lambda: _LEGACY_TASK_BIN.exists()),
-        (_LEGACY_TASK_DATA, TASK_DATA, 'dir',
-         lambda: _LEGACY_TASK_DATA.exists()),
-        (_LEGACY_TASK_RC, TASK_RC, 'file',
-         lambda: _LEGACY_TASK_RC.exists()),
-        (_LEGACY_CONFIG_FILE, CONFIG_FILE, 'file',
-         lambda: _LEGACY_CONFIG_FILE.exists()),
-    ]
-    plan = [(s, d, k) for s, d, k, present in legacy_items if present()]
-
-    cruft_dir = HOME / 'config'
-    cruft_present = cruft_dir.is_dir()
-
-    if not plan and not cruft_present:
-        if INTERNAL_DIR.exists() and TASK_BIN.exists():
-            print("already migrated; nothing to do.")
-            return 0
-        die("no legacy layout detected and embedded backend not installed; "
-            "run `tasks install` first")
-
-    print(f"ADULTING_HOME: {HOME}")
-    print(f"Target subdir: {INTERNAL_DIR}")
-    print()
-    print("Planned moves:")
-    for src, dst, kind in plan:
-        print(f"  [{kind}] {src} -> {dst}")
-    if cruft_present:
-        print(f"  [del] {cruft_dir} (cruft from abandoned ask.toml feature)")
-
-    if args.dry_run:
-        print("\nDry run. Re-run without --dry-run to apply.")
-        return 0
-
-    # ------ pre-flight: nothing in the way ------
-    for src, dst, _kind in plan:
-        if dst.exists():
-            die(f"refusing to overwrite existing {dst}")
-
-    # ------ tarball backup (outside HOME so a botched migration can't eat it) ------
-    ts = datetime.now().strftime('%Y%m%d-%H%M%S')
-    backup_path = HOME.parent / f'{HOME.name}.backup-{ts}.tar.gz'
-    print(f"\nBacking up: {HOME} -> {backup_path}")
-    bk = subprocess.run(
-        ['tar', '-czf', str(backup_path), '-C', str(HOME.parent), HOME.name],
-        capture_output=True, text=True)
-    if bk.returncode != 0:
-        die(f"tarball backup failed: {(bk.stderr or '').strip()}")
-    if not backup_path.exists() or backup_path.stat().st_size < 1024:
-        die(f"backup tarball suspiciously small or missing; aborting")
-    print(f"backup: {backup_path} ({backup_path.stat().st_size:,} bytes)")
-
-    # ------ moves ------
-    INTERNAL_DIR.mkdir(parents=True, exist_ok=True)
-    for src, dst, _kind in plan:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
-        print(f"moved: {src} -> {dst}")
-
-    # ------ delete cruft ------
-    if cruft_present:
-        shutil.rmtree(cruft_dir)
-        print(f"deleted: {cruft_dir}")
-
-    # ------ regenerate taskrc absolute paths ------
-    if TASK_RC.exists():
-        # The old rcfile pinned data.location at the old absolute path; the
-        # backend would still find the data via TASKDATA env var, but a
-        # direct invocation of the binary (without our env) would land on a
-        # ghost path. Rewrite to canonicalize.
-        TASK_RC.write_text(f"data.location={TASK_DATA}\nconfirmation=no\n")
-        print(f"regenerated: {TASK_RC}")
-        # Re-apply UDA config (the previous rcfile had uda.source.* lines
-        # that we just truncated; ensure_uda detects this and re-adds them).
-        ensure_uda()
-
-    print()
-    print("done. To roll back:")
-    print(f"  rm -rf {HOME}")
-    print(f"  tar -xzf {backup_path} -C {HOME.parent}")
+    print(f"source:      "
+          f"{anchor.path.relative_to(HOME)}:{anchor.line_no + 1}")
+    print(f"body:        {anchor.body}")
+    print(f"entry:       {anchor.entry}")
+    print(f"end:         {anchor.end or '-'}")
+    print(f"due:         {anchor.due or '-'}")
+    print(f"scheduled:   {anchor.scheduled or '-'}")
+    print(f"depends:     "
+          f"{', '.join(anchor.depends) if anchor.depends else '-'}")
     return 0
 
 
 # ---------- main ----------
 
-def cmd_default(args):
-    """No subcommand: ingest + sync. Used as the pre-pass by `notes`."""
-    succeeded, failed = cmd_ingest(args)
-    if not args.dry_run:
-        cmd_sync(args)
-    if failed:
-        print()
-        print(f"{len(failed)} action(s) NOT ingested (left as ACTION: in source):", file=sys.stderr)
-        for prefix, errs in failed:
-            for e in errs:
-                print(f"  {prefix}: {e}", file=sys.stderr)
-        print()
-    if not args.quiet:
-        if succeeded or failed:
-            print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
-    return 1 if failed else 0
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Bridge ACTION lines into the task backend; surface ops as subcommands.")
+        description="Bridge ACTION lines into source TASK anchors; "
+                    "expose anchor mutations as subcommands.")
     parser.add_argument('--dry-run', action='store_true',
-                        help="(default invocation only) Show what would be ingested.")
+                        help="(default invocation only) Show what would "
+                             "be ingested without writing.")
     parser.add_argument('--quiet', action='store_true',
-                        help="(default invocation only) Suppress per-action output.")
+                        help="(default invocation only) Suppress per-action "
+                             "output.")
     sub = parser.add_subparsers(dest='subcommand')
 
-    p_add = sub.add_parser('add', help="Buffer-append a structured ACTION (delegates to `buffer add-action`).")
+    p_add = sub.add_parser('add',
+        help="Buffer-append a structured ACTION (delegates to `buffer add-action`).")
     p_add.add_argument('thread', help="Thread label like 'Projects/SGB'.")
-    p_add.add_argument('text', help="'(Assignee) description' or just 'description'.")
-    p_add.add_argument('--due', help='YYYY-MM-DD due date applied at ingest.')
+    p_add.add_argument('text',
+        help="'(Assignee) description' or just 'description'.")
+    p_add.add_argument('--due', help='YYYY-MM-DD due date.')
     p_add.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
     p_add.add_argument('--priority', choices=['H', 'M', 'L'])
     p_add.add_argument('--depends', action='append', default=[],
-                       help='8-char UUID prefix; repeatable for multiple deps.')
+        help='8-char UUID prefix; repeatable.')
     p_add.set_defaults(func=cmd_add)
 
-    p_done = sub.add_parser('done', help="Mark a task complete (source + backend).")
+    p_done = sub.add_parser('done',
+        help="Mark a task complete; rewrites source TASK->DONE and stamps end.")
     p_done.add_argument('uuid')
     p_done.set_defaults(func=cmd_done)
 
-    p_sd = sub.add_parser('set-description', help="Rewrite source body and backend description.")
+    p_sd = sub.add_parser('set-description', help="Rewrite source body.")
     p_sd.add_argument('uuid')
     p_sd.add_argument('text')
     p_sd.set_defaults(func=cmd_set_description)
@@ -1290,12 +666,13 @@ def main():
     p_sdue.add_argument('date')
     p_sdue.set_defaults(func=cmd_set_due)
 
-    p_ssch = sub.add_parser('set-scheduled', help="Set scheduled date (YYYY-MM-DD).")
+    p_ssch = sub.add_parser('set-scheduled', help="Set scheduled date.")
     p_ssch.add_argument('uuid')
     p_ssch.add_argument('date')
     p_ssch.set_defaults(func=cmd_set_scheduled)
 
-    p_sp = sub.add_parser('set-priority', help="Set priority H|M|L.")
+    p_sp = sub.add_parser('set-priority',
+        help="Set priority H|M|L; writes [#X] in the visible portion.")
     p_sp.add_argument('uuid')
     p_sp.add_argument('priority')
     p_sp.set_defaults(func=cmd_set_priority)
@@ -1311,56 +688,27 @@ def main():
     p_rd.set_defaults(func=cmd_rm_depends)
 
     p_list = sub.add_parser('list', help="List pending tasks (formatted).")
-    p_list.add_argument('filter', nargs='*', help="Optional backend filter args.")
-    p_list.add_argument('--thread', help="Filter to tasks whose source note has this thread (e.g. Processes/SGB).")
+    p_list.add_argument('--priority', choices=['H', 'M', 'L'],
+        help="Filter to a single priority.")
+    p_list.add_argument('--thread',
+        help="Filter to tasks whose source note carries this thread "
+             "(e.g. Processes/SGB).")
+    p_list.add_argument('--assignee',
+        help="Filter to tasks assigned to this person.")
+    p_list.add_argument('--overdue', action='store_true',
+        help="Show only tasks whose due date is before today.")
     p_list.set_defaults(func=cmd_list)
 
-    p_next = sub.add_parser('next', help="Top 5 pending tasks by urgency.")
+    p_next = sub.add_parser('next',
+        help="Top 5 pending tasks by (priority, due, entry).")
     p_next.set_defaults(func=cmd_next)
 
-    p_show = sub.add_parser('show', help="Detail view of one task.")
+    p_show = sub.add_parser('show', help="Detail view of one anchor.")
     p_show.add_argument('uuid')
     p_show.set_defaults(func=cmd_show)
 
-    p_rebuild = sub.add_parser(
-        'rebuild',
-        help="Reconcile backend state with source-of-truth anchors. Dry-run by default.")
-    p_rebuild.add_argument(
-        '--apply', action='store_true',
-        help="Write changes to the backend (backup is taken first).")
-    p_rebuild.add_argument(
-        '--only', choices=['source', 'status', 'description'],
-        action='append', default=[],
-        help="Limit to one or more change categories (repeatable). "
-             "Omit to include all.")
-    p_rebuild.set_defaults(func=cmd_rebuild)
-
-    p_install = sub.add_parser(
-        'install',
-        help="Set up the embedded backend under ADULTING_HOME (one-shot).")
-    p_install.add_argument(
-        '--from-path',
-        help="Source binary to copy. Default: first `task` on PATH.")
-    p_install.add_argument(
-        '--migrate', action='store_true',
-        help="Also copy ~/.task/* into the new data dir (source left in place).")
-    p_install.add_argument(
-        '--force', action='store_true',
-        help="Overwrite an existing embedded binary / rcfile.")
-    p_install.set_defaults(func=cmd_install)
-
-    p_migrate = sub.add_parser(
-        'migrate-layout',
-        help="Relocate operational state into ADULTING_HOME/.adulting/ (one-shot).")
-    p_migrate.add_argument(
-        '--dry-run', action='store_true', dest='dry_run',
-        help="Print the planned moves without touching anything.")
-    p_migrate.set_defaults(func=cmd_migrate_layout)
-
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
-
-    ensure_uda()
 
     if args.subcommand is None:
         return cmd_default(args)

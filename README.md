@@ -7,7 +7,7 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 - **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/vault/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
 - **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/vault/threads/{Projects,Processes,Topics}/`.
 - **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
-- **Action** — a task. Notes contain `ACTION:` lines that get ingested into the task backend by the `tasks` bridge, then rewritten in place to `TASK:`.
+- **Action** — a task. Notes contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source notes are the only store — there is no backend.
 
 # Installation
 
@@ -34,17 +34,7 @@ export PATH=/Users/riaz/bin/adulting:$PATH
 
 ## One-time setup
 
-After cloning, set up the task backend (private to this install, lives under `~/vault/`):
-
-```zsh
-tasks install
-```
-
-`tasks install` copies a backend binary from your `PATH` (e.g. one installed via `brew install task` — install one first if missing) into `~/vault/.adulting/bin/`, with its own data dir and rcfile, so it doesn't share state with any other install on your machine. Pass `--migrate` to also copy any pre-existing `~/.task/` data into the new location.
-
-If you're upgrading from an earlier layout that had `bin/`, `task-data/`, `taskrc`, and `config.yaml` at the top level, run `tasks migrate-layout` once to relocate them into `.adulting/` (atomic moves, with a tarball backup written outside the vault and a one-line rollback printed at the end).
-
-The data location follows `ADULTING_HOME` if set (default `~/.adulting`).
+Nothing to install — task state lives in source notes themselves. The vault location follows `ADULTING_HOME` if set (default `~/vault`).
 
 # Scripts
 
@@ -68,8 +58,9 @@ Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files wi
 
 | Keyword     | Meaning                                                                  |
 |-------------|--------------------------------------------------------------------------|
-| `ACTION:`   | Action item — ingested by `tasks` into the backend, then rewritten to `TASK:` |
-| `TASK:`     | Already-ingested action (set by `tasks`; don't write by hand)            |
+| `ACTION:`   | Action item — ingested by `tasks` and rewritten to a `TASK:` anchor    |
+| `TASK:`     | Anchored open action (managed by `tasks`; don't write by hand)         |
+| `DONE:`     | Anchored completed action (set by `tasks done`)                        |
 | `AGREED:`   | Formal agreement — surfaced in `notes minutes`                         |
 | `RESOLVED:` | Formal resolution — surfaced in `notes minutes`                        |
 | `!:`        | Important callout — surfaced in `notes pdf` summary                    |
@@ -117,23 +108,27 @@ Same skeleton shape, applied to people files.
 
 ## tasks
 
-Bridge from `ACTION:` lines in notes into the task backend. Run `tasks install` once before first use (see *One-time setup* above).
+Bridge from `ACTION:` lines in notes/logs into anchored `TASK:` lines, plus per-anchor mutations. Source notes are the entire store — there is no backend.
 
 | Command                  | What it does                                                                                |
 |--------------------------|---------------------------------------------------------------------------------------------|
-| `tasks`                  | Walk notes, validate every `ACTION:` line, ingest valid ones into the backend, rewrite to `TASK:` |
-| `tasks --dry-run`        | Show what would be ingested without modifying backend state or files                        |
+| `tasks`                  | Walk notes/logs, validate every `ACTION:` line, ingest valid ones (rewrite in place to `TASK:` anchors with a fresh uuid and `entry:<today>`) |
+| `tasks --dry-run`        | Show what would be ingested without writing                                                 |
 | `tasks --quiet`          | Suppress per-action output                                                                  |
-| `tasks install`          | Set up the embedded backend (one-shot; `--migrate` to copy existing `~/.task/` data)        |
-| `tasks <subcommand>`     | See `tasks --help` for the full list of mutating / read operations on the backend           |
+| `tasks <subcommand>`     | See `tasks --help` for `done`, `set-{description,assignee,due,scheduled,priority}`, `add-depends`, `rm-depends`, `list`, `next`, `show` |
 
-Validation rules:
+Anchor shape on disk (validated by the `task_anchor` schema):
+```
+TASK: [#H] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD [end:…] [due:…] [scheduled:…] [depends:<u8>,…]-->
+```
+
+Validation rules at ingest:
 - Each entry in the note's `threads:` list must resolve to an existing thread file.
 - If the action has `(Assignee)`, that name must resolve to `people/<name>.md`.
 - Description must be non-empty.
-- Any inline attrs (in the trailing HTML comment, e.g. `due:2026-05-08 priority:H`) are validated and applied to the new task at create time.
+- Any inline attrs in the `ACTION:`'s trailing HTML comment (`due:`, `scheduled:`, `priority:`, `depends:`) are validated and carried onto the resulting `TASK:` anchor.
 
-Failures are printed; the source line is left as `ACTION:` so you can fix it and re-run. The backend is checked lazily — only errors when there's something to ingest.
+Failures are printed; the source line is left as `ACTION:` so you can fix and re-run.
 
 ## lint
 
@@ -152,10 +147,7 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 ```
 ~/vault/                    # ADULTING_HOME (override via env var)
 ├── .obsidian/                  # Obsidian vault config
-├── .adulting/                  # this codebase's operational state (hidden, like .git or .obsidian)
-│   ├── bin/task                # embedded backend binary (written by `tasks install`)
-│   ├── task-data/              # embedded backend's private data dir
-│   ├── taskrc                  # embedded backend's rcfile
+├── .adulting/                  # operational state (hidden, like .git or .obsidian)
 │   └── config.yaml             # vault-wide config (owner, etc.)
 ├── notes/                      # markdown notes (one file per note)
 ├── threads/
@@ -178,6 +170,7 @@ The visible top level (what Obsidian shows in its sidebar) is only user content:
 | `thread.md`                   | Thread files in `threads/{Projects,Processes,Topics}/`          |
 | `person.md`                   | Person files in `people/`                                       |
 | `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |
+| `task_anchor.md`              | `TASK:`/`DONE:` lines in notes/logs (uuid, attrs, depends)      |
 
 Each schema is a markdown file with YAML frontmatter (`schema`, `scope`, `directory`, `filename`, optionally `applies_when`) and a `## Fields` table describing required fields, types, and constraints. Pipes inside cells (e.g. inside a regex) must be escaped as `\|`.
 

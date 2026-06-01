@@ -343,7 +343,7 @@ def find_file_schema(path, fm, schemas):
     return None
 
 
-def validate_file(path, schemas):
+def validate_file(path, schemas, registry=None):
     path = Path(path)
     if not path.exists():
         yield (0, "file does not exist")
@@ -429,13 +429,22 @@ def validate_file(path, schemas):
             if not m:
                 yield (line_no, f"line does not conform to {ls['name']} shape /{shape}/")
                 continue
+            captures = m.groupdict()
             for fname, spec in ls['fields'].items():
-                captured = m.groupdict().get(fname, '')
+                captured = captures.get(fname) or ''
                 if spec['required'] and not captured:
                     yield (line_no, f"{ls['name']}.{fname}: missing")
                 elif captured:
                     for err in validate_value(f"{ls['name']}.{fname}", captured, spec):
                         yield (line_no, err)
+
+            # task_anchor: per-line cross-cuts (kind/end/assignee) and
+            # register for vault-wide checks (uniqueness, depends, cycles).
+            if ls['name'] == 'task_anchor':
+                for err in _task_anchor_per_line(captures):
+                    yield (line_no, err)
+                if registry is not None:
+                    _task_anchor_register(registry, captures, path, line_no)
 
         # ACTION: lines (notes only)
         if is_note:
@@ -449,6 +458,122 @@ def validate_file(path, schemas):
                     person_path = HOME / 'people' / f"{name}.md"
                     if not person_path.exists():
                         yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
+
+
+# ---------- task_anchor: per-line + vault-wide rules ----------
+
+def _task_anchor_per_line(captures):
+    """Cross-cuts that need the full capture dict but are scoped to one line."""
+    kind = captures.get('kind')
+    entry = captures.get('entry')
+    end = captures.get('end')
+    assignee = captures.get('assignee')
+
+    if kind == 'DONE' and not end:
+        yield "task_anchor: kind=DONE requires 'end'"
+    if end and entry and end < entry:
+        yield f"task_anchor: end {end!r} precedes entry {entry!r}"
+    if assignee:
+        if not (HOME / 'people' / f"{assignee}.md").exists():
+            yield f"task_anchor.assignee: {assignee!r} does not resolve to people/{assignee}.md"
+
+
+def _task_anchor_register(registry, captures, path, line_no):
+    uuid8 = captures.get('uuid')
+    if not uuid8:
+        return
+    registry['by_uuid'].setdefault(uuid8, []).append((path, line_no))
+    deps_raw = captures.get('depends') or ''
+    if deps_raw:
+        deps = [d for d in deps_raw.split(',') if d]
+        if deps:
+            registry['depends_edges'].append((uuid8, deps, path, line_no))
+
+
+def cross_check_tasks(registry):
+    """Yield (path, line_no, msg) for vault-wide task_anchor rules.
+    Runs after every file has been walked so the registry is complete."""
+    by_uuid = registry['by_uuid']
+
+    # Duplicate uuids — report each occurrence pointing at the others.
+    for uuid8, hits in by_uuid.items():
+        if len(hits) <= 1:
+            continue
+        for path, ln in hits:
+            others = ', '.join(f"{p}:{l}" for p, l in hits if (p, l) != (path, ln))
+            yield path, ln, f"task_anchor.uuid: {uuid8!r} duplicated at {others}"
+
+    # Dependency targets must resolve.
+    known = set(by_uuid)
+    for _src, deps, path, ln in registry['depends_edges']:
+        for d in deps:
+            if d not in known:
+                yield path, ln, f"task_anchor.depends: {d!r} does not resolve to any anchor"
+
+    # Cycle detection via iterative DFS coloring. Self-loops included.
+    graph = {}
+    for src, deps, _, _ in registry['depends_edges']:
+        graph.setdefault(src, []).extend(deps)
+    src_locations = {}
+    for src, _deps, path, ln in registry['depends_edges']:
+        src_locations.setdefault(src, (path, ln))
+    seen = set()
+    for cycle in _find_cycles(graph):
+        canon = tuple(_rotate_to_min(cycle))
+        if canon in seen:
+            continue
+        seen.add(canon)
+        first = cycle[0]
+        path, ln = src_locations.get(first, (None, 0))
+        if path is not None:
+            yield path, ln, ("task_anchor.depends: cycle: "
+                             + ' -> '.join(list(cycle) + [cycle[0]]))
+
+
+def _find_cycles(graph):
+    """Yield each cycle as a list of uuid8s in traversal order. Uses
+    iterative DFS with white/gray/black coloring; on a gray hit, splice
+    out the cycle from the path stack."""
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {n: WHITE for n in graph}
+    for node in list(graph):
+        if color[node] != WHITE:
+            continue
+        # (node, iter_over_neighbors); path tracks the current DFS chain.
+        stack = [(node, iter(graph.get(node, [])))]
+        path = [node]
+        color[node] = GRAY
+        while stack:
+            cur, it = stack[-1]
+            nxt = next(it, None)
+            if nxt is None:
+                color[cur] = BLACK
+                stack.pop()
+                path.pop()
+                continue
+            if nxt not in color:
+                # Unknown target — handled by the dangling-depends check;
+                # don't traverse into it for cycle detection.
+                continue
+            c = color[nxt]
+            if c == WHITE:
+                color[nxt] = GRAY
+                path.append(nxt)
+                stack.append((nxt, iter(graph.get(nxt, []))))
+            elif c == GRAY:
+                # Cycle: from where nxt appears in path to the end.
+                idx = path.index(nxt)
+                yield path[idx:]
+            # BLACK: already-finished node; not a cycle through here.
+
+
+def _rotate_to_min(seq):
+    """Canonical rotation so equivalent cycles dedupe. Rotates so the
+    lexicographically smallest element comes first."""
+    if not seq:
+        return seq
+    i = min(range(len(seq)), key=lambda k: seq[k])
+    return list(seq[i:]) + list(seq[:i])
 
 
 # ---------- file discovery ----------
@@ -488,12 +613,18 @@ def main():
 
     files = [Path(p) for p in args.paths] if args.paths else list(discover_files())
 
+    registry = {'by_uuid': {}, 'depends_edges': []}
     total = 0
     for f in files:
-        for line_no, msg in validate_file(f, schemas):
+        for line_no, msg in validate_file(f, schemas, registry=registry):
             total += 1
             if not args.quiet:
                 print(f"{f}:{line_no}: {msg}")
+
+    for path, line_no, msg in cross_check_tasks(registry):
+        total += 1
+        if not args.quiet:
+            print(f"{path}:{line_no}: {msg}")
 
     if not args.quiet:
         print(f"\n{len(files)} file(s) checked. {total} violation(s).")

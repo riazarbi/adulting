@@ -2,6 +2,26 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-05-27 - `tasks` source-as-database: taskwarrior backend removed
+
+The taskwarrior sqlite store (`~/vault/.adulting/task-data/taskchampion.sqlite3`) was the canonical engine-plane state. Syncing the vault across machines produced unmergeable binary conflicts. Source notes already carried uuid-anchored `TASK:`/`DONE:` lines as the user-visible state; only six attrs (`entry`, `end`, `due`, `scheduled`, `priority`, `depends`) lived exclusively in the backend. This change lifts those onto the on-disk anchor line and deletes the backend.
+
+PRD/user story: `stories/2026-05-27-tasks-source-as-database.md`.
+
+- **New on-disk anchor shape**, validated by the new `schemas/task_anchor.md` line-scope schema:
+  ```
+  TASK: [#H] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD [end:…] [due:…] [scheduled:…] [depends:<u8>,…]-->
+  ```
+  Priority lives in the visible `[#X]`, never in attrs. Order is fixed; the writer in `tasks` is the only authority.
+- **`schemas/task_anchor.md`** declares every field as a named capture (`kind`, `priority`, `assignee`, `body`, `uuid`, `entry`, `end`, `due`, `scheduled`, `depends`) and reuses the existing scalar constraint DSL — no DSL extension needed.
+- **`lint` patch**: per-line conditional rules (`kind=DONE → end required`, `end >= entry`, `assignee → people/<name>.md`) follow the precedent at the prior thread/person hardcode block; new vault-wide pass (uuid uniqueness across the vault, `depends` target resolution, `depends` cycle detection via iterative DFS coloring) runs end-of-run after the file walk.
+- **`tasks` rewritten**. All subcommands now read and write the source line directly via a `parse_anchor` / `format_anchor` / `mutate_anchor` triple. The dataclass-based `Anchor` is the single in-memory shape; `walk_anchors()` is the only read path; `find_anchor(prefix)` resolves uuid prefixes via the same walk. File mutations go through `tmp + os.replace` for atomicity. Preserved commands: `add`, `done`, `set-description`, `set-assignee`, `set-due`, `set-scheduled`, `set-priority`, `add-depends`, `rm-depends`, `list`, `next`, `show`, and the default (no-arg) ingest. `list` filter DSL replaced with explicit `--priority` / `--thread` / `--assignee` / `--overdue` flags. `next` sorts by `(priority, due, entry, uuid)` ascending; tw's `urgency` formula is gone (priority weight dominated it anyway).
+- **`tasks install`, `tasks migrate-layout`, `tasks rebuild`, `cmd_sync`, `task_cmd`, `task_env`, `tw_modify`, `ensure_uda`, the entire `INTERNAL_DIR / bin` / `TASK_BIN` stanza, the legacy-layout detection, the report-vs-export UUID lookup detour, the noon-shift date hack — all deleted. The `tasks` file shrinks from ~1370 lines to ~530.
+- **Migration** ran on the live vault: 308 source anchors rewritten with their tw attrs lifted (4 source anchors had no tw record and got synthesized entry/end; 56 tw records had no source anchor and were logged to `.adulting/migration-orphans.txt`). Source-wins on every field where tw disagreed. Where tw recorded an end date that predated entry (back-dated historical tasks), entry was pulled back to match end so the `end >= entry` invariant holds going forward.
+- **`~/vault/.adulting/{bin,task-data,taskrc}` deleted** post-migration (~50 MB freed). The visible `.adulting/` keeps only `config.yaml` and the two migration log files for posterity.
+- **New test suite** at `tests/`: 61 tests across smoke, schema, lint cross-vault rules, and per-subcommand functionality (ingest, `done`, every `set-*`, `add`/`rm-depends`, `list` filters, `next` sort order, `show`, full ACTION→TASK→DONE lifecycle, prefix-not-found, prefix-ambiguous, removed subcommands). Runs as subprocess against a temp vault per test via the new `conftest.py` `vault` fixture.
+- **Sync model is now git only.** Two machines making concurrent edits to the same TASK line conflict on that line in git — resolvable. Two machines editing different lines/files don't conflict at all.
+
 ## 2026-05-25 - `Dockerfile` rewritten for the new distroless agent base
 
 The upstream agent project dropped its bundled llama.cpp backend and switched the container base to `gcr.io/distroless/static-debian12`, taking the image from multi-GB down to ~15 MB. Distroless has no shell and no `apt`, so the prior layering — `FROM agent-offline:local` then `apt-get install python3 taskwarrior` — stops building on first `RUN`. The fix inverts the dependency: pull just the agent binary out of the upstream image and build adulting's runtime on debian-slim, where we control the package set.

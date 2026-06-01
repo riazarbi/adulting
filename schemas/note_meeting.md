@@ -18,7 +18,7 @@ A note recording a meeting with one or more counterparties. Lives in `~/vault/no
 | threads      | yes      | list   | regex=\[\[(Projects\|Processes\|Topics)/[^\]]+\]\] |
 | timestamp    | yes      | string | regex=\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2} |
 | counterparty | no       | string |                                           |
-| location     | yes      | string |                                           |
+| location     | no       | string |                                           |
 | people       | no       | list   |                                           |
 
 `threads` is a list of wikilinks; each entry must resolve to a thread file under `threads/<Kind>/<Name>.md` (Projects / Processes / Topics). A note can belong to multiple threads. `people` is a list whose entries may be wikilinks `[[people/X]]` (validated to resolve) or plain strings (untracked attendees).

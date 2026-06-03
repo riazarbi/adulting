@@ -359,6 +359,18 @@ def test_list_assignee_filter(vault):
     assert "mine" not in r.stdout
 
 
+def test_list_renders_assignee(vault):
+    _setup_vault(vault, people=("Riaz Arbi", "Charlie"))
+    _seed_anchor(vault, "2026-05-27-09-15-22",
+        "TASK: (Charlie) theirs <!--abcd1234 entry:2026-05-20-->\n"
+        "TASK: unassigned <!--ef567890 entry:2026-05-20-->")
+    r = vault.run("list", cli="tasks")
+    assert "(Charlie)" in r.stdout
+    assert "theirs" in r.stdout
+    # unassigned task still renders, just without a parenthetical
+    assert "unassigned" in r.stdout
+
+
 def test_list_overdue_filter(vault):
     _setup_vault(vault)
     _seed_anchor(vault, "2026-05-27-09-15-22",

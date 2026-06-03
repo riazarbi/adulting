@@ -567,7 +567,8 @@ def _print_table(anchors, cache):
     for a in anchors:
         prio = f"[#{a.priority}]" if a.priority else "    "
         thread_cell = _format_threads(threads_for(a, cache))
-        cells = [a.uuid, prio, thread_cell, a.body,
+        assignee_cell = f"({a.assignee})" if a.assignee else ''
+        cells = [a.uuid, prio, thread_cell, assignee_cell, a.body,
                  f"due:{a.due}" if a.due else '']
         rows.append(cells)
     widths = [max(len(r[c]) for r in rows) for c in range(len(rows[0]))]

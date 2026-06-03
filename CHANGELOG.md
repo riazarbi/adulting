@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-06-03 - `tasks list`/`next` now render the assignee
+
+Bug fix: `tasks next` (and `tasks list`) dropped the assignee from their output. The assignee was parsed and stored on the anchor correctly — `tasks show` printed it — but the shared table renderer never emitted it.
+
+- **`_print_table` patch**: added an `assignee_cell` (`(Name)` when set, blank otherwise) between the thread and body columns, matching the `(assignee)` convention already used by `format_anchor`. Both `list` and `next` route through this one renderer, so both are fixed by the single change. Unassigned tasks leave the column blank; alignment is preserved.
+- **Regression test** `tests/test_tasks_cli.py::test_list_renders_assignee`: seeds an assigned and an unassigned task, asserts `(Charlie)` appears in `list` output and the unassigned task still renders. Confirmed failing on the unpatched renderer and passing with the fix; full `tasks` CLI suite green.
+
 ## 2026-05-27 - `tasks` source-as-database: taskwarrior backend removed
 
 The taskwarrior sqlite store (`~/vault/.adulting/task-data/taskchampion.sqlite3`) was the canonical engine-plane state. Syncing the vault across machines produced unmergeable binary conflicts. Source notes already carried uuid-anchored `TASK:`/`DONE:` lines as the user-visible state; only six attrs (`entry`, `end`, `due`, `scheduled`, `priority`, `depends`) lived exclusively in the backend. This change lifts those onto the on-disk anchor line and deletes the backend.

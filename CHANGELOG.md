@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-06-04 - anchor lines end with a Markdown hard break
+
+Bug fix: ingested `TASK:`/`DONE:` lines ended with `-->` and no trailing whitespace, so pandoc soft-wrapped consecutive anchors into one paragraph and the PDF rendered every task on a single line.
+
+- **`format_anchor` patch**: append two trailing spaces (a Markdown hard line break) to the formatted anchor. `format_anchor` is the single writer, so both ingest and every `tasks` mutation are covered. Round-trips cleanly — `ANCHOR_RE`/`ACTION_RE`, the `schemas/task_anchor.md` `shape` regex, and `lint`'s `TASK_RE` all already tolerate trailing whitespace; `notes_pdf`'s action-table renderer strips the comment with surrounding whitespace, so table cells are unaffected.
+- **Regression test** `tests/test_tasks_cli.py::test_ingest_appends_markdown_hard_break`: ingests two actions and asserts each anchor ends with `-->  `. Confirmed failing on the unpatched writer and passing with the fix; the two existing `-->$` assertions were updated to `-->  $`; full suite green (63 passed).
+- **Not bundled**: anchors already on disk gain the trailing spaces only on next mutation — there is no reformat/`rebuild` command to backfill old notes.
+
 ## 2026-06-03 - `tasks list`/`next` now render the assignee
 
 Bug fix: `tasks next` (and `tasks list`) dropped the assignee from their output. The assignee was parsed and stored on the anchor correctly — `tasks show` printed it — but the shared table renderer never emitted it.

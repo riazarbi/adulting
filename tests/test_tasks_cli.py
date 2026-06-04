@@ -50,8 +50,24 @@ def test_ingest_basic_action(vault):
     note = vault.read("notes/2026-05-27-09-15-22.md")
     assert "ACTION:" not in note
     assert re.search(
-        r"^TASK: Pick up dry cleaning <!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2}-->$",
+        r"^TASK: Pick up dry cleaning <!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2}-->  $",
         note, re.MULTILINE), note
+
+
+def test_ingest_appends_markdown_hard_break(vault):
+    # Each ingested anchor must end with two trailing spaces (a Markdown
+    # hard line break) so pandoc renders consecutive tasks on separate
+    # lines in the PDF instead of soft-wrapping them into one paragraph.
+    _setup_vault(vault)
+    vault.write_note("2026-05-27-09-15-22",
+        "ACTION: First thing\nACTION: Second thing",
+        threads=["Projects/SGB"])
+    r = vault.run(cli="tasks")
+    assert r.returncode == 0, r.stderr
+    lines = _find_anchor_lines(vault, "notes/2026-05-27-09-15-22.md")
+    assert len(lines) == 2, lines
+    for ln in lines:
+        assert ln.endswith("-->  "), repr(ln)
 
 
 def test_ingest_with_assignee_and_attrs(vault):
@@ -65,7 +81,7 @@ def test_ingest_with_assignee_and_attrs(vault):
     note = vault.read("notes/2026-05-27-09-15-22.md")
     assert re.search(
         r"^TASK: \[#H\] \(Riaz Arbi\) Send report "
-        r"<!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2} due:2026-05-29-->$",
+        r"<!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2} due:2026-05-29-->  $",
         note, re.MULTILINE), note
 
 

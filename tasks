@@ -128,7 +128,11 @@ def format_anchor(a: Anchor) -> str:
         attrs.append(f"scheduled:{a.scheduled}")
     if a.depends:
         attrs.append(f"depends:{','.join(a.depends)}")
-    return f"{' '.join(head)} <!--{' '.join(attrs)}-->"
+    # Trailing two spaces are a Markdown hard line break: without them
+    # pandoc soft-wraps consecutive anchor lines into one paragraph and
+    # the PDF renders every task on a single line. The parse regexes
+    # tolerate trailing whitespace, so this round-trips cleanly.
+    return f"{' '.join(head)} <!--{' '.join(attrs)}-->  "
 
 
 # ---------- walking / locating ----------

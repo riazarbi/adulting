@@ -1,22 +1,18 @@
 #!/bin/bash
 
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+
 selected_note=$1
-        note="$NOTES_DIR/$selected_note"
-        tempfile=$(mktemp)
+note="$NOTES_DIR/$selected_note"
+tempfile=$(mktemp)
 
-        count=0
+# Copy YAML frontmatter verbatim, then keep only headers/separators from the body.
+awk '
+BEGIN { in_fm = 0 }
+NR == 1 && /^---$/ { in_fm = 1; print; next }
+in_fm && /^---$/ { print; in_fm = 0; next }
+in_fm { print; next }
+/^#/ || /^---/ { print ""; print }
+' "$note" > "$tempfile"
 
-        while IFS= read -r line; do
-            count=$((count + 1))
-            if [ "$count" -le 8 ]; then
-                echo "$line" >> "$tempfile"
-            else
-              if [[ "$line" =~ ^# ]] || [[ "$line" =~ ^--- ]]; then
-                    echo "" >> "$tempfile"  # Adding a newline for Markdown formatting
-                    echo "$line" >> "$tempfile"
-            fi
-            fi
-        done < "$note"
-
-        # Move the temporary file to replace the original file
-        mv "$tempfile" "$note"
+mv "$tempfile" "$note"

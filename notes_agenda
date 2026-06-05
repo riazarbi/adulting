@@ -1,8 +1,16 @@
 #!/bin/bash
 
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+: "${EXPORT_DIR:?must be invoked via 'notes', not directly}"
+type extract_meta >/dev/null 2>&1 || { echo "$0: extract_meta function missing; must be invoked via 'notes'" >&2; exit 1; }
+
 selected_note=$1
 
-        note="$NOTES_DIR/$selected_note" 
+        note="$NOTES_DIR/$selected_note"
+
+        # Work in a temp directory so the relative awk file refs below don't pollute CWD
+        workdir=$(mktemp -d)
+        cd "$workdir"
 
         # Temporary files for different tasks
         metadata_file=$(mktemp)
@@ -11,16 +19,15 @@ selected_note=$1
         resolved_lines="resolved_lines.txt"
         agreed_lines="agreed_lines.txt"
         action_lines="action_lines.txt"
-        final_file="$DOWNLOADS_DIR/$selected_note"
+        final_file="$EXPORT_DIR/$selected_note"
         file_path=$note
 
         # Extract file metadata
-        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
-        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        title=$(extract_meta topic "$note")
+        type=$(extract_meta type "$note")
+        location=$(extract_meta location "$note")
+        timestamp=$(extract_meta timestamp "$note")
+        people=$(extract_people_list "$note")
 
 
 # Write the metadata to the temporary file
@@ -52,18 +59,17 @@ if [ -n "$location" ]; then
 
 fi
 
-# Add attendees if it's not empty
-if [ -n "$attendees" ]; then
-    echo "**Attendees**:  " >> "$metadata_file"
+# Add the people list if it's not empty
+if [ -n "$people" ]; then
+    if [ "$type" = "Correspondence" ]; then
+        echo "**Participants**:  " >> "$metadata_file"
+    else
+        echo "**Attendees**:  " >> "$metadata_file"
+    fi
     echo "" >> "$metadata_file"
-    echo "$attendees" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
-fi
-
-# Add participants if it's not empty
-if [ -n "$participants" ]; then
-    echo "**Participants**:  " >> "$metadata_file"
-    echo "" >> "$metadata_file"
-    echo "$participants" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+    while IFS= read -r p; do
+        [ -n "$p" ] && echo "- $p" >> "$metadata_file"
+    done <<< "$people"
 fi
 
 
@@ -85,8 +91,10 @@ fi
 # Remove the content between # Agreed and the line with dashes
 # Remove the content between # Actions and the line with dashes
 awk '
-BEGIN { print_lines = 1 }
-index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
+BEGIN { print_lines = 1; in_fm = 0 }
+NR == 1 && $0 == "---" { in_fm = 1; next }
+in_fm && $0 == "---" { in_fm = 0; next }
+in_fm { next }
 /# Minuted Agreements/ {
     print;
     print_lines = 0;
@@ -106,8 +114,51 @@ index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") 
 }
 /--{10,}/ && print_lines == 0 { print_lines = 1; }
 /# Timesheet/ { exit }
+/# Acceptance/ { exit }
 print_lines { print }
 ' "$temp_summary" > "$temp_file"
+
+# Strip empty H3+ headers (keep H1/H2 always; keep H3+ only if there is
+# body text before the next same-or-higher-level header). A sub-header
+# does not count as body, so a chain of empty H3 -> empty H4 collapses
+# away too. H1/H2 are always preserved per the agenda template.
+awk '
+{ lines[NR] = $0; n = NR }
+function header_level(s,    k, lvl) {
+    if (s !~ /^#+[[:space:]]+/) return 0
+    lvl = 0
+    for (k = 1; k <= length(s); k++) {
+        if (substr(s, k, 1) == "#") lvl++; else break
+    }
+    return lvl
+}
+function is_hr(s,    t) {
+    # Markdown horizontal rule: 3+ of -, *, or _ only (whitespace ignored).
+    # Used as a decorative separator in the agenda template; not body.
+    t = s
+    gsub(/[[:space:]]/, "", t)
+    if (length(t) < 3) return 0
+    if (t ~ /^-+$/) return 1
+    if (t ~ /^\*+$/) return 1
+    if (t ~ /^_+$/) return 1
+    return 0
+}
+END {
+    for (i = 1; i <= n; i++) {
+        line = lines[i]
+        level = header_level(line)
+        if (level == 0 || level <= 2) { print line; continue }
+        has_body = 0
+        for (j = i + 1; j <= n; j++) {
+            nl = lines[j]
+            nlvl = header_level(nl)
+            if (nlvl > 0 && nlvl <= level) break
+            if (nlvl == 0 && nl ~ /[^[:space:]]/ && !is_hr(nl)) { has_body = 1; break }
+        }
+        if (has_body) print line
+    }
+}
+' "$temp_file" > "$temp_file.stripped" && mv "$temp_file.stripped" "$temp_file"
 
 # Re-add metadata in pandoc compatible structure
 cat "$metadata_file" "$temp_file" > "$temp_file.tmp"
@@ -123,11 +174,10 @@ rm "$metadata_file"
 
         #cat "$final_file"
 
-        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
-        pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
+        pandoc $final_file --from=markdown+lists_without_preceding_blankline -s -o "$EXPORT_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
 		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
 		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
-	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
-        #open -g /tmp/tempfile.pdf &
-        #open -g $final_file &
-        open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
+        open -g "$EXPORT_DIR/$selected_note.pdf" &
+
+        cd /
+        rm -rf "$workdir"

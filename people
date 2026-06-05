@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Manage thread files in ~/vault/threads/{Projects,Processes,Topics}/.
+"""Manage people files in ~/vault/people/.
 
-Skeleton: just create / delete / list / show. The richer reporting tools
-(daily review, tail, overdue, report) are intentionally omitted — they'll
-be rebuilt when we know what views we actually want from notes data.
+People are link targets (`[[people/<name>]]`) for `note.people` and
+action `assignee:`. They are not threads — they cannot be the value of
+`note.thread`. Skeleton: just create / delete / list / show.
 """
 
 import argparse
@@ -11,7 +11,6 @@ import difflib
 import json
 import os
 import re
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,12 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 
 HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-THREADS_DIR = HOME / 'threads'
-KIND_DIRS = {
-    'project': 'Projects',
-    'process': 'Processes',
-    'topic': 'Topics',
-}
+PEOPLE_DIR = HOME / 'people'
 CATEGORIES = ['professional', 'personal', 'voluntary']
 
 
@@ -33,15 +27,12 @@ def today():
     return datetime.now().strftime('%Y-%m-%d')
 
 
-def discover_threads():
-    """Yield (kind, name, path) for every thread file."""
-    for kind, subdir in KIND_DIRS.items():
-        d = THREADS_DIR / subdir
-        if not d.is_dir():
-            continue
-        for f in sorted(d.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
-                yield kind, f.stem, f
+def discover_people():
+    if not PEOPLE_DIR.is_dir():
+        return
+    for f in sorted(PEOPLE_DIR.iterdir()):
+        if f.suffix == '.md' and not f.name.startswith('.'):
+            yield f.stem, f
 
 
 def read_frontmatter(path):
@@ -59,50 +50,7 @@ def read_frontmatter(path):
     return fm
 
 
-def resolve_thread(arg):
-    """Resolve a user-supplied thread reference to (kind, name, path).
-    Accepts:
-      - bare name 'SGB' (must be unique across kinds, else error)
-      - path 'Processes/SGB'
-      - wikilink form '[[Processes/SGB]]'
-    Returns None if not found, raises ValueError on ambiguity."""
-    arg = arg.strip()
-    m = re.match(r'^\[\[([^\]]+)\]\]$', arg)
-    if m:
-        arg = m.group(1)
-    if '/' in arg:
-        kind_dir, name = arg.split('/', 1)
-        for kind, subdir in KIND_DIRS.items():
-            if subdir == kind_dir:
-                p = THREADS_DIR / subdir / f"{name}.md"
-                if p.exists():
-                    return kind, name, p
-                return None
-        return None
-    matches = [(k, n, p) for k, n, p in discover_threads() if n == arg]
-    if len(matches) == 0:
-        return None
-    if len(matches) > 1:
-        raise ValueError(f"ambiguous thread name {arg!r}; matches in: {', '.join(KIND_DIRS[k] for k, _, _ in matches)}")
-    return matches[0]
-
-
 def cmd_new(args):
-    """Interactive: prompt for kind, category, name; create the file."""
-    if args.kind:
-        kind = args.kind
-    else:
-        print("Kind:")
-        for i, k in enumerate(KIND_DIRS, start=1):
-            print(f"  {i}. {k}")
-        choice = input("Pick: ").strip()
-        try:
-            kind = list(KIND_DIRS)[int(choice) - 1]
-        except (ValueError, IndexError):
-            sys.exit("invalid choice")
-    if kind not in KIND_DIRS:
-        sys.exit(f"unknown kind: {kind}")
-
     if args.category:
         category = args.category
     else:
@@ -120,30 +68,35 @@ def cmd_new(args):
     if args.name:
         name = args.name
     else:
-        name = input("Name: ").strip()
+        name = input("Full name: ").strip()
     if not name:
         sys.exit("empty name")
 
-    target_dir = THREADS_DIR / KIND_DIRS[kind]
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / f"{name}.md"
+    PEOPLE_DIR.mkdir(parents=True, exist_ok=True)
+    path = PEOPLE_DIR / f"{name}.md"
     if path.exists():
         sys.exit(f"already exists: {path}")
     path.write_text(
-        f"---\nstatus: open\nkind: {kind}\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
+        f"---\nstatus: open\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
         encoding='utf-8',
     )
     print(f"created: {path}")
 
 
+def _resolve_person(arg):
+    """Accept either bare name ('Bern Sellmeyer') or wikilink-style
+    ('people/Bern Sellmeyer'). Strips the prefix if present."""
+    arg = arg.strip()
+    if arg.startswith('people/'):
+        arg = arg[len('people/'):]
+    return arg
+
+
 def cmd_delete(args):
-    try:
-        match = resolve_thread(args.thread)
-    except ValueError as e:
-        sys.exit(str(e))
-    if not match:
-        sys.exit(f"not found: {args.thread}")
-    kind, name, path = match
+    name = _resolve_person(args.person)
+    path = PEOPLE_DIR / f"{name}.md"
+    if not path.exists():
+        sys.exit(f"not found: {path}")
     if not args.yes:
         ans = input(f"delete {path}? [y/N] ").strip().lower()
         if ans not in ('y', 'yes'):
@@ -174,12 +127,11 @@ def fuzzy_score(query, name):
 
 def cmd_list(args):
     rows = []
-    for kind, name, path in discover_threads():
+    for name, path in discover_people():
         fm = read_frontmatter(path)
         rows.append({
-            'kind': kind,
             'name': name,
-            'thread': f"{KIND_DIRS[kind]}/{name}",  # resolvable Kind/Name form
+            'person': f"people/{name}",  # resolvable wikilink-form
             'path': str(path.relative_to(HOME)),
             'status': fm.get('status', ''),
             'category': fm.get('category', ''),
@@ -191,10 +143,10 @@ def cmd_list(args):
         rows = [r for r in rows if r['status'] == 'open']
 
     if args.query:
-        # Match against both bare name and Kind/Name; take the better score.
+        # Match against both bare name and people/Name; take the better score.
         scored = [
             (max(fuzzy_score(args.query, r['name']),
-                 fuzzy_score(args.query, r['thread'])), r)
+                 fuzzy_score(args.query, r['person'])), r)
             for r in rows
         ]
         scored = [(s, r) for s, r in scored if s > 0.3]
@@ -205,27 +157,23 @@ def cmd_list(args):
         print(json.dumps(rows, indent=2))
         return
     if not rows:
-        print("(no matches)" if args.query else "(no threads)")
+        print("(no matches)" if args.query else "(no people)")
         return
-    thread_w = max(len(r['thread']) for r in rows)
-    print(f"{'THREAD':<{thread_w}}  {'STATUS':<8}  CATEGORY")
+    person_w = max(len(r['person']) for r in rows)
+    print(f"{'PERSON':<{person_w}}  {'STATUS':<8}  CATEGORY")
     for r in rows:
-        print(f"{r['thread']:<{thread_w}}  {r['status']:<8}  {r['category']}")
+        print(f"{r['person']:<{person_w}}  {r['status']:<8}  {r['category']}")
 
 
 def cmd_show(args):
-    try:
-        match = resolve_thread(args.thread)
-    except ValueError as e:
-        sys.exit(str(e))
-    if not match:
-        sys.exit(f"not found: {args.thread}")
-    kind, name, path = match
+    name = _resolve_person(args.person)
+    path = PEOPLE_DIR / f"{name}.md"
+    if not path.exists():
+        sys.exit(f"not found: {path}")
     if args.json:
         fm = read_frontmatter(path)
         print(json.dumps({
-            'kind': kind,
-            'name': name,
+            'name': path.stem,
             'path': str(path.relative_to(HOME)),
             **fm,
         }, indent=2))
@@ -234,30 +182,29 @@ def cmd_show(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage thread files.")
+    parser = argparse.ArgumentParser(description="Manage people files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_list = sub.add_parser('list', help="List thread files (open by default).")
+    p_list = sub.add_parser('list', help="List person files (open by default).")
     p_list.add_argument('query', nargs='?', default=None,
                         help="Optional fuzzy search; ranks results by similarity.")
     p_list.add_argument('--all', action='store_true',
-                        help="Include paused/closed threads (default: open only).")
+                        help="Include closed people (default: open only).")
     p_list.add_argument('--json', action='store_true', help="JSON output.")
     p_list.set_defaults(func=cmd_list)
 
-    p_show = sub.add_parser('show', help="Show a single thread file.")
-    p_show.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p_show = sub.add_parser('show', help="Show a single person file.")
+    p_show.add_argument('person', help="Full name (matches filename without .md).")
     p_show.add_argument('--json', action='store_true', help="JSON output.")
     p_show.set_defaults(func=cmd_show)
 
-    p_new = sub.add_parser('new', help="Create a thread file (interactive prompts for missing fields).")
-    p_new.add_argument('--name', help="Thread name (skip prompt).")
-    p_new.add_argument('--kind', choices=list(KIND_DIRS), help="Skip prompt.")
+    p_new = sub.add_parser('new', help="Create a person file (interactive prompts for missing fields).")
+    p_new.add_argument('--name', help="Full name (skip prompt).")
     p_new.add_argument('--category', choices=CATEGORIES, help="Skip prompt.")
     p_new.set_defaults(func=cmd_new)
 
-    p_delete = sub.add_parser('delete', help="Permanently delete a thread file.")
-    p_delete.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p_delete = sub.add_parser('delete', help="Permanently delete a person file.")
+    p_delete.add_argument('person', help="Full name.")
     p_delete.add_argument('-y', '--yes', action='store_true', help="Skip confirmation.")
     p_delete.set_defaults(func=cmd_delete)
 

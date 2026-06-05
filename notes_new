@@ -1,78 +1,142 @@
 #!/bin/bash
 
-	# Determine timestamp
-	dt=$(date '+%Y-%m-%d-%H-%M-%S');
-	# Set note filename
-	mkdir -p "$NOTES_DIR"
-	note="$NOTES_DIR/$dt.md"
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+: "${THREAD_DIR:?must be invoked via 'notes', not directly}"
+: "${PEOPLE_DIR:?must be invoked via 'notes', not directly}"
 
-	# Determine note type
-	# Feel free to edit these options
-	PS3="What type of note is this? : "
-	select type in Meeting Workshop Report Correspondence Blog Study Writing Log Deskwork
-	do
-    		echo ""
-    		break
-	done
+# Timestamp + filename
+dt=$(date '+%Y-%m-%d-%H-%M-%S')
+mkdir -p "$NOTES_DIR"
+note="$NOTES_DIR/$dt.md"
 
-        # Determine the thread
-        THREADS="$THREAD_DIR/*"
-        # Set IFS to only newline character
-        IFS=$'\n'
-        PS3="What thread does this relate to? : "
-        select thread in "uncategorized" $(ls "$THREAD_DIR")
-        do
-                echo ""
-                break
+# --- Type ---
+PS3="What type of note is this? : "
+select type in Meeting Correspondence Workshop Report Log Research Recipe
+do
+    echo ""
+    break
+done
+
+# --- Threads (multi-pick, first pick required; Enter on subsequent picks finishes) ---
+# Build labels like 'Projects/SGB' so the kind is visible in the picker.
+all_thread_labels=$(
+    for sub in Projects Processes Topics; do
+        d="$THREAD_DIR/$sub"
+        [ -d "$d" ] || continue
+        for f in "$d"/*.md; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f" .md)
+            echo "$sub/$base"
+        done
+    done | sort
+)
+
+threads_picked=()
+remaining_labels="$all_thread_labels"
+while [ -n "$remaining_labels" ]; do
+    echo
+    printf '%s\n' "$remaining_labels" | nl -ba -w2 -s') '
+    echo
+    if [ ${#threads_picked[@]} -eq 0 ]; then
+        read -p "What thread does this relate to? : " choice
+    else
+        read -p "Add another thread (Enter to finish): " choice
+    fi
+    if [ -z "$choice" ]; then
+        if [ ${#threads_picked[@]} -eq 0 ]; then
+            echo "must pick at least one thread"
+            continue
+        fi
+        break
+    fi
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        picked=$(printf '%s\n' "$remaining_labels" | sed -n "${choice}p")
+        if [ -n "$picked" ]; then
+            threads_picked+=("$picked")
+            remaining_labels=$(printf '%s\n' "$remaining_labels" | grep -vxF "$picked")
+            continue
+        fi
+    fi
+    echo "invalid choice — pick a number from the list" >&2
+done
+
+if [ ${#threads_picked[@]} -eq 0 ]; then
+    echo "no thread chosen, aborting" >&2
+    exit 1
+fi
+
+# --- Topic ---
+echo "Enter the topic of this $type note:"
+read topic
+echo
+
+# --- People (multi-pick, optional) ---
+people_yaml=""
+if [[ "$type" = "Meeting" || "$type" = "Correspondence" ]]; then
+    echo "Enter people (semicolon-separated; blank to skip):"
+    read people_input
+    echo
+    if [ -n "$people_input" ]; then
+        people_yaml="people:"$'\n'
+        IFS=';'
+        for raw in $people_input; do
+            name=$(echo "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            [ -z "$name" ] && continue
+            if [ -f "$PEOPLE_DIR/$name.md" ]; then
+                people_yaml+="  - \"[[people/$name]]\""$'\n'
+            else
+                # Plain string for unresolved (escape internal quotes)
+                escaped=$(echo "$name" | sed 's/"/\\"/g')
+                people_yaml+="  - \"$escaped\""$'\n'
+            fi
         done
         unset IFS
+    fi
+fi
 
-	# Determine the topic
-	echo "Enter the topic of this $type note:"
-	read topic
-        echo
-	# Write metadata
-cat > "$note" << EOM
-# Topic:			$topic  
-**Type**:			$type  
-**Thread**:			$thread  
-EOM
+# --- Meeting extras (counterparty, location) ---
+meeting_extras=""
+if [[ "$type" = "Meeting" ]]; then
+    echo "Enter the counterparty (blank to skip):"
+    read counterparty
+    echo
+    echo "Enter the location:"
+    read location
+    echo
+    if [ -n "$counterparty" ]; then
+        meeting_extras+="counterparty: $counterparty"$'\n'
+    fi
+    meeting_extras+="location: $location"$'\n'
+fi
 
-	# Get additional data if it's a meeting
-	if [[ $type = "Meeting" ]]
-	then
-    		echo "Enter the location:"
-    		read location
-    		echo
-    		echo "Enter attendees, separated by semicolon (eg Riaz Arbi; John Smith etc)"
-    		read attendees
-    		echo
-cat >> "$note" << EOM
-**Location**:		$location
-**Attendees**:		$attendees   
-EOM
-	# Get additional data if it's correspondence
-	elif [[ $type = "Correspondence" ]]
-	then
-    		echo "Enter the participants:"
-    		read participants
-    		echo
-cat >> "$note" << EOM
-**Participants**:   $participants  
-EOM
-	fi
+# --- Write the note ---
+# Escape any " in the topic for safe YAML quoting (rare but handles e.g. "Q3 review")
+alias_escaped=$(echo "$topic" | sed 's/"/\\"/g')
 
-	# Separate the metadata from the actual note
-cat >> "$note" << EOM
-**Timestamp**:		$dt  
+threads_yaml="threads:"$'\n'
+for t in "${threads_picked[@]}"; do
+    threads_yaml+="  - \"[[$t]]\""$'\n'
+done
 
---------------------------------------------------------------------
+{
+    echo "---"
+    echo "topic: $topic"
+    echo "type: $type"
+    printf '%s' "$threads_yaml"
+    echo "timestamp: $dt"
+    echo "aliases: [\"$alias_escaped\"]"
+    [ -n "$meeting_extras" ] && printf '%s' "$meeting_extras"
+    [ -n "$people_yaml" ] && printf '%s' "$people_yaml"
+    echo "---"
+    echo ""
+    echo "# Content"
+    echo ""
+} > "$note"
 
-# Content
+# Buffer a REF entry per thread, so this note shows up in each thread's
+# daily log on next `buffer flush`. Failure here doesn't block the editor.
+for t in "${threads_picked[@]}"; do
+    buffer add-ref "$t" "notes/$dt" "$topic" || true
+done
 
--------------------------------------------------------------------
-
-# Timesheet
-
-EOM
-        open_note $note
+open_note "$note"

@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Build the agent tool definitions for an adulting vault.
+
+Writes tools/<binary>.json to <target>, one per CLI, generated from each
+tool's --help-json output. Tools are introspected by running the binaries
+found on PATH.
+
+The emitted `command` is the bare binary name (e.g. "tasks"), not an
+absolute path: the agent is expected to have the adulting CLIs on its
+$PATH. This is all this script does — it does not copy prompts, skills,
+or any other markdown/context.
+
+Usage:
+    agent-build [--target <dir>] [--check] [--quiet]
+
+Default target: $ADULTING_HOME/.agent (defaults to ~/vault/.agent)
+With --check: diff the would-be-generated content against what's on
+              disk; non-zero exit if any drift. No writes. Useful in CI.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+# Per-tool overrides applied on top of the auto-generated description.
+# read_only is the only field we currently set; lint is the only purely
+# read-only tool (others wrap mixed-mutation surfaces).
+TOOLS = ['tasks', 'buffer', 'notes', 'threads', 'people', 'lint']
+TOOL_OVERRIDES = {
+    'lint': {'read_only': True},
+}
+
+
+def die(msg, code=1):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def get_manifest(binary_name):
+    """Resolve the binary on PATH, run --help-json, return parsed dict."""
+    path = shutil.which(binary_name)
+    if not path:
+        die(f"{binary_name!r} not found on PATH")
+    result = subprocess.run([path, '--help-json'], capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"{binary_name} --help-json failed: {result.stderr.strip()}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        die(f"{binary_name} --help-json produced invalid JSON: {e}")
+
+
+def render_description(manifest):
+    """Build the terse tool description: top-level summary + subcommand
+    list with one-liners + pointer to --help."""
+    lines = [manifest.get('description', '').strip(), ""]
+
+    flags = manifest.get('flags') or []
+    if flags:
+        lines.append("Top-level flags:")
+        for f in flags:
+            choices = f"  (one of: {', '.join(f['choices'])})" if f.get('choices') else ""
+            lines.append(f"  {f['name']:<14} {f['description']}{choices}")
+        lines.append("")
+
+    subs = manifest.get('subcommands') or []
+    if subs:
+        lines.append("Subcommands:")
+        max_name = max(len(s['name']) for s in subs)
+        for s in subs:
+            raw = (s.get('description') or '').strip()
+            desc = raw.splitlines()[0].strip() if raw else ''
+            lines.append(f"  {s['name']:<{max_name}}  {desc}".rstrip())
+        lines.append("")
+        lines.append(f"For full flag/arg detail on a subcommand, invoke `{manifest['name']} <subcommand> --help`.")
+    elif manifest.get('args'):
+        lines.append("Args:")
+        for a in manifest['args']:
+            req = "(required)" if a.get('required') else "(optional)"
+            lines.append(f"  {a['name']} {req}  {a['description']}")
+        lines.append("")
+        lines.append(f"For full detail, invoke `{manifest['name']} --help`.")
+
+    lines.append("")
+    lines.append("Args is a JSON array of strings — one element per argv entry. A flag")
+    lines.append("and its value are two elements: [\"--due\", \"2026-05-15\"], not [\"--due 2026-05-15\"].")
+    lines.append("Embedded spaces / quotes / apostrophes pass through verbatim — no shell quoting.")
+
+    return '\n'.join(lines).rstrip() + '\n'
+
+
+def generate_tool_json(binary_name):
+    manifest = get_manifest(binary_name)
+    out = {
+        'command': binary_name,
+        'description': render_description(manifest),
+    }
+    out.update(TOOL_OVERRIDES.get(binary_name, {}))
+    return out
+
+
+def write_or_check(target_dir, generated, check_only, quiet):
+    """Write tools/<binary>.json to target_dir, or diff if check_only."""
+    tools_dir = Path(target_dir) / 'tools'
+    if not check_only:
+        tools_dir.mkdir(parents=True, exist_ok=True)
+
+    drift = []
+    for binary, content in generated.items():
+        out_path = tools_dir / f"{binary}.json"
+        new_text = json.dumps(content, indent=2) + '\n'
+        existing_text = out_path.read_text(encoding='utf-8') if out_path.exists() else ''
+        if existing_text == new_text:
+            if not quiet:
+                print(f"  unchanged: {out_path}")
+            continue
+        if check_only:
+            drift.append((out_path, existing_text, new_text))
+            print(f"  DRIFT: {out_path}", file=sys.stderr)
+            continue
+        out_path.write_text(new_text, encoding='utf-8')
+        print(f"  wrote:    {out_path}")
+    return drift
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate agent tool JSON from each binary's --help-json.")
+    parser.add_argument('--target',
+                        default=str(Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault'))) / '.agent'),
+                        help='Directory to write tools/ into (default: $ADULTING_HOME/.agent, i.e. ~/vault/.agent).')
+    parser.add_argument('--check', action='store_true',
+                        help='Diff-only mode. Exit 1 if any drift. No writes.')
+    parser.add_argument('--quiet', action='store_true', help='Suppress unchanged lines.')
+    args = parser.parse_args()
+
+    target = Path(args.target)
+    if not target.exists() and not args.check:
+        target.mkdir(parents=True)
+
+    generated = {}
+    for binary in TOOLS:
+        generated[binary] = generate_tool_json(binary)
+
+    drift = write_or_check(target, generated, args.check, args.quiet)
+
+    if args.check:
+        if drift:
+            print(f"\n{len(drift)} file(s) drifted. Run agent-build to regenerate.", file=sys.stderr)
+            sys.exit(1)
+        if not args.quiet:
+            print(f"\nclean: target matches sources ({len(generated)} tool(s)).")
+        sys.exit(0)
+
+    if not args.quiet:
+        print(f"\nbuilt agent tools in {target}: {len(generated)} tool(s).")
+
+
+if __name__ == '__main__':
+    main()

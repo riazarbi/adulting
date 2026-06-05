@@ -1,0 +1,712 @@
+#!/usr/bin/env python3
+"""Operate on the buffer queue at ~/vault/buffer.md.
+
+The buffer is the staging area for captured items. Four line types:
+    ACTION:  action item that becomes a backend task after flush
+    TEXT:    free-text observation
+    REF:     reference to another file in the vault
+    UNKNOWN: raw quick-capture; must be converted before tend will pass
+
+Single line format (no multi-line entries; one capture per line):
+
+    - [[<Kind>/<Name>]] ACTION: [(<Person>)] <body> <!--<TS> [<attr> ...]-->
+    - [[<Kind>/<Name>]] TEXT:   <body>                                <!--<TS>-->
+    - [[<Kind>/<Name>]] REF:    [[<target>]] <summary>                <!--<TS>-->
+    - UNKNOWN: <body>                                                 <!--<TS>-->
+
+where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
+wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry the
+backend metadata that ingest applies on task creation:
+
+    due:YYYY-MM-DD     scheduled:YYYY-MM-DD
+    priority:H|M|L     depends:<uuid8>
+
+UNKNOWN entries have no thread and carry the input string verbatim.
+They are intentionally invalid: `tend` reports them as violations so
+they block `flush` until they're removed and re-added via the matching
+`buffer add-*` command. This lets you capture something quickly when
+you don't have time to pick a thread or shape.
+
+Subcommands:
+    add        <text>                    (UNKNOWN; convert later)
+    add-text   <thread> <text>
+    add-ref    <thread> <target> [<summary>]
+    add-action <thread> <text>          (also reachable as `tasks add`)
+    suggest    <text> [-y]               (rules suggester → accept/reject)
+    list       [<grep>]
+    rm         <line-number>
+    tend                                 (regroup + validate; idempotent)
+    flush                                (tend, then write logs/, clear buffer)
+
+Operators (human or agent) interact only via these commands. Direct
+edits to buffer.md are discouraged — `tend` is the way to fix things,
+and individual entries are added/removed via the API.
+"""
+
+import argparse
+import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+NOTES_DIR = HOME / 'notes'
+THREADS_DIR = HOME / 'threads'
+PEOPLE_DIR = HOME / 'people'
+LOGS_DIR = HOME / 'logs'
+BUFFER_FILE = HOME / 'buffer.md'
+
+ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
+WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
+
+# Buffer line shape: thread wikilink, type tag, body, timestamp comment.
+# The comment carries the timestamp and (for ACTION lines) optional attrs.
+BUFFER_LINE_RE = re.compile(
+    r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF):\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})((?:\s+\S+)*)-->\s*$'
+)
+
+# UNKNOWN entries have no thread; just a body and a timestamp.
+UNKNOWN_LINE_RE = re.compile(
+    r'^-\s+UNKNOWN:\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})-->\s*$'
+)
+
+DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
+
+
+# ---------- helpers ----------
+
+def die(msg, code=1):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def now_ts():
+    return datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def thread_resolves(target):
+    if not target or '/' not in target:
+        return False
+    kind, name = target.split('/', 1)
+    if kind not in ('Projects', 'Processes', 'Topics'):
+        return False
+    return (THREADS_DIR / kind / f"{name}.md").exists()
+
+
+def assignee_resolves(name):
+    if not name:
+        return True
+    return (PEOPLE_DIR / f"{name}.md").exists()
+
+
+def parse_action_attrs(tokens):
+    """Parse the attr block from an ACTION buffer comment. `tokens` is
+    a list of whitespace-separated strings (TS already removed).
+    Returns (attrs_dict, errors). Each error is a string describing
+    what's wrong; attrs_dict is built best-effort."""
+    attrs = {'depends': []}
+    errors = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if ':' not in tok:
+            errors.append(f"unknown attr token {tok!r}")
+            continue
+        key, _, val = tok.partition(':')
+        if key in ('due', 'scheduled'):
+            if not DATE_RE.match(val):
+                errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
+            attrs[key] = val
+        elif key == 'priority':
+            if val not in ('H', 'M', 'L'):
+                errors.append(f"priority must be H, M, or L; got {val!r}")
+            attrs[key] = val
+        elif key == 'depends':
+            if not UUID8_RE.match(val):
+                errors.append(f"depends must be 8 hex chars; got {val!r}")
+            attrs['depends'].append(val)
+        else:
+            errors.append(f"unknown attr {key!r}")
+    return attrs, errors
+
+
+def format_action_attrs(attrs):
+    """Render an attrs dict as a deterministic space-separated string.
+    Alphabetical key order; empty depends list omitted."""
+    out = []
+    if attrs.get('depends'):
+        for d in sorted(attrs['depends']):
+            out.append(f"depends:{d}")
+    if attrs.get('due'):
+        out.append(f"due:{attrs['due']}")
+    if attrs.get('priority'):
+        out.append(f"priority:{attrs['priority']}")
+    if attrs.get('scheduled'):
+        out.append(f"scheduled:{attrs['scheduled']}")
+    return ' '.join(out)
+
+
+def ref_target_resolves(target):
+    """REF targets can point to notes, threads, people, or logs.
+    Returns the absolute path if it would exist; else None."""
+    target = target.strip()
+    if not target:
+        return None
+    if target.startswith(('Projects/', 'Processes/', 'Topics/')):
+        path = THREADS_DIR / f"{target}.md"
+    elif target.startswith(('people/', 'notes/', 'logs/')):
+        path = HOME / f"{target}.md"
+    else:
+        return None
+    return path if path.exists() else None
+
+
+def read_buffer():
+    if not BUFFER_FILE.exists():
+        return []
+    return BUFFER_FILE.read_text(encoding='utf-8').split('\n')
+
+
+def write_buffer(lines):
+    BUFFER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    text = '\n'.join(lines)
+    if text and not text.endswith('\n'):
+        text += '\n'
+    BUFFER_FILE.write_text(text, encoding='utf-8')
+
+
+def append_line(line):
+    lines = read_buffer()
+    # Drop trailing empty lines for a tight append.
+    while lines and lines[-1] == '':
+        lines.pop()
+    lines.append(line)
+    write_buffer(lines)
+
+
+# ---------- subcommand: add (UNKNOWN) ----------
+
+def cmd_add(args):
+    text = args.text.strip()
+    if not text:
+        die("text is empty")
+    line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
+    append_line(line)
+    print(f"buffered: {line}")
+    return 0
+
+
+# ---------- subcommand: add-text ----------
+
+def cmd_add_text(args):
+    thread = args.thread.strip()
+    text = args.text.strip()
+    if not thread_resolves(thread):
+        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md "
+            f"(expected Projects/X, Processes/X, or Topics/X)")
+    if not text:
+        die("text is empty")
+    line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
+    append_line(line)
+    print(f"buffered: {line}")
+    return 0
+
+
+# ---------- subcommand: add-ref ----------
+
+def cmd_add_ref(args):
+    thread = args.thread.strip()
+    target = args.target.strip()
+    summary = (args.summary or '').strip()
+    if not thread_resolves(thread):
+        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md")
+    if not ref_target_resolves(target):
+        die(f"ref target {target!r} does not resolve to a vault file "
+            f"(expected notes/X, logs/X, people/X, or <Kind>/X)")
+    body = f"[[{target}]]" + (f" {summary}" if summary else "")
+    line = f"- [[{thread}]] REF: {body} <!--{now_ts()}-->"
+    append_line(line)
+    print(f"buffered: {line}")
+    return 0
+
+
+# ---------- subcommand: add-action ----------
+
+def cmd_add_action(args):
+    thread = args.thread.strip()
+    text = args.text.strip()
+    if not thread_resolves(thread):
+        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md")
+    if not text:
+        die("description is empty")
+    am = ASSIGNEE_PREFIX_RE.match(text)
+    if am:
+        assignee = am.group(1).strip()
+        body = am.group(2).strip()
+        if not body:
+            die("description after assignee is empty")
+        if not assignee_resolves(assignee):
+            die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
+                f"(create the person file first)")
+        body_text = f"({assignee}) {body}"
+    else:
+        body_text = text
+
+    # Validate attr flags at write time.
+    attrs = {'depends': list(args.depends or [])}
+    if args.due:
+        if not DATE_RE.match(args.due):
+            die(f"--due must be YYYY-MM-DD; got {args.due!r}")
+        attrs['due'] = args.due
+    if args.scheduled:
+        if not DATE_RE.match(args.scheduled):
+            die(f"--scheduled must be YYYY-MM-DD; got {args.scheduled!r}")
+        attrs['scheduled'] = args.scheduled
+    if args.priority:
+        attrs['priority'] = args.priority
+    for d in attrs['depends']:
+        if not UUID8_RE.match(d):
+            die(f"--depends must be 8 hex chars; got {d!r}")
+
+    attr_str = format_action_attrs(attrs)
+    comment = now_ts() + (f" {attr_str}" if attr_str else "")
+    line = f"- [[{thread}]] ACTION: {body_text} <!--{comment}-->"
+    append_line(line)
+    print(f"buffered: {line}")
+    return 0
+
+
+# ---------- subcommand: list ----------
+
+def cmd_list(args):
+    lines = read_buffer()
+    pattern = (args.filter or '').lower()
+    shown = 0
+    for i, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        if pattern and pattern not in line.lower():
+            continue
+        print(f"{i:4}  {line}")
+        shown += 1
+    if shown == 0:
+        print("(buffer empty)" if not pattern else "(no matching entries)")
+    return 0
+
+
+# ---------- subcommand: rm ----------
+
+def cmd_rm(args):
+    try:
+        ln = int(args.line_number)
+    except ValueError:
+        die(f"line number must be an integer; got {args.line_number!r}")
+    lines = read_buffer()
+    if ln < 1 or ln > len(lines):
+        die(f"line {ln} out of range (buffer has {len(lines)} lines)")
+    removed = lines[ln - 1]
+    if not removed.strip():
+        die(f"line {ln} is empty")
+    del lines[ln - 1]
+    write_buffer(lines)
+    print(f"removed line {ln}: {removed}")
+    return 0
+
+
+# ---------- parsing for tend / flush ----------
+
+def parse_buffer_entries(lines):
+    """Walk buffer lines, classify each. Returns:
+        entries:  parseable structured entries (ACTION/TEXT/REF).
+        unknowns: list of {line_no, body, ts, raw} for UNKNOWN entries.
+        unparsed: list of (line_no, raw) for non-empty lines that don't
+                  match any known shape.
+    Separator comment lines for UNKNOWN/UNPARSED sections are skipped.
+    """
+    entries = []
+    unknowns = []
+    unparsed = []
+    for i, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        # Skip HTML comment marker lines used as separators in the file.
+        if line.lstrip().startswith('<!--') and line.rstrip().endswith('-->') \
+           and ('UNPARSED' in line or 'UNKNOWN ENTRIES' in line):
+            continue
+        m = BUFFER_LINE_RE.match(line)
+        if m:
+            thread, type_, body, ts, attr_block = m.groups()
+            attr_tokens = (attr_block or '').split()
+            entries.append({
+                'line_no': i,
+                'thread': thread,
+                'type': type_,
+                'body': body.strip(),
+                'ts': ts,
+                'date': ts[:10],
+                'attr_tokens': attr_tokens,
+                'raw': line,
+            })
+            continue
+        mu = UNKNOWN_LINE_RE.match(line)
+        if mu:
+            body, ts = mu.groups()
+            unknowns.append({
+                'line_no': i,
+                'body': body.strip(),
+                'ts': ts,
+                'raw': line,
+            })
+            continue
+        unparsed.append((i, line))
+    return entries, unknowns, unparsed
+
+
+def validate_entry(e):
+    """Yield violation messages for one parseable entry."""
+    if not thread_resolves(e['thread']):
+        yield f"thread {e['thread']!r} does not resolve"
+
+    try:
+        datetime.strptime(e['ts'], '%Y-%m-%dT%H:%M:%S')
+    except ValueError:
+        yield f"timestamp {e['ts']!r} is not YYYY-MM-DDTHH:MM:SS"
+
+    if e['type'] == 'ACTION':
+        body = e['body']
+        am = ASSIGNEE_PREFIX_RE.match(body)
+        if am:
+            assignee = am.group(1).strip()
+            rest = am.group(2).strip()
+            if not rest:
+                yield "ACTION description after assignee is empty"
+            if not assignee_resolves(assignee):
+                yield f"ACTION assignee {assignee!r} does not resolve to people/{assignee}.md"
+        else:
+            if not body:
+                yield "ACTION description is empty"
+        _attrs, attr_errors = parse_action_attrs(e.get('attr_tokens', []))
+        for err in attr_errors:
+            yield f"ACTION {err}"
+    elif e['type'] in ('TEXT', 'REF') and e.get('attr_tokens'):
+        yield f"{e['type']} entries do not accept attrs; got {' '.join(e['attr_tokens'])!r}"
+
+    if e['type'] == 'REF':
+        wm = WIKILINK_BODY_RE.match(e['body'])
+        if not wm:
+            yield "REF body must start with a [[wikilink]]"
+            return
+        target = wm.group(1).strip()
+        if not ref_target_resolves(target):
+            yield f"REF target {target!r} does not resolve to a vault file"
+
+    elif e['type'] == 'TEXT':
+        if not e['body']:
+            yield "TEXT body is empty"
+
+
+def regroup_lines(entries, unknowns, unparsed):
+    """Rewrite the buffer in canonical order:
+        - Structured entries grouped by (thread, date), sorted by timestamp.
+        - UNKNOWN entries in their own section at the bottom, sorted by ts.
+        - Unparsed lines after that with their own separator comment.
+    Returns the new list of buffer lines.
+    """
+    by_group = {}
+    for e in entries:
+        key = (e['thread'], e['date'])
+        by_group.setdefault(key, []).append(e)
+    out = []
+    for key in sorted(by_group.keys()):
+        group = sorted(by_group[key], key=lambda e: e['ts'])
+        for e in group:
+            out.append(e['raw'])
+    if unknowns:
+        out.append('')
+        out.append('<!-- UNKNOWN ENTRIES BELOW: convert via `buffer rm <n>` + the matching `buffer add-*`. tend will fail until cleared. -->')
+        for u in sorted(unknowns, key=lambda u: u['ts']):
+            out.append(u['raw'])
+    if unparsed:
+        out.append('')
+        out.append('<!-- UNPARSED ENTRIES BELOW: tend cannot regroup these. Fix or remove via `buffer rm`. -->')
+        for _ln, raw in unparsed:
+            out.append(raw)
+    return out
+
+
+# ---------- subcommand: tend ----------
+
+def cmd_tend(args):
+    """Regroup and validate. Idempotent. Returns 0 if clean, 1 if any
+    violations, UNKNOWN entries, or unparsed lines remain."""
+    lines = read_buffer()
+    entries, unknowns, unparsed = parse_buffer_entries(lines)
+    new_lines = regroup_lines(entries, unknowns, unparsed)
+    write_buffer(new_lines)
+
+    # Re-parse so line numbers refer to the rewritten file.
+    lines2 = read_buffer()
+    entries2, unknowns2, unparsed2 = parse_buffer_entries(lines2)
+
+    violations = []
+    for e in entries2:
+        for v in validate_entry(e):
+            violations.append((e['line_no'], v, e['raw']))
+    for u in unknowns2:
+        violations.append((u['line_no'],
+                           "UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass",
+                           u['raw']))
+    for ln, raw in unparsed2:
+        violations.append((ln, "line does not match buffer entry shape", raw))
+
+    if not violations:
+        groups = sorted({(e['thread'], e['date']) for e in entries2})
+        if not args.quiet:
+            print(f"buffer tended: {len(entries2)} entries, "
+                  f"{len(groups)} group(s).")
+        return 0
+
+    print(f"buffer has {len(violations)} violation(s):", file=sys.stderr)
+    for ln, msg, raw in violations:
+        print(f"  buffer.md:{ln}: {msg}", file=sys.stderr)
+        print(f"    line: {raw}", file=sys.stderr)
+        print(f"    fix: edit via `buffer rm {ln}` and re-add via the matching `buffer add-*`", file=sys.stderr)
+    return 1
+
+
+# ---------- subcommand: flush ----------
+
+def cmd_flush(args):
+    """Tend, then if clean, write each (thread, date) group to
+    logs/<thread>/<date>.md (append if exists) and remove flushed
+    entries from buffer. Atomic per-flush — if validation fails, the
+    buffer is left as `tend` left it and nothing is written."""
+    rc = cmd_tend(argparse.Namespace(quiet=True))
+    if rc != 0:
+        return rc
+
+    lines = read_buffer()
+    entries, _unknowns, _unparsed = parse_buffer_entries(lines)
+    if not entries:
+        if not args.quiet:
+            print("buffer is empty; nothing to flush.")
+        return 0
+
+    by_group = {}
+    for e in entries:
+        by_group.setdefault((e['thread'], e['date']), []).append(e)
+
+    written_files = []
+    for (thread, date), group in sorted(by_group.items()):
+        kind, name = thread.split('/', 1)
+        log_dir = LOGS_DIR / kind / name
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{date}.md"
+
+        body_lines = []
+        for e in sorted(group, key=lambda e: e['ts']):
+            line = f"{e['type']}: {e['body']}"
+            # ACTION attrs ride along into the log line so ingest can apply
+            # them on tw task creation. TS is dropped — the file's `date:`
+            # frontmatter carries day-level resolution; sub-day order is lost.
+            if e['type'] == 'ACTION' and e.get('attr_tokens'):
+                line += f" <!--{' '.join(e['attr_tokens'])}-->"
+            body_lines.append(line)
+
+        if log_path.exists():
+            existing = log_path.read_text(encoding='utf-8')
+            if not existing.endswith('\n'):
+                existing += '\n'
+            log_path.write_text(existing + '\n'.join(body_lines) + '\n', encoding='utf-8')
+        else:
+            header = (
+                f"---\n"
+                f"thread: \"[[{thread}]]\"\n"
+                f"date: {date}\n"
+                f"type: Log\n"
+                f"---\n"
+                f"\n"
+                f"# Daily log — {thread} — {date}\n"
+                f"\n"
+            )
+            log_path.write_text(header + '\n'.join(body_lines) + '\n', encoding='utf-8')
+
+        written_files.append((log_path, len(group)))
+
+    write_buffer([])
+
+    if not args.quiet:
+        for path, n in written_files:
+            rel = path.relative_to(HOME)
+            print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
+        print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
+        # Flush before invoking the subprocess so our prints appear ahead
+        # of its output rather than after (parent stdout is block-buffered
+        # when not attached to a TTY in some cases).
+        sys.stdout.flush()
+
+    # Trigger ingest + sync so any ACTION lines just written to logs/ become
+    # real taskwarrior tasks immediately. Output is passed through (not
+    # silenced) so the operator/agent can read the new uuid prefixes off
+    # the ingest summary lines.
+    try:
+        import subprocess as _subprocess
+        _subprocess.run(['tasks'], check=False)
+    except FileNotFoundError:
+        pass
+    return 0
+
+
+# ---------- subcommand: suggest ----------
+
+def _shquote(s):
+    """Minimal shell-quoting so the suggested command is paste-safe."""
+    if s and re.match(r'^[A-Za-z0-9_./:@=+-]+$', s):
+        return s
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def format_suggestion(proposal):
+    """Render a proposal dict as the shell command a user would type."""
+    sub = proposal['subcmd']
+    if sub == 'add':
+        return f"buffer add {_shquote(proposal['body'])}"
+    if sub == 'add-text':
+        return f"buffer add-text {_shquote(proposal['thread'])} {_shquote(proposal['body'])}"
+    if sub == 'add-ref':
+        target = proposal.get('ref_target') or ''
+        summary = proposal.get('ref_summary') or ''
+        return f"buffer add-ref {_shquote(proposal['thread'])} {_shquote(target)} {_shquote(summary)}"
+    if sub == 'add-action':
+        parts = ['buffer', 'add-action', _shquote(proposal['thread']), _shquote(proposal['body'])]
+        if proposal.get('due'):
+            parts += ['--due', proposal['due']]
+        if proposal.get('scheduled'):
+            parts += ['--scheduled', proposal['scheduled']]
+        if proposal.get('priority'):
+            parts += ['--priority', proposal['priority']]
+        return ' '.join(parts)
+    return f"buffer add {_shquote(proposal.get('body', ''))}"
+
+
+def dispatch_proposal(proposal, raw_text):
+    """Invoke the matching cmd_* with a synthesized argparse.Namespace."""
+    sub = proposal['subcmd']
+    if sub == 'add':
+        return cmd_add(argparse.Namespace(text=raw_text))
+    if sub == 'add-text':
+        return cmd_add_text(argparse.Namespace(
+            thread=proposal['thread'], text=proposal['body']))
+    if sub == 'add-ref':
+        return cmd_add_ref(argparse.Namespace(
+            thread=proposal['thread'],
+            target=proposal.get('ref_target') or '',
+            summary=proposal.get('ref_summary') or ''))
+    if sub == 'add-action':
+        return cmd_add_action(argparse.Namespace(
+            thread=proposal['thread'],
+            text=proposal['body'],
+            due=proposal.get('due'),
+            scheduled=proposal.get('scheduled'),
+            priority=proposal.get('priority'),
+            depends=[]))
+    die(f"internal error: unknown subcmd {sub!r}")
+
+
+def cmd_suggest(args):
+    """Propose a structured `buffer add-*` for raw text, then prompt to
+    accept (run it) or reject (fall back to `buffer add` UNKNOWN)."""
+    from _suggester import suggest
+    proposal = suggest(args.text)
+    if proposal['subcmd'] == 'add':
+        if not args.quiet:
+            print("no structured suggestion; storing as UNKNOWN.")
+        return cmd_add(argparse.Namespace(text=args.text))
+
+    cmd_str = format_suggestion(proposal)
+    print(f"suggested:\n  {cmd_str}")
+
+    accept = args.yes
+    if not accept:
+        if not sys.stdin.isatty():
+            # Non-interactive without --yes: safe default is to drop to
+            # UNKNOWN rather than silently auto-running a suggestion.
+            print("rejected (no tty, no --yes); storing as UNKNOWN.")
+            return cmd_add(argparse.Namespace(text=args.text))
+        try:
+            reply = input("accept? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\naborted; nothing added.", file=sys.stderr)
+            return 1
+        accept = reply in ('', 'y', 'yes')
+
+    if not accept:
+        print("rejected; storing as UNKNOWN.")
+        return cmd_add(argparse.Namespace(text=args.text))
+    return dispatch_proposal(proposal, args.text)
+
+
+# ---------- main ----------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Buffer queue operations: capture, regroup, validate, flush.")
+    parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
+    sub = parser.add_subparsers(dest='subcommand', required=True)
+
+    p_a = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
+    p_a.add_argument('text')
+    p_a.set_defaults(func=cmd_add)
+
+    p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; prompt to accept or fall back to UNKNOWN.")
+    p_s.add_argument('text')
+    p_s.add_argument('-y', '--yes', action='store_true', help="Auto-accept the suggestion without prompting.")
+    p_s.set_defaults(func=cmd_suggest)
+
+    p_at = sub.add_parser('add-text', help="Append a TEXT entry.")
+    p_at.add_argument('thread')
+    p_at.add_argument('text')
+    p_at.set_defaults(func=cmd_add_text)
+
+    p_ar = sub.add_parser('add-ref', help="Append a REF entry.")
+    p_ar.add_argument('thread')
+    p_ar.add_argument('target', help="Wikilink target like notes/<stem> or Projects/X.")
+    p_ar.add_argument('summary', nargs='?', default='')
+    p_ar.set_defaults(func=cmd_add_ref)
+
+    p_aa = sub.add_parser('add-action', help="Append an ACTION entry. Also reachable as `tasks add`.")
+    p_aa.add_argument('thread')
+    p_aa.add_argument('text')
+    p_aa.add_argument('--due', help='YYYY-MM-DD due date applied on flush+ingest.')
+    p_aa.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
+    p_aa.add_argument('--priority', choices=['H', 'M', 'L'])
+    p_aa.add_argument('--depends', action='append', default=[],
+                      help='8-char UUID prefix; repeatable for multiple deps.')
+    p_aa.set_defaults(func=cmd_add_action)
+
+    p_list = sub.add_parser('list', help="Show buffer with line numbers.")
+    p_list.add_argument('filter', nargs='?', default='')
+    p_list.set_defaults(func=cmd_list)
+
+    p_rm = sub.add_parser('rm', help="Remove a single line by line number.")
+    p_rm.add_argument('line_number', metavar='line-number')
+    p_rm.set_defaults(func=cmd_rm)
+
+    p_tend = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")
+    p_tend.set_defaults(func=cmd_tend)
+
+    p_flush = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
+    p_flush.set_defaults(func=cmd_flush)
+
+    emit_helpjson_if_requested(parser)
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,8 +1,16 @@
 #!/bin/bash
 
+: "${NOTES_DIR:?must be invoked via 'notes', not directly}"
+: "${EXPORT_DIR:?must be invoked via 'notes', not directly}"
+type extract_meta >/dev/null 2>&1 || { echo "$0: extract_meta function missing; must be invoked via 'notes'" >&2; exit 1; }
+
 selected_note=$1
 
-        note="$NOTES_DIR/$selected_note" 
+        note="$NOTES_DIR/$selected_note"
+
+        # Work in a temp directory so the relative awk file refs below don't pollute CWD
+        workdir=$(mktemp -d)
+        cd "$workdir"
 
         # Temporary files for different tasks
         metadata_file=$(mktemp)
@@ -11,16 +19,19 @@ selected_note=$1
         resolved_lines="resolved_lines.txt"
         agreed_lines="agreed_lines.txt"
         action_lines="action_lines.txt"
-        final_file="$DOWNLOADS_DIR/$selected_note"
+        final_file="$EXPORT_DIR/$selected_note"
         file_path=$note
 
         # Extract file metadata
-        title=$(grep '^# Topic:' "$note" | cut -d ':' -f2- | xargs)
-        type=$(grep '^**Type\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        location=$(grep '^**Location\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        attendees=$(grep '^**Attendees\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        participants=$(grep '^**Participants\*\*\:' "$note" | cut -d ':' -f2- | xargs)
-        timestamp=$(grep '^**Timestamp\*\*\:' "$note" | cut -d ':' -f2- | xargs)
+        title=$(extract_meta topic "$note")
+        type=$(extract_meta type "$note")
+        location=$(extract_meta location "$note")
+        timestamp=$(extract_meta timestamp "$note")
+        # The new `people:` field replaces the old separate `attendees:` /
+        # `participants:` (both rendered identically here as a bullet list).
+        people=$(extract_people_list "$note")
+        # Owner from config, used as the assignee when an action has none.
+        owner=$(awk '/^owner:[[:space:]]*/{sub(/^owner:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}' "${ADULTING_HOME:-$HOME/vault}/.adulting/config.yaml" 2>/dev/null)
 
 
 # Write the metadata to the temporary file
@@ -53,18 +64,17 @@ if [ -n "$location" ]; then
 
 fi
 
-# Add attendees if it's not empty
-if [ -n "$attendees" ]; then
-    echo "**Attendees**:  " >> "$metadata_file"
+# Add the people list (attendees / participants) if it's not empty
+if [ -n "$people" ]; then
+    if [ "$type" = "Correspondence" ]; then
+        echo "**Participants**:  " >> "$metadata_file"
+    else
+        echo "**Attendees**:  " >> "$metadata_file"
+    fi
     echo "" >> "$metadata_file"
-    echo "$attendees" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
-fi
-
-# Add participants if it's not empty
-if [ -n "$participants" ]; then
-    echo "**Participants**:  " >> "$metadata_file"
-    echo "" >> "$metadata_file"
-    echo "$participants" | awk -v RS=';' '{print "- " $0 }' >> "$metadata_file"
+    while IFS= read -r p; do
+        [ -n "$p" ] && echo "- $p" >> "$metadata_file"
+    done <<< "$people"
 fi
 
 
@@ -87,8 +97,10 @@ fi
 # Remove the content between # Agreed and the line with dashes
 # Remove the content between # Actions and the line with dashes
 awk '
-BEGIN { print_lines = 1 }
-index($0, "# Topic:") == 1 || index($0, "**Type") == 1 || index($0, "**Thread") == 1 || index($0, "**Location") == 1 || index($0, "**Attendees") == 1 || index($0, "**Timestamp") == 1 { next }
+BEGIN { print_lines = 1; in_fm = 0 }
+NR == 1 && $0 == "---" { in_fm = 1; next }
+in_fm && $0 == "---" { in_fm = 0; next }
+in_fm { next }
 /# Minuted Agreements/ {
     print;
     print_lines = 0;
@@ -140,14 +152,35 @@ rm "$metadata_file"
         echo "" >> "$resolved_lines"
 
 
-        # Grep for task lines - [ ] and - [x]
+        # Action items: extract both legacy `- [ ] / - [x]` and new `ACTION: / TASK:`.
+        # Empty assignees become the owner (PDF is for distribution).
         echo "" > "$action_lines"
-        echo '| Status | Assignee | Task |'  >> "$action_lines"
-        echo '|--------|----------|--------------------------------------------------|'  >> "$action_lines"
-	    grep '\-\s*\[[ x]\]' "$temp_file" | sed 's/^\(.\{6\}\).\{5\}/\1/' | sort | uniq | sed -E 's/- \[([ x]*)\] +\(([^)]+)\) +(.*)/| \1 | \2 | \3 |/' >> "$action_lines"
+        echo '| Assignee | Task |'  >> "$action_lines"
+        echo '|----------|--------------------------------------------------|'  >> "$action_lines"
+        python3 - "$temp_file" "$owner" >> "$action_lines" << 'PYEOF'
+import re, sys
+LEGACY = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
+NEW = re.compile(r'^(?:ACTION|TASK|DONE):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+COMMENT = re.compile(r'\s*<!--[^>]*-->\s*')
+owner = sys.argv[2] if len(sys.argv) > 2 else ''
+seen = set()
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.rstrip('\n')
+        m = LEGACY.match(line) or NEW.match(line)
+        if not m:
+            continue
+        assignee = (m.group(1) or '').strip() or owner
+        text = COMMENT.sub(' ', m.group(2)).strip()
+        key = (assignee, text)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f'| {assignee} | {text} |')
+PYEOF
         # Check if file only has headers and add "None" if so
         if [ $(wc -l < "$action_lines") -eq 3 ]; then
-            echo '| None | None | None |' >> "$action_lines"
+            echo '| None | None |' >> "$action_lines"
         fi
         echo "" >> "$action_lines"
 
@@ -191,11 +224,10 @@ rm "$metadata_file"
 
         #cat "$final_file"
 
-        #pandoc -s -f gfm -t html $note -c $CSS_LOCATION > /tmp/tempfile.html 
-        pandoc $final_file -s -o "$DOWNLOADS_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
+        pandoc $final_file --from=markdown+lists_without_preceding_blankline -s -o "$EXPORT_DIR/$selected_note.pdf" --pdf-engine=xelatex    \
 		-V header-includes="\let\oldtoc\tableofcontents\renewcommand{\tableofcontents}{\oldtoc\newpage}" \
 		-V header-includes="\AtBeginEnvironment{quote}{\itshape}"
-	#/usr/bin/pandoc -s -f gfm -t html $note  > /tmp/tempfile.html        
-        #open -g /tmp/tempfile.pdf &
-        #open -g $final_file &
-        open -g "$DOWNLOADS_DIR/$selected_note.pdf" &
+        open -g "$EXPORT_DIR/$selected_note.pdf" &
+
+        cd /
+        rm -rf "$workdir"

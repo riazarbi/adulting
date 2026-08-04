@@ -34,7 +34,7 @@ FROM debian:sid-slim
 # pandoc + a LaTeX engine for `notes pdf|minutes|agenda` are deferred —
 # add later if PDF rendering becomes necessary (adds ~1GB).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 taskwarrior ca-certificates \
+      python3 taskwarrior ca-certificates ripgrep \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent

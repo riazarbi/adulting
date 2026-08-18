@@ -11,14 +11,14 @@
 # The agent base image must exist locally. Build it via the `agent-base`
 # profile in the staging vault's compose file:
 #
-#   docker compose -f /Users/riaz/vault/docker-compose.yml \
+#   docker compose -f /home/riaz/vault/docker-compose.yml \
 #       --profile build build agent-base
 #
 # or directly:
 #
 #   docker build -t agent:local \
-#       -f /Users/riaz/projects/agent/docker/Dockerfile \
-#       /Users/riaz/projects/agent
+#       -f /home/riaz/projects/agent/docker/Dockerfile \
+#       /home/riaz/projects/agent
 
 FROM agent:local AS agent_bin
 
@@ -36,13 +36,13 @@ FROM debian:sid-slim
 # pandoc + a LaTeX engine for `notes pdf|minutes|agenda` are deferred —
 # add later if PDF rendering becomes necessary (adds ~1GB).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 taskwarrior ca-certificates git \
+      python3 taskwarrior ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent
 
 # /opt/adulting is filled at runtime by a bind mount from
-# /Users/riaz/projects/adulting on the host. Pre-create the directory so
+# /home/riaz/projects/adulting on the host. Pre-create the directory so
 # the mount has a target and so PATH resolves cleanly even if the mount is
 # ever omitted (the dir is just empty in that case).
 # /state and /workspace match the agent base image's layout — bind mounts

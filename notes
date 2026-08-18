@@ -240,6 +240,39 @@ extract_meta() {
     ' "$file"
 }
 
+# Normalise spacing around Markdown horizontal rules so pandoc renders them
+# as rules. Without a blank line above, a line of text immediately followed
+# by `---` is parsed as a setext H2 heading (the dashes become its underline)
+# rather than a rule; without a blank line below, the rule can swallow the
+# next line. This guarantees at least one blank line above and below every
+# horizontal rule (`---`, `***`, `___`; 3+ chars, optionally spaced) in the
+# body. YAML frontmatter delimiters are passed through untouched.
+# Reads a file, writes the normalised note to stdout.
+pad_note_rules() {
+    local file="$1"
+    awk '
+    function is_blank(s) { return s ~ /^[[:space:]]*$/ }
+    function is_hr(s,   t) {
+        t = s
+        gsub(/[[:space:]]/, "", t)
+        if (length(t) < 3) return 0
+        return (t ~ /^-+$/ || t ~ /^\*+$/ || t ~ /^_+$/)
+    }
+    function emit(s) { print s; prev_blank = is_blank(s) }
+    BEGIN { in_fm = 0; prev_blank = 1; prev_hr = 0 }
+    NR == 1 && $0 == "---" { print; in_fm = 1; prev_blank = 0; next }
+    in_fm && $0 == "---" { print; in_fm = 0; prev_blank = 1; next }
+    in_fm { print; next }
+    {
+        hr = is_hr($0)
+        if (hr && !prev_blank) emit("")
+        else if (!hr && prev_hr && !is_blank($0)) emit("")
+        emit($0)
+        prev_hr = hr
+    }
+    ' "$file"
+}
+
 # EXPORTS
 # Export variables
 export NOTES_DIR
@@ -252,6 +285,7 @@ export -f open_note
 export -f extract_meta
 export -f extract_people_list
 export -f extract_threads_list
+export -f pad_note_rules
 
 
 subcommand="${1:-new}"

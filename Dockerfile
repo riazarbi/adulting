@@ -31,10 +31,12 @@ FROM debian:sid-slim
 # python3 runs the adulting CLIs (stdlib only). taskwarrior provides the
 # `task` binary that `tasks install` copies into ADULTING_HOME/.adulting/bin/.
 # ca-certificates is needed for the agent's outbound TLS to the LLM API.
+# git backs the `commit` CLI (~50MB with its deps) — the vault's only sync
+# mechanism, so the agent cannot record its work without it.
 # pandoc + a LaTeX engine for `notes pdf|minutes|agenda` are deferred —
 # add later if PDF rendering becomes necessary (adds ~1GB).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 taskwarrior ca-certificates \
+      python3 taskwarrior ca-certificates git \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent
@@ -54,6 +56,16 @@ ENV PATH=/opt/adulting:$PATH \
     ADULTING_TASK_BIN=/usr/bin/task \
     AGENT_STATE_DIR=/state \
     HOME=/tmp
+
+# Git identity for `commit save`. Set explicitly because git otherwise
+# derives an author silently from the container UID and hostname — with
+# HOME=/tmp there is no gitconfig to read, so commits would land as
+# `1000@<container-id>` with no error. Both AUTHOR and COMMITTER are
+# needed: setting only AUTHOR still leaves the committer auto-derived.
+ENV GIT_AUTHOR_NAME=agent \
+    GIT_AUTHOR_EMAIL=agent@sprite.local \
+    GIT_COMMITTER_NAME=agent \
+    GIT_COMMITTER_EMAIL=agent@sprite.local
 
 WORKDIR /workspace
 USER 1000:0

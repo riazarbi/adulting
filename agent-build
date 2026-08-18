@@ -29,7 +29,7 @@ from pathlib import Path
 # Per-tool overrides applied on top of the auto-generated description.
 # read_only is the only field we currently set; lint is the only purely
 # read-only tool (others wrap mixed-mutation surfaces).
-TOOLS = ['tasks', 'buffer', 'notes', 'threads', 'people', 'lint']
+TOOLS = ['tasks', 'buffer', 'notes', 'threads', 'people', 'lint', 'commit']
 TOOL_OVERRIDES = {
     'lint': {'read_only': True},
 }

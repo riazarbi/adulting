@@ -21,6 +21,10 @@ Markdown file holding a chronological log of an ongoing project, process, or rel
 | cadences  | no       | list   | list of objects with `key`, `frequency`, `description` |
 | currency  | no       | string | regex=^[A-Z]{3}$                                      |
 | rate      | no       | int    |                                                       |
+| client_name    | no  | string |                                                  |
+| client_address | no  | string |                                                  |
+| client_vat     | no  | string |                                                  |
+| client_email   | no  | string |                                                  |
 
 `ended` is required when `status` is `closed`.
 
@@ -34,6 +38,13 @@ guessing it would silently corrupt cross-thread totals. `rate` falls back to
 `.adulting/config.yaml`'s `time.rate`, then to 2500. Both are resolved at write
 time and stored literally on each entry, so changing them here never re-prices
 work already logged.
+
+The `client_*` fields name the party billed on a statement of account
+(`payments statement --pdf`). Only `client_name` is required to render one. The payment reference printed on the statement is the thread name without its `Kind/` prefix — derived, not configured.
+Addresses are pipe-separated — `Unit 301|2 Park Road|Cape Town` — because the
+frontmatter reader is single-line only, and teaching it block scalars for this
+one field would not pay for itself. The supplier side and banking details are
+vault-wide and live in `.adulting/config.yaml` under `billing:`.
 
 ### Cadences
 

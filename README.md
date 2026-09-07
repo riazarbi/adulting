@@ -201,7 +201,8 @@ Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thr
 | `payments log <thread> <amount>` | Record a receipt |
 | `payments log` | Interactive: pick thread → amount → date → account → note |
 | `payments list [thread] [--since] [--until] [--json]` | List payments |
-| `payments statement [--thread] [--since] [--until] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
+| `payments statement [--thread] [--since] [--until] [--as-of] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
+| `payments statement --thread T --pdf out.pdf [--as-of D]` | Render a statement of account as a PDF |
 | `payments show <id> [--json]` | One payment |
 | `payments edit <id> [--amount/-c/-d/-t/-a/-n]` | Change one field |
 | `payments rm <id> [-y]` | Delete a payment |
@@ -213,6 +214,44 @@ Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thr
 Amounts accept `47300`, `47300.50`, or `47,300.50`, and must be positive — a refund is not a negative payment. All money arithmetic uses `decimal.Decimal`, so `hours report` and `payments statement` agree exactly rather than drifting by float error.
 
 Payment ids share one namespace with `hours` entry ids; `lint` enforces uniqueness across both.
+
+### Statement of account (PDF)
+
+```
+payments statement --thread "SANA Partners" --as-of 2026-08-31 --pdf statement.pdf
+```
+
+Renders a one-client statement: parties, summary, a dated ledger of every charge and payment with a running balance, aging buckets (current / 30 / 60 / 90+), and banking details. Rendered with pandoc + xelatex — the same toolchain `notes pdf` uses, so it needs no Python packages beyond the standard library.
+
+`--as-of` is the statement date and drives aging: work logged after it has not happened yet as far as the document is concerned, so `--as-of` never ages future charges into `current`. It applies to the text view too, so the two always agree.
+
+A statement is per client, so `--pdf` requires `--thread`. Charges round to whole cents at each line, so the printed lines always sum to the printed total, and the aging buckets always sum to the balance — both are asserted before anything is written.
+
+Party details come from two places:
+
+| what | where |
+|---|---|
+| Supplier (you) and banking | `.adulting/config.yaml`, under `billing:` |
+| Client name, address, VAT | the thread's frontmatter (`client_name`, `client_address`, `client_vat`, `client_email`) |
+
+```yaml
+# .adulting/config.yaml
+billing:
+  supplier_name: Riaz Arbi
+  supplier_address: 14 Kinnoull Road|Camps Bay|Cape Town
+  supplier_phone: +27 72 605 1357
+  bank_account_name: ...
+  bank_name: ...
+  bank_account_number: ...
+  bank_branch_code: ...
+  bank_account_type: ...
+```
+
+Addresses are pipe-separated because the frontmatter and config readers are single-line only.
+
+The payment reference printed on the statement is the thread name without its `Kind/` prefix — `SANA Partners`, not `Projects/SANA Partners`. It is derived rather than configured, so it can never drift from the thread or carry another client's code.
+
+**Banking details are required for a usable statement.** While any bank field is missing or still says `TODO`, the PDF prints "Banking details not yet supplied" instead of a payment table and the command warns on stderr — a document that asks for money must say where to send it.
 
 ## lint
 

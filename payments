@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
 import _vault as V  # noqa: E402
+import _statement as S  # noqa: E402
 
 TOOL = 'payments'
 SUBDIR = 'payments'
@@ -263,10 +264,75 @@ def billed(thread=None, since=None, until=None):
     return out
 
 
+def _as_of(raw):
+    from datetime import datetime
+    if not raw:
+        from datetime import date
+        return date.today()
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        sys.exit(f"{TOOL}: bad --as-of {raw!r}; expected YYYY-MM-DD")
+
+
+def one_thread_statement(thread_arg, as_of):
+    """Everything `_statement.build` needs for a single thread."""
+    kind, name, tpath = V.resolve_target(TOOL, thread_arg)
+    ref = V.thread_ref(kind, name)
+    currency = V.resolve_currency(TOOL, tpath, ref, None)
+
+    entries = []
+    for _, r, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
+        if r != ref or not e.get('startTime') or not e.get('endTime'):
+            continue
+        mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
+        entries.append({'on': V.local(e['startTime']).date(),
+                        'description': e.get('name', ''),
+                        'minutes': mins,
+                        'rate': e.get('rate', 0) or 0})
+
+    paid = []
+    for _, r, pm in V.load_all(SUBDIR, FENCE, KEY):
+        if r != ref or not pm.get('received'):
+            continue
+        paid.append({'on': V.local(pm['received']).date(),
+                     'amount': V.dec(pm.get('amount', 0)),
+                     'account': pm.get('account', '')})
+
+    st = S.build(ref, currency, entries, paid, as_of)
+    st['thread_path'] = tpath
+    return st
+
+
+def cmd_pdf(args):
+    """A statement document is per client, so --pdf needs exactly one thread."""
+    import _statement_pdf as P
+    st = one_thread_statement(args.thread, _as_of(args.as_of))
+    if not st['lines']:
+        sys.exit(f"{TOOL}: nothing to state for {st['thread']!r} as at {st['as_of']}")
+    out, bank = P.render(st, args.pdf, tool=TOOL)
+    if not bank['complete']:
+        sys.stdout.flush()
+        print(f"warning: banking details incomplete in .adulting/config.yaml — "
+              f"the statement says so instead of printing a payment table",
+              file=sys.stderr)
+    print(f"{out}: {len(st['lines'])} lines, {st['hours_total']:.2f} h, "
+          f"charges {V.fmt_money(st['charges'], st['currency'])}, "
+          f"paid {V.fmt_money(st['payments'], st['currency'])}, "
+          f"balance {V.fmt_money(st['balance'], st['currency'])} "
+          f"as at {st['as_of']}")
+
+
 def cmd_statement(args):
-    bill = billed(args.thread, args.since, args.until)
+    if args.pdf:
+        if not args.thread:
+            sys.exit(f"{TOOL}: --pdf needs --thread; a statement is per client")
+        return cmd_pdf(args)
+    # --as-of is an upper bound on the text view too, so the two agree.
+    until = args.until or (args.as_of if args.as_of else None)
+    bill = billed(args.thread, args.since, until)
     recv = {}
-    for _, ref, p in collect(args.thread, args.since, args.until):
+    for _, ref, p in collect(args.thread, args.since, until):
         key = (ref, p.get('currency', ''))
         recv.setdefault(key, V.dec(0))
         recv[key] += V.dec(p.get('amount', 0))
@@ -336,6 +402,8 @@ def main():
     st.add_argument('--thread')
     st.add_argument('--since')
     st.add_argument('--until')
+    st.add_argument('--as-of', help="Statement date, YYYY-MM-DD; drives aging (default: today).")
+    st.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
     st.add_argument('--json', action='store_true')
     st.set_defaults(func=cmd_statement)
 

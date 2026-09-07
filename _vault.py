@@ -178,6 +178,61 @@ def resolve_currency(tool, tpath, ref, flag):
     return currency
 
 
+# ---------- billing parties ----------
+
+# Multi-line addresses are pipe-separated: the frontmatter and config readers
+# are single-line only, and teaching them block scalars for this one field
+# would not pay for itself.
+def lines_of(value):
+    return [x.strip() for x in (value or '').split('|') if x.strip()]
+
+
+def supplier():
+    """Who is billing, from .adulting/config.yaml's `billing:` section."""
+    b = read_config().get('billing', {})
+    return {
+        'name': b.get('supplier_name') or read_config().get('owner') or '',
+        'lines': lines_of(b.get('supplier_address')),
+        'phone': b.get('supplier_phone') or '',
+        'email': b.get('supplier_email') or '',
+        'vat': b.get('supplier_vat') or '',
+    }
+
+
+BANK_FIELDS = ('bank_account_name', 'bank_name', 'bank_account_number',
+               'bank_branch_code', 'bank_account_type')
+
+
+def banking():
+    """Where payment should be sent. Printed verbatim on the statement.
+
+    `complete` is false while any field is missing or still a TODO placeholder;
+    a statement then says so rather than printing a half-filled payment table.
+    A document that asks for money must say where to send it.
+    """
+    b = read_config().get('billing', {})
+    fields = {k: (b.get(k) or '').strip() for k in BANK_FIELDS}
+    fields['complete'] = all(
+        v and not v.upper().startswith('TODO') for k, v in fields.items()
+        if k in BANK_FIELDS)
+    return fields
+
+
+def client(tpath):
+    """Who is being billed, from the thread's frontmatter."""
+    fm, _ = parse_frontmatter(tpath.read_text(encoding='utf-8'))
+    return {
+        'name': fm.get('client_name') or '',
+        'lines': lines_of(fm.get('client_address')),
+        'vat': fm.get('client_vat') or '',
+        'email': fm.get('client_email') or '',
+        # What the client quotes when paying: the thread name without its
+        # Kind/ prefix. Not configurable -- it is derived, so it can never
+        # drift from the thread or collide with another client's.
+        'reference': tpath.stem,
+    }
+
+
 # ---------- record files (JSON in a fenced block) ----------
 
 def record_path(subdir, kind, name):

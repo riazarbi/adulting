@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""Consulting time tracking for the adulting vault.
+
+Entries live in $ADULTING_HOME/hours/<Kind>/<Thread>.md as JSON inside a
+```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker plugin
+(and anything that reads its format) can render them natively.
+
+  hours log <thread> <description...>   append an entry
+  hours log                            interactive capture
+  hours list / report / show / edit / rm
+
+The entry `name` field holds the description: it is the only field the plugin
+renders, and these descriptions are invoice line items. Extra keys (id, rate,
+currency) ride alongside; the plugin round-trips unknown keys unharmed because
+loadTracker() casts rather than maps.
+
+Rate 0 means unbillable and is an ordinary value -- hours still count.
+"""
+
+import argparse
+import json
+import re
+import sys
+from datetime import timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+import _vault as V  # noqa: E402
+
+TOOL = 'hours'
+SUBDIR = 'hours'
+FENCE = '```simple-time-tracker'
+HEADING = ' — hours'
+
+DEFAULT_MINUTES = 60
+DEFAULT_RATE = 2500
+
+BY_START = lambda e: e.get('startTime') or ''  # noqa: E731
+
+
+# ---------- entries ----------
+
+def minutes_of(e):
+    if not e.get('startTime') or not e.get('endTime'):
+        return 0
+    return int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
+
+
+def money_of(e):
+    """Decimal, not float: these figures get invoiced."""
+    return V.dec(minutes_of(e)) / V.dec(60) * V.dec(e.get('rate', 0) or 0)
+
+
+def resolve_rate(tpath, flag):
+    if flag is not None:
+        return int(flag)
+    thread_rate = V.thread_meta(tpath)[1]
+    if thread_rate is not None:
+        return thread_rate
+    return V.config_default('hours', 'rate', DEFAULT_RATE)
+
+
+def build_entry(desc, when, minutes, rate, currency, ids):
+    return {
+        'name': desc,
+        'startTime': V.to_iso(when),
+        'endTime': V.to_iso(when + timedelta(minutes=minutes)),
+        'id': V.new_id(ids),
+        'rate': int(rate),
+        'currency': currency,
+    }
+
+
+def save(path, entries, ref, currency):
+    V.write_records(path, entries, FENCE, ref, currency,
+                    sort_key=BY_START, heading=HEADING)
+
+
+def append_entry(kind, name, entry):
+    ref = V.thread_ref(kind, name)
+    path = V.record_path(SUBDIR, kind, name)
+    save(path, V.read_records(path, FENCE) + [entry], ref, entry['currency'])
+    return path
+
+
+def report_logged(entry, ref):
+    when = V.local(entry['startTime']).strftime('%Y-%m-%d %H:%M')
+    print(f"logged {entry['id']}  {ref}  {when}  "
+          f"{V.fmt_duration(minutes_of(entry))} @ {entry['rate']} "
+          f"{entry['currency']} = {V.fmt_money(money_of(entry), entry['currency'])}")
+
+
+# ---------- log ----------
+
+def cmd_log(args):
+    if not args.thread:
+        return cmd_log_interactive(args)
+    desc = ' '.join(args.description).strip()
+    if not desc:
+        sys.exit(f"{TOOL}: empty description")
+
+    kind, name, tpath = V.resolve_target(TOOL, args.thread)
+    ref = V.thread_ref(kind, name)
+    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
+    rate = resolve_rate(tpath, args.rate)
+    minutes = args.minutes if args.minutes is not None else V.config_default(
+        'hours', 'minutes', DEFAULT_MINUTES)
+    if minutes <= 0:
+        sys.exit(f"{TOOL}: --minutes must be positive")
+
+    entry = build_entry(desc, V.when_from_flags(TOOL, args.date, args.time),
+                        minutes, rate, currency, V.all_ids())
+    append_entry(kind, name, entry)
+    report_logged(entry, ref)
+
+
+def cmd_log_interactive(args):
+    kind, name, tpath = V.pick_thread(TOOL, include_all=args.all)
+    ref = V.thread_ref(kind, name)
+    desc = V.prompt("Description")
+    if not desc:
+        sys.exit(f"{TOOL}: empty description")
+
+    try:
+        minutes = int(V.prompt("Minutes", V.config_default(
+            'hours', 'minutes', DEFAULT_MINUTES)))
+    except ValueError:
+        sys.exit(f"{TOOL}: minutes must be a number")
+    if minutes <= 0:
+        sys.exit(f"{TOOL}: minutes must be positive")
+
+    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
+    try:
+        rate = int(V.prompt("Rate", f"{resolve_rate(tpath, None)} {currency}").split()[0])
+    except (ValueError, IndexError):
+        sys.exit(f"{TOOL}: rate must be a number")
+
+    entry = build_entry(desc, V.when_from_flags(TOOL, args.date, args.time),
+                        minutes, rate, currency, V.all_ids())
+    append_entry(kind, name, entry)
+    report_logged(entry, ref)
+
+
+# ---------- query ----------
+
+def collect(thread=None, since=None, until=None):
+    want = None
+    if thread:
+        kind, name, _ = V.resolve_target(TOOL, thread)
+        want = V.thread_ref(kind, name)
+    for path, ref, e in V.load_all(SUBDIR, FENCE):
+        if want and ref != want:
+            continue
+        if not e.get('startTime'):
+            continue
+        day = V.local(e['startTime']).strftime('%Y-%m-%d')
+        if since and day < since:
+            continue
+        if until and day > until:
+            continue
+        yield path, ref, e
+
+
+def as_row(ref, e):
+    return {
+        'id': e.get('id', ''),
+        'thread': ref,
+        'date': V.local(e['startTime']).strftime('%Y-%m-%d'),
+        'time': V.local(e['startTime']).strftime('%H:%M'),
+        'minutes': minutes_of(e),
+        'rate': e.get('rate', 0),
+        'currency': e.get('currency', ''),
+        'amount': float(money_of(e)),
+        'description': e.get('name', ''),
+    }
+
+
+def cmd_list(args):
+    rows = [as_row(ref, e) for _, ref, e in
+            collect(args.thread, args.since, args.until)]
+    rows.sort(key=lambda r: (r['date'], r['time']))
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no entries)")
+        return
+    tw = max(len(r['thread']) for r in rows)
+    print(f"{'ID':<9} {'DATE':<11} {'THREAD':<{tw}}  {'DUR':>7}  {'AMOUNT':>14}  DESCRIPTION")
+    for r in rows:
+        print(f"{r['id']:<9} {r['date']:<11} {r['thread']:<{tw}}  "
+              f"{V.fmt_duration(r['minutes']):>7}  "
+              f"{V.fmt_money(r['amount'], r['currency']):>14}  {r['description']}")
+
+
+def cmd_report(args):
+    buckets = {}
+    for _, ref, e in collect(args.thread, args.since, args.until):
+        key = (ref, e.get('currency', ''))
+        b = buckets.setdefault(key, {'thread': ref, 'currency': key[1],
+                                     'minutes': 0, 'amount': V.dec(0), 'entries': 0})
+        b['minutes'] += minutes_of(e)
+        b['amount'] += money_of(e)
+        b['entries'] += 1
+    out = sorted(buckets.values(), key=lambda b: (b['thread'], b['currency']))
+    if args.json:
+        print(json.dumps([{**b, 'amount': float(b['amount']),
+                           'hours': round(b['minutes'] / 60, 2)} for b in out], indent=2))
+        return
+    if not out:
+        print("(no entries)")
+        return
+    tw = max(len(b['thread']) for b in out)
+    print(f"{'THREAD':<{tw}}  {'ENTRIES':>7}  {'DURATION':>10}  {'AMOUNT':>16}")
+    for b in out:
+        print(f"{b['thread']:<{tw}}  {b['entries']:>7}  "
+              f"{V.fmt_duration(b['minutes']):>10}  "
+              f"{V.fmt_money(b['amount'], b['currency']):>16}")
+    # Totals are per-currency only: summing across currencies is meaningless.
+    per_ccy = {}
+    for b in out:
+        t = per_ccy.setdefault(b['currency'], {'minutes': 0, 'amount': V.dec(0)})
+        t['minutes'] += b['minutes']
+        t['amount'] += b['amount']
+    print()
+    for ccy, t in sorted(per_ccy.items()):
+        print(f"{'TOTAL ' + ccy:<{tw}}  {'':>7}  {V.fmt_duration(t['minutes']):>10}  "
+              f"{V.fmt_money(t['amount'], ccy):>16}")
+
+
+def find_entry(entry_id):
+    for path, ref, e in V.load_all(SUBDIR, FENCE):
+        if e.get('id') == entry_id:
+            return path, ref, e
+    sys.exit(f"{TOOL}: no entry with id {entry_id!r}")
+
+
+def cmd_show(args):
+    _, ref, e = find_entry(args.id)
+    row = as_row(ref, e)
+    if args.json:
+        print(json.dumps(row, indent=2))
+        return
+    for k in ('id', 'thread', 'date', 'time', 'minutes', 'rate', 'currency',
+              'amount', 'description'):
+        print(f"{k:<12} {row[k]}")
+
+
+def cmd_edit(args):
+    path, ref, _ = find_entry(args.id)
+    entries = V.read_records(path, FENCE)
+    target = next(e for e in entries if e.get('id') == args.id)
+
+    if args.description is not None:
+        target['name'] = ' '.join(args.description).strip()
+    if args.rate is not None:
+        target['rate'] = int(args.rate)
+    if args.currency is not None:
+        ccy = args.currency.upper()
+        if not re.match(r'^[A-Z]{3}$', ccy):
+            sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
+        target['currency'] = ccy
+
+    if args.date or args.time:
+        start = V.local(target['startTime'])
+        mins = minutes_of(target)
+        when = V.when_from_flags(TOOL, args.date or start.strftime('%Y-%m-%d'),
+                                 args.time or start.strftime('%H:%M'))
+        target['startTime'] = V.to_iso(when)
+        target['endTime'] = V.to_iso(when + timedelta(minutes=mins))
+    if args.minutes is not None:
+        if args.minutes <= 0:
+            sys.exit(f"{TOOL}: --minutes must be positive")
+        target['endTime'] = V.to_iso(
+            V.from_iso(target['startTime']) + timedelta(minutes=args.minutes))
+
+    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
+    save(path, entries, ref, fm.get('currency', target['currency']))
+    report_logged(target, ref)
+
+
+def cmd_rm(args):
+    path, ref, entry = find_entry(args.id)
+    if not args.yes:
+        r = as_row(ref, entry)
+        print(f"{r['id']}  {r['date']}  {r['thread']}  "
+              f"{V.fmt_duration(r['minutes'])}  {r['description']}")
+        if input("delete? [y/N] ").strip().lower() not in ('y', 'yes'):
+            sys.exit("aborted")
+    entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
+    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
+    save(path, entries, ref, fm.get('currency', ''))
+    print(f"deleted {args.id}")
+
+
+# ---------- main ----------
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Track consulting hours in the adulting vault.")
+    sub = p.add_subparsers(dest='subcommand', required=True)
+
+    log = sub.add_parser('log', help="Append an entry (interactive if no thread).")
+    log.add_argument('thread', nargs='?', help="Thread name, 'Kind/Name', or wikilink.")
+    log.add_argument('description', nargs='*', help="What was done.")
+    log.add_argument('-m', '--minutes', type=int, help="Duration (default 60).")
+    log.add_argument('-r', '--rate', type=int, help="Hourly rate; 0 = unbillable.")
+    log.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
+    log.add_argument('-d', '--date', help="YYYY-MM-DD (default today).")
+    log.add_argument('-t', '--time', help="HH:MM (default now).")
+    log.add_argument('--all', action='store_true',
+                     help="Interactive: list paused/closed threads too.")
+    log.set_defaults(func=cmd_log)
+
+    ls = sub.add_parser('list', help="List entries.")
+    ls.add_argument('thread', nargs='?')
+    ls.add_argument('--since', help="YYYY-MM-DD, inclusive.")
+    ls.add_argument('--until', help="YYYY-MM-DD, inclusive.")
+    ls.add_argument('--json', action='store_true')
+    ls.set_defaults(func=cmd_list)
+
+    rep = sub.add_parser('report', help="Totals by thread and currency.")
+    rep.add_argument('--thread')
+    rep.add_argument('--since')
+    rep.add_argument('--until')
+    rep.add_argument('--json', action='store_true')
+    rep.set_defaults(func=cmd_report)
+
+    sh = sub.add_parser('show', help="Show one entry.")
+    sh.add_argument('id')
+    sh.add_argument('--json', action='store_true')
+    sh.set_defaults(func=cmd_show)
+
+    ed = sub.add_parser('edit', help="Change one field of an entry.")
+    ed.add_argument('id')
+    ed.add_argument('--description', nargs='*')
+    ed.add_argument('-m', '--minutes', type=int)
+    ed.add_argument('-r', '--rate', type=int)
+    ed.add_argument('-c', '--currency')
+    ed.add_argument('-d', '--date')
+    ed.add_argument('-t', '--time')
+    ed.set_defaults(func=cmd_edit)
+
+    rm = sub.add_parser('rm', help="Delete an entry.")
+    rm.add_argument('id')
+    rm.add_argument('-y', '--yes', action='store_true')
+    rm.set_defaults(func=cmd_rm)
+
+    emit_helpjson_if_requested(p)
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == '__main__':
+    main()

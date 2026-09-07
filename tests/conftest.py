@@ -32,13 +32,20 @@ class Vault:
 
     def write_thread(self, kind: str, name: str, status: str = "open",
                      category: str = "professional",
-                     started: str = "2026-01-01") -> Path:
+                     started: str = "2026-01-01",
+                     currency: str | None = None,
+                     rate: int | None = None) -> Path:
         """kind in {Projects, Processes, Topics}. Returns the file path."""
         p = self.home / "threads" / kind / f"{name}.md"
         p.parent.mkdir(parents=True, exist_ok=True)
+        extra = ""
+        if currency:
+            extra += f"currency: {currency}\n"
+        if rate is not None:
+            extra += f"rate: {rate}\n"
         p.write_text(
             f"---\nstatus: {status}\nkind: {kind.rstrip('s').lower()}\n"
-            f"category: {category}\nstarted: {started}\n---\n\n"
+            f"category: {category}\nstarted: {started}\n{extra}---\n\n"
             f"# {name}\n", encoding="utf-8")
         return p
 
@@ -74,6 +81,50 @@ class Vault:
                      encoding="utf-8")
         return p
 
+    def write_hours_file(self, kind: str, name: str, entries: list | None = None,
+                        currency: str = "ZAR") -> Path:
+        """kind in {Projects, Processes, Topics}. entries is a list of entry
+        dicts; None writes an empty tracker block."""
+        import json as _json
+        p = self.home / "hours" / kind / f"{name}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        payload = _json.dumps({"entries": entries or []}, indent=2)
+        p.write_text(
+            f'---\nthread: "[[{kind}/{name}]]"\ncurrency: {currency}\n---\n\n'
+            f"# {name} — hours\n\n```simple-time-tracker\n{payload}\n```\n",
+            encoding="utf-8")
+        return p
+
+    def entries(self, kind: str, name: str) -> list:
+        """Parse the tracker block out of a time file."""
+        import json as _json
+        text = self.read(f"hours/{kind}/{name}.md")
+        lines = text.split("\n")
+        i = lines.index("```simple-time-tracker")
+        j = lines.index("```", i + 1)
+        return _json.loads("\n".join(lines[i + 1:j])).get("entries", [])
+
+    def write_payments_file(self, kind: str, name: str,
+                            payments: list | None = None,
+                            currency: str = "ZAR"):
+        import json as _json
+        p = self.home / "payments" / kind / f"{name}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        payload = _json.dumps({"payments": payments or []}, indent=2)
+        p.write_text(
+            f'---\nthread: "[[{kind}/{name}]]"\ncurrency: {currency}\n---\n\n'
+            f"# {name} — payments\n\n```adulting-payments\n{payload}\n```\n",
+            encoding="utf-8")
+        return p
+
+    def payments(self, kind: str, name: str) -> list:
+        import json as _json
+        text = self.read(f"payments/{kind}/{name}.md")
+        lines = text.split("\n")
+        i = lines.index("```adulting-payments")
+        j = lines.index("```", i + 1)
+        return _json.loads("\n".join(lines[i + 1:j])).get("payments", [])
+
     def read(self, relpath: str) -> str:
         return (self.home / relpath).read_text(encoding="utf-8")
 
@@ -94,7 +145,7 @@ class Vault:
 @pytest.fixture
 def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
     home = tmp_path / "vault"
-    for sub in ("notes", "logs", "threads", "people", ".adulting"):
+    for sub in ("notes", "logs", "threads", "people", "hours", "payments", ".adulting"):
         (home / sub).mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["ADULTING_HOME"] = str(home)

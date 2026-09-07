@@ -124,13 +124,35 @@ def cmd_new(args):
     if not name:
         sys.exit("empty name")
 
+    # Billing defaults for `hours`. Optional -- most threads are never billed --
+    # so a blank answer leaves them off entirely.
+    currency = args.currency
+    if currency is None and not (args.kind and args.category and args.name):
+        currency = input("Currency (blank for none): ").strip()
+    currency = (currency or '').strip().upper()
+    if currency and not re.match(r'^[A-Z]{3}$', currency):
+        sys.exit(f"currency {currency!r} is not a 3-letter ISO code")
+
+    rate = args.rate
+    if currency and rate is None and not (args.kind and args.category and args.name):
+        got = input("Rate [2500]: ").strip()
+        rate = int(got) if got.isdigit() else 2500
+    if rate is not None and not currency:
+        sys.exit("--rate needs a --currency")
+
     target_dir = THREADS_DIR / KIND_DIRS[kind]
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
     if path.exists():
         sys.exit(f"already exists: {path}")
+    billing = ''
+    if currency:
+        billing += f"currency: {currency}\n"
+    if rate is not None:
+        billing += f"rate: {rate}\n"
     path.write_text(
-        f"---\nstatus: open\nkind: {kind}\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
+        f"---\nstatus: open\nkind: {kind}\ncategory: {category}\n"
+        f"started: {today()}\n{billing}---\n\n# {name}\n",
         encoding='utf-8',
     )
     print(f"created: {path}")
@@ -254,6 +276,8 @@ def main():
     p_new.add_argument('--name', help="Thread name (skip prompt).")
     p_new.add_argument('--kind', choices=list(KIND_DIRS), help="Skip prompt.")
     p_new.add_argument('--category', choices=CATEGORIES, help="Skip prompt.")
+    p_new.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
+    p_new.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")
     p_new.set_defaults(func=cmd_new)
 
     p_delete = sub.add_parser('delete', help="Permanently delete a thread file.")

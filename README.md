@@ -7,6 +7,8 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 - **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/vault/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
 - **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/vault/threads/{Projects,Processes,Topics}/`.
 - **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
+- **Time entry** — a billable (or unbillable) session of work on a thread. Entries live in `~/vault/hours/` as JSON inside a ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker format renders them natively.
+- **Payment** — money received against a thread. Records live in `~/vault/payments/`, same shape as hours.
 - **Action** — a task. Notes contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source notes are the only store — there is no backend.
 
 # Installation
@@ -88,12 +90,14 @@ Skeleton management for thread files. Daily-review / tail / overdue tooling will
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `threads new`                        | Interactive: pick kind, category, name; creates the file      |
+| `threads new`                        | Interactive: pick kind, category, name, optional currency/rate; creates the file |
 | `threads delete <thread> [-y]`       | Delete a thread (with confirm)                                |
 | `threads list [--json]`              | List all threads (kind, status, category, name)               |
 | `threads show <thread> [--json]`     | Print frontmatter + body (or JSON of frontmatter)             |
 
 `<thread>` accepts a bare name (`SGB`) or a path (`Processes/SGB`). Bare names error if ambiguous across kinds.
+
+`threads new` also asks for a `currency` (blank to skip) and, if you give one, a `rate` — the billing defaults `hours` reads. Both are optional: most threads are never billed. Flags `--currency` / `--rate` skip the prompts, and passing `--kind --category --name` together suppresses all prompting for scripted use.
 
 ## people
 
@@ -130,6 +134,86 @@ Validation rules at ingest:
 
 Failures are printed; the source line is left as `ACTION:` so you can fix and re-run.
 
+## hours
+
+Consulting time tracking. One file per thread at `~/vault/hours/<Kind>/<Thread>.md`, holding a ` ```simple-time-tracker ` fenced JSON block in the format Obsidian's Super Simple Time Tracker plugin reads — so entries render natively and you can build your own views over the raw data.
+
+| Command | What it does |
+|---|---|
+| `hours log <thread> <description...>` | Append an entry |
+| `hours log` | Interactive: pick thread → description → minutes → rate |
+| `hours list [thread] [--since] [--until] [--json]` | List entries |
+| `hours report [--thread] [--since] [--until] [--json]` | Totals by thread **and currency** |
+| `hours show <id> [--json]` | One entry |
+| `hours edit <id> [-m/-r/-c/-d/-t/--description]` | Change one field |
+| `hours rm <id> [-y]` | Delete an entry |
+
+`log` flags: `-m/--minutes` (default 60), `-r/--rate`, `-c/--currency`, `-d/--date`, `-t/--time`.
+
+The thread must resolve to an existing thread file or the command fails — matching is case-sensitive, deliberately, so results don't differ between macOS and Linux.
+
+Defaults resolve most-specific-first and are **stored literally on each entry at write time**, so changing a thread's defaults never re-prices work already logged:
+
+| value | 1. flag | 2. thread frontmatter | 3. vault default |
+|---|---|---|---|
+| minutes | `--minutes` | — | 60 |
+| rate | `--rate` | `rate:` | 2500 (`.adulting/config.yaml` → `hours.rate`) |
+| currency | `--currency` | `currency:` | none — hard error |
+
+Currency is never guessed: a wrong one silently corrupts totals. Set `currency: ZAR` on the thread, or pass `--currency`.
+
+`rate: 0` means unbillable. It is an ordinary value, not a sentinel — the hours still count, the money is just zero.
+
+### On-disk shape
+
+```markdown
+---
+thread: "[[Projects/SANA Partners]]"
+currency: ZAR
+---
+
+# SANA Partners — hours
+
+```simple-time-tracker
+{
+  "entries": [
+    {
+      "name": "Further decomposition; code review, with \"Nick\"",
+      "startTime": "2026-08-01T06:30:00.000Z",
+      "endTime": "2026-08-01T09:30:00.000Z",
+      "id": "5048f86e",
+      "rate": 2500,
+      "currency": "ZAR"
+    }
+  ]
+}
+```
+```
+
+`name` holds the description, not a label — it is the only field the plugin renders, and these descriptions are invoice line items. `id`, `rate`, and `currency` are extra keys; the plugin round-trips unknown keys unharmed. Duration is derived from `endTime - startTime` (the plugin has no duration field), so a logged start plus a duration is written as an interval. JSON is pretty-printed rather than the plugin's single-line default, so appends produce readable git diffs.
+
+## payments
+
+Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thread>.md`, holding an ` ```adulting-payments ` fenced JSON block — same structure as `hours`, but its own fence since no external plugin is involved.
+
+| Command | What it does |
+|---|---|
+| `payments log <thread> <amount>` | Record a receipt |
+| `payments log` | Interactive: pick thread → amount → date → account → note |
+| `payments list [thread] [--since] [--until] [--json]` | List payments |
+| `payments statement [--thread] [--since] [--until] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
+| `payments show <id> [--json]` | One payment |
+| `payments edit <id> [--amount/-c/-d/-t/-a/-n]` | Change one field |
+| `payments rm <id> [-y]` | Delete a payment |
+
+`log` flags: `-c/--currency`, `-d/--date`, `-t/--time`, `-a/--account`, `-n/--note`.
+
+`statement` is the payoff: it reads the `hours/` side for billed and the `payments/` side for received, and reports the difference per thread and currency. It never sums across currencies.
+
+Amounts accept `47300`, `47300.50`, or `47,300.50`, and must be positive — a refund is not a negative payment. All money arithmetic uses `decimal.Decimal`, so `hours report` and `payments statement` agree exactly rather than drifting by float error.
+
+Payment ids share one namespace with `hours` entry ids; `lint` enforces uniqueness across both.
+
 ## lint
 
 Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
@@ -155,6 +239,14 @@ Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fie
 │   ├── Processes/              # ongoing operations
 │   └── Topics/                 # interest areas / catchalls
 ├── people/                     # people files (relationship link targets)
+├── hours/                      # billable time, one file per thread
+│   ├── Projects/
+│   ├── Processes/
+│   └── Topics/
+├── payments/                   # money received, one file per thread
+│   ├── Projects/
+│   ├── Processes/
+│   └── Topics/
 └── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
 ```
 
@@ -171,6 +263,8 @@ The visible top level (what Obsidian shows in its sidebar) is only user content:
 | `person.md`                   | Person files in `people/`                                       |
 | `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |
 | `task_anchor.md`              | `TASK:`/`DONE:` lines in notes/logs (uuid, attrs, depends)      |
+| `hours_file.md`                | Time files in `hours/` (tracker block, entry objects)            |
+| `payments_file.md`            | Payments files in `payments/` (payments block, payment objects) |
 
 Each schema is a markdown file with YAML frontmatter (`schema`, `scope`, `directory`, `filename`, optionally `applies_when`) and a `## Fields` table describing required fields, types, and constraints. Pipes inside cells (e.g. inside a regex) must be escaped as `\|`.
 

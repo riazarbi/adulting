@@ -19,8 +19,21 @@ Markdown file holding a chronological log of an ongoing project, process, or rel
 | started   | yes      | string | regex=\d{4}-\d{2}-\d{2}                               |
 | ended     | no       | string | regex=\d{4}-\d{2}-\d{2}                               |
 | cadences  | no       | list   | list of objects with `key`, `frequency`, `description` |
+| currency  | no       | string | regex=^[A-Z]{3}$                                      |
+| rate      | no       | int    |                                                       |
 
 `ended` is required when `status` is `closed`.
+
+### Billing
+
+`currency` and `rate` are the defaults the `hours` CLI applies when logging time
+against this thread. Both are optional — most threads are never billed.
+
+`hours log` requires a currency and will refuse to write without one, since
+guessing it would silently corrupt cross-thread totals. `rate` falls back to
+`.adulting/config.yaml`'s `time.rate`, then to 2500. Both are resolved at write
+time and stored literally on each entry, so changing them here never re-prices
+work already logged.
 
 ### Cadences
 

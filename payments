@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""Money received, per thread, for the adulting vault.
+
+Records live in $ADULTING_HOME/payments/<Kind>/<Thread>.md as JSON inside an
+```adulting-payments fence — the same shape `hours` uses, so both are readable,
+greppable, and produce clean git diffs.
+
+  payments log <thread> <amount>       record a receipt
+  payments log                         interactive capture
+  payments list / show / edit / rm
+  payments statement                   billed vs received, per thread
+
+Unlike `hours`, there is no Obsidian plugin to be compatible with here, so the
+fence is our own. Amounts are handled as Decimal throughout: these figures get
+reconciled against invoices, and float drift is not acceptable in money.
+"""
+
+import argparse
+import json
+import re
+import sys
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+import _vault as V  # noqa: E402
+
+TOOL = 'payments'
+SUBDIR = 'payments'
+FENCE = '```adulting-payments'
+HEADING = ' — payments'
+KEY = 'payments'
+
+# `hours` side, for the statement.
+HOURS_SUBDIR = 'hours'
+HOURS_FENCE = '```simple-time-tracker'
+
+BY_RECEIVED = lambda p: p.get('received') or ''  # noqa: E731
+
+
+# ---------- amounts ----------
+
+def parse_amount(raw):
+    """Accept '47300', '47300.50', '47,300.50'. Reject anything else."""
+    try:
+        amt = Decimal(str(raw).replace(',', '').strip())
+    except (InvalidOperation, AttributeError):
+        sys.exit(f"{TOOL}: {raw!r} is not a valid amount")
+    if amt <= 0:
+        sys.exit(f"{TOOL}: amount must be positive (got {amt})")
+    return amt
+
+
+def amount_json(amt):
+    """Store as a JSON number, dropping a pointless .00."""
+    q = amt.quantize(Decimal('0.01'))
+    return int(q) if q == q.to_integral_value() else float(q)
+
+
+# ---------- records ----------
+
+def build_payment(amount, received, currency, account, note, ids):
+    p = {
+        'id': V.new_id(ids),
+        'received': V.to_iso(received),
+        'amount': amount_json(amount),
+        'currency': currency,
+    }
+    if account:
+        p['account'] = account
+    if note:
+        p['note'] = note
+    return p
+
+
+def save(path, records, ref, currency):
+    V.write_records(path, records, FENCE, ref, currency, key=KEY,
+                    sort_key=BY_RECEIVED, heading=HEADING)
+
+
+def append_payment(kind, name, payment):
+    ref = V.thread_ref(kind, name)
+    path = V.record_path(SUBDIR, kind, name)
+    save(path, V.read_records(path, FENCE, KEY) + [payment], ref, payment['currency'])
+    return path
+
+
+def report_logged(p, ref):
+    when = V.local(p['received']).strftime('%Y-%m-%d')
+    acct = f"  {p['account']}" if p.get('account') else ''
+    print(f"received {p['id']}  {ref}  {when}  "
+          f"{V.fmt_money(V.dec(p['amount']), p['currency'])}{acct}")
+
+
+# ---------- log ----------
+
+def cmd_log(args):
+    if not args.thread:
+        return cmd_log_interactive(args)
+    if args.amount is None:
+        sys.exit(f"{TOOL}: amount is required")
+
+    kind, name, tpath = V.resolve_target(TOOL, args.thread)
+    ref = V.thread_ref(kind, name)
+    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
+    amount = parse_amount(args.amount)
+    received = V.when_from_flags(TOOL, args.date, args.time)
+
+    p = build_payment(amount, received, currency, args.account,
+                      ' '.join(args.note).strip() if args.note else '', V.all_ids())
+    append_payment(kind, name, p)
+    report_logged(p, ref)
+
+
+def cmd_log_interactive(args):
+    kind, name, tpath = V.pick_thread(TOOL, include_all=args.all)
+    ref = V.thread_ref(kind, name)
+    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
+    amount = parse_amount(V.prompt(f"Amount ({currency})"))
+    date = V.prompt("Received (YYYY-MM-DD)", V.when_from_flags(
+        TOOL, None, None).strftime('%Y-%m-%d'))
+    account = V.prompt("Account (blank for none)", '') or ''
+    note = V.prompt("Note (blank for none)", '') or ''
+
+    p = build_payment(amount, V.when_from_flags(TOOL, date, args.time),
+                      currency, account.strip(), note.strip(), V.all_ids())
+    append_payment(kind, name, p)
+    report_logged(p, ref)
+
+
+# ---------- query ----------
+
+def collect(thread=None, since=None, until=None):
+    want = None
+    if thread:
+        kind, name, _ = V.resolve_target(TOOL, thread)
+        want = V.thread_ref(kind, name)
+    for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
+        if want and ref != want:
+            continue
+        if not p.get('received'):
+            continue
+        day = V.local(p['received']).strftime('%Y-%m-%d')
+        if since and day < since:
+            continue
+        if until and day > until:
+            continue
+        yield path, ref, p
+
+
+def as_row(ref, p):
+    return {
+        'id': p.get('id', ''),
+        'thread': ref,
+        'received': V.local(p['received']).strftime('%Y-%m-%d'),
+        'amount': float(V.dec(p.get('amount', 0))),
+        'currency': p.get('currency', ''),
+        'account': p.get('account', ''),
+        'note': p.get('note', ''),
+    }
+
+
+def cmd_list(args):
+    rows = [as_row(ref, p) for _, ref, p in
+            collect(args.thread, args.since, args.until)]
+    rows.sort(key=lambda r: (r['received'], r['thread']))
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no payments)")
+        return
+    tw = max(len(r['thread']) for r in rows)
+    aw = max(len(r['account']) for r in rows) or 1
+    print(f"{'ID':<9} {'RECEIVED':<11} {'THREAD':<{tw}}  {'AMOUNT':>16}  "
+          f"{'ACCOUNT':<{aw}}  NOTE")
+    for r in rows:
+        print(f"{r['id']:<9} {r['received']:<11} {r['thread']:<{tw}}  "
+              f"{V.fmt_money(r['amount'], r['currency']):>16}  "
+              f"{r['account']:<{aw}}  {r['note']}")
+
+
+def find_payment(pid):
+    for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
+        if p.get('id') == pid:
+            return path, ref, p
+    sys.exit(f"{TOOL}: no payment with id {pid!r}")
+
+
+def cmd_show(args):
+    _, ref, p = find_payment(args.id)
+    row = as_row(ref, p)
+    if args.json:
+        print(json.dumps(row, indent=2))
+        return
+    for k in ('id', 'thread', 'received', 'amount', 'currency', 'account', 'note'):
+        print(f"{k:<10} {row[k]}")
+
+
+def cmd_edit(args):
+    path, ref, _ = find_payment(args.id)
+    records = V.read_records(path, FENCE, KEY)
+    target = next(p for p in records if p.get('id') == args.id)
+
+    if args.amount is not None:
+        target['amount'] = amount_json(parse_amount(args.amount))
+    if args.currency is not None:
+        ccy = args.currency.upper()
+        if not re.match(r'^[A-Z]{3}$', ccy):
+            sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
+        target['currency'] = ccy
+    if args.account is not None:
+        target['account'] = args.account
+    if args.note is not None:
+        target['note'] = ' '.join(args.note).strip()
+    if args.date:
+        target['received'] = V.to_iso(V.when_from_flags(TOOL, args.date, args.time))
+
+    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
+    save(path, records, ref, fm.get('currency', target['currency']))
+    report_logged(target, ref)
+
+
+def cmd_rm(args):
+    path, ref, p = find_payment(args.id)
+    if not args.yes:
+        r = as_row(ref, p)
+        print(f"{r['id']}  {r['received']}  {r['thread']}  "
+              f"{V.fmt_money(r['amount'], r['currency'])}")
+        if input("delete? [y/N] ").strip().lower() not in ('y', 'yes'):
+            sys.exit("aborted")
+    records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
+    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
+    save(path, records, ref, fm.get('currency', ''))
+    print(f"deleted {args.id}")
+
+
+# ---------- statement ----------
+
+def billed(thread=None, since=None, until=None):
+    """Sum the `hours` side. Kept here rather than shelling out to `hours`,
+    but using the same Decimal arithmetic so the two agree exactly."""
+    out = {}
+    want = None
+    if thread:
+        kind, name, _ = V.resolve_target(TOOL, thread)
+        want = V.thread_ref(kind, name)
+    for _, ref, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
+        if want and ref != want:
+            continue
+        if not e.get('startTime') or not e.get('endTime'):
+            continue
+        day = V.local(e['startTime']).strftime('%Y-%m-%d')
+        if since and day < since:
+            continue
+        if until and day > until:
+            continue
+        mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
+        amt = V.dec(mins) / V.dec(60) * V.dec(e.get('rate', 0) or 0)
+        out.setdefault((ref, e.get('currency', '')), V.dec(0))
+        out[(ref, e.get('currency', ''))] += amt
+    return out
+
+
+def cmd_statement(args):
+    bill = billed(args.thread, args.since, args.until)
+    recv = {}
+    for _, ref, p in collect(args.thread, args.since, args.until):
+        key = (ref, p.get('currency', ''))
+        recv.setdefault(key, V.dec(0))
+        recv[key] += V.dec(p.get('amount', 0))
+
+    rows = []
+    for key in sorted(set(bill) | set(recv)):
+        ref, ccy = key
+        b, r = bill.get(key, V.dec(0)), recv.get(key, V.dec(0))
+        rows.append({'thread': ref, 'currency': ccy,
+                     'billed': b, 'received': r, 'outstanding': b - r})
+
+    if args.json:
+        print(json.dumps([{**x, 'billed': float(x['billed']),
+                           'received': float(x['received']),
+                           'outstanding': float(x['outstanding'])}
+                          for x in rows], indent=2))
+        return
+    if not rows:
+        print("(nothing to report)")
+        return
+    tw = max(len(x['thread']) for x in rows)
+    print(f"{'THREAD':<{tw}}  {'BILLED':>16}  {'RECEIVED':>16}  {'OUTSTANDING':>16}")
+    for x in rows:
+        print(f"{x['thread']:<{tw}}  "
+              f"{V.fmt_money(x['billed'], x['currency']):>16}  "
+              f"{V.fmt_money(x['received'], x['currency']):>16}  "
+              f"{V.fmt_money(x['outstanding'], x['currency']):>16}")
+    per_ccy = {}
+    for x in rows:
+        t = per_ccy.setdefault(x['currency'], {'b': V.dec(0), 'r': V.dec(0)})
+        t['b'] += x['billed']
+        t['r'] += x['received']
+    print()
+    for ccy, t in sorted(per_ccy.items()):
+        print(f"{'TOTAL ' + ccy:<{tw}}  {V.fmt_money(t['b'], ccy):>16}  "
+              f"{V.fmt_money(t['r'], ccy):>16}  "
+              f"{V.fmt_money(t['b'] - t['r'], ccy):>16}")
+
+
+# ---------- main ----------
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Record money received against threads.")
+    sub = p.add_subparsers(dest='subcommand', required=True)
+
+    log = sub.add_parser('log', help="Record a receipt (interactive if no thread).")
+    log.add_argument('thread', nargs='?', help="Thread name, 'Kind/Name', or wikilink.")
+    log.add_argument('amount', nargs='?', help="Amount received.")
+    log.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
+    log.add_argument('-d', '--date', help="Date received, YYYY-MM-DD (default today).")
+    log.add_argument('-t', '--time', help="HH:MM (default now).")
+    log.add_argument('-a', '--account', help="Which account it landed in.")
+    log.add_argument('-n', '--note', nargs='*', help="Free-text note.")
+    log.add_argument('--all', action='store_true',
+                     help="Interactive: list paused/closed threads too.")
+    log.set_defaults(func=cmd_log)
+
+    ls = sub.add_parser('list', help="List payments.")
+    ls.add_argument('thread', nargs='?')
+    ls.add_argument('--since')
+    ls.add_argument('--until')
+    ls.add_argument('--json', action='store_true')
+    ls.set_defaults(func=cmd_list)
+
+    st = sub.add_parser('statement', help="Billed vs received, by thread and currency.")
+    st.add_argument('--thread')
+    st.add_argument('--since')
+    st.add_argument('--until')
+    st.add_argument('--json', action='store_true')
+    st.set_defaults(func=cmd_statement)
+
+    sh = sub.add_parser('show', help="Show one payment.")
+    sh.add_argument('id')
+    sh.add_argument('--json', action='store_true')
+    sh.set_defaults(func=cmd_show)
+
+    ed = sub.add_parser('edit', help="Change one field of a payment.")
+    ed.add_argument('id')
+    ed.add_argument('--amount')
+    ed.add_argument('-c', '--currency')
+    ed.add_argument('-d', '--date')
+    ed.add_argument('-t', '--time')
+    ed.add_argument('-a', '--account')
+    ed.add_argument('-n', '--note', nargs='*')
+    ed.set_defaults(func=cmd_edit)
+
+    rm = sub.add_parser('rm', help="Delete a payment.")
+    rm.add_argument('id')
+    rm.add_argument('-y', '--yes', action='store_true')
+    rm.set_defaults(func=cmd_rm)
+
+    emit_helpjson_if_requested(p)
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == '__main__':
+    main()

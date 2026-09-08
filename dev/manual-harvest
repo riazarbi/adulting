@@ -16,8 +16,14 @@ Sources, in order of authority for the command surface:
   5. constants in the sources     vault paths, environment variables
   6. README.md                    authored background prose
 
+Harvesting is the expensive step: it executes every operator binary and each
+of their subcommands. --from-json re-renders a previously harvested corpus
+without running anything, so a pipeline that needs both formats pays for the
+binaries once.
+
 Usage:
     dev/manual-harvest [--format md|json] [--out FILE]
+    dev/manual-harvest --from-json corpus.json --format md
 """
 
 import argparse
@@ -285,9 +291,13 @@ def main():
     ap.add_argument('--format', choices=['md', 'json'], default='md',
                     help='Output format (default: md).')
     ap.add_argument('--out', help='Write here instead of stdout.')
+    ap.add_argument('--from-json', metavar='FILE',
+                    help='Render this previously harvested JSON corpus '
+                         'instead of running the binaries again.')
     args = ap.parse_args()
 
-    data = harvest()
+    data = (json.loads(Path(args.from_json).read_text(encoding='utf-8'))
+            if args.from_json else harvest())
     text = render_md(data) if args.format == 'md' else json.dumps(data, indent=2) + '\n'
     if args.out:
         Path(args.out).write_text(text, encoding='utf-8')

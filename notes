@@ -7,7 +7,7 @@ if [ "$1" = "--help-json" ]; then
 cat <<'EOF'
 {
   "name": "notes",
-  "description": "Dispatcher for note operations: create, render, edit, query.",
+  "description": "Dispatcher for note operations: create, render, edit, query. With no subcommand, runs `new`. Every subcommand except `last` opens an interactive picker and reads a selection from stdin, so only `last` is usable without a TTY.",
   "args": [
     {"name": "subcommand", "description": "One of the named operations below.", "required": false, "nargs": null},
     {"name": "filter", "description": "Optional substring filter for the picker (case-insensitive).", "required": false, "nargs": null}
@@ -18,12 +18,12 @@ cat <<'EOF'
     {"name": "strip", "description": "Pick a note, copy and remove body — for templating (interactive)."},
     {"name": "edit", "description": "Pick a note, open in the default editor (interactive)."},
     {"name": "nano", "description": "Pick a note, open in nano (interactive)."},
-    {"name": "last", "description": "Open the most recently-created note."},
+    {"name": "last", "description": "Open the most recently-created note. The only non-interactive subcommand."},
     {"name": "delete", "description": "Pick a note and permanently delete (interactive)."},
-    {"name": "cat", "description": "Pick a note and print to stdout."},
-    {"name": "pdf", "description": "Pick a note and render to PDF + markdown."},
-    {"name": "minutes", "description": "Render meeting minutes (TOC + AGREED/RESOLVED/ACTION summary)."},
-    {"name": "agenda", "description": "Render meeting agenda."}
+    {"name": "cat", "description": "Pick a note and print to stdout (interactive)."},
+    {"name": "pdf", "description": "Pick a note and render to PDF + markdown (interactive)."},
+    {"name": "minutes", "description": "Pick a note and render meeting minutes: TOC + AGREED/RESOLVED/ACTION summary (interactive)."},
+    {"name": "agenda", "description": "Pick a note and render a meeting agenda (interactive)."}
   ]
 }
 EOF

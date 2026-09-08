@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Generate the agent tool definitions in dev/tools/.
+
+Developer tool. Not on the operator's PATH, not documented in the manual.
+
+One JSON file per operator tool, in the schema the agent's shell tool loader
+accepts. The loader rejects unknown fields, and every shell tool shares a
+single `args: []string` input — so the description string is the only channel
+for teaching the model the interface, and it has to carry real weight.
+
+Pipeline, deliberately split by how much judgement each part needs:
+
+    dev/manual-harvest  ->  corpus            (same corpus MANUAL.md is built
+                                               from, so the two stay in sync)
+    corpus + dev/tools-prompt.md  ->  claude  ->  descriptions
+    POLICY (below)                            ->  safety fields
+
+Descriptions are written by the model because summarising a CLI well is a
+judgement call. The safety fields are NOT: read_only and forbidden_args
+decide whether an agent can delete a file or hang on a prompt, so they are
+declared here, reviewed in code review, and validated on the way out.
+
+Usage:
+    dev/tools-build [--out dev/tools] [--model opus] [--corpus FILE]
+                    [--use-api-key] [--dry-run]
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+HARVEST = REPO / 'dev' / 'manual-harvest'
+PROMPT = REPO / 'dev' / 'tools-prompt.md'
+
+# Fields the agent's loader accepts. It calls DisallowUnknownFields, so
+# anything else here is a hard load error on the agent side.
+ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
+                  'prepend_args', 'forbidden_args', 'allow_user_args'}
+
+API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
+
+# Safety policy. Deliberately hand-maintained: these fields are the blast
+# radius, and a generated guess at them is worse than no guess.
+#
+#   read_only       tool never mutates the vault
+#   forbidden_args  argv elements the agent may not pass. The loader matches
+#                   these exactly against any element, so listing a
+#                   subcommand name blocks that subcommand. It also blocks
+#                   the same word used as a filter, which is an acceptable
+#                   trade for not letting an agent delete a note.
+POLICY = {
+    'tasks': {},
+    # Every notes subcommand except `last` opens a picker and reads a
+    # selection from stdin. With no TTY the read takes EOF and the script
+    # carries on with a garbage selection rather than failing, so these are
+    # blocked outright rather than merely discouraged.
+    'notes': {'forbidden_args': ['new', 'copy', 'strip', 'edit', 'nano',
+                                 'delete', 'cat', 'pdf', 'minutes',
+                                 'agenda']},
+    'threads': {'forbidden_args': ['delete']},
+    'people': {'forbidden_args': ['delete']},
+    'hours': {},
+    'payments': {},
+    'buffer': {},
+    'lint': {'read_only': True},
+    'commit': {},
+}
+
+
+def rel(path):
+    """Repo-relative display path, falling back to the full path."""
+    try:
+        return path.resolve().relative_to(REPO)
+    except ValueError:
+        return path
+
+
+def die(msg, code=1):
+    print(f"tools-build: error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def harvest():
+    p = subprocess.run([str(HARVEST), '--format', 'md'],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        die(f"harvest failed: {p.stderr.strip()}")
+    return p.stdout
+
+
+def operator_tools(corpus):
+    """The tool list the corpus declares. Single source of truth for scope."""
+    m = re.search(r'^Operator tools: (.+)$', corpus, re.M)
+    if not m:
+        die("corpus does not declare an 'Operator tools:' line")
+    return [t.strip() for t in m.group(1).split(',')]
+
+
+def generate(corpus, model, use_api_key):
+    claude = shutil.which('claude')
+    if not claude:
+        die("the `claude` CLI is not on PATH; cannot generate tool definitions")
+    with tempfile.TemporaryDirectory() as sandbox:
+        cmd = [claude, '-p', corpus,
+               '--model', model,
+               '--system-prompt', PROMPT.read_text(encoding='utf-8'),
+               '--output-format', 'text',
+               '--allowedTools', '']
+        env = dict(os.environ)
+        env.pop('ADULTING_HOME', None)
+        if not use_api_key:
+            for var in API_KEY_VARS:
+                env.pop(var, None)
+        p = subprocess.run(cmd, capture_output=True, text=True,
+                           cwd=sandbox, env=env)
+    if p.returncode != 0:
+        die(f"claude failed (rc={p.returncode}): {p.stderr.strip()[:2000]}")
+    return p.stdout
+
+
+def parse_descriptions(text):
+    """Pull the JSON object out of the model's reply."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```[a-zA-Z]*\n', '', text)
+        text = re.sub(r'\n```$', '', text)
+    start, end = text.find('{'), text.rfind('}')
+    if start < 0 or end < 0:
+        die("model reply contained no JSON object")
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as e:
+        die(f"model reply was not valid JSON: {e}")
+    if not isinstance(data, dict):
+        die("model reply was not a JSON object")
+    return data
+
+
+def build(tool, description):
+    """Assemble one tool definition: generated prose + declared policy."""
+    out = {'command': tool, 'description': description.strip() + '\n'}
+    out.update(POLICY.get(tool, {}))
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Generate agent tool definitions into dev/tools/.")
+    ap.add_argument('--out', default=str(REPO / 'dev' / 'tools'),
+                    help='Directory to write into (default: dev/tools).')
+    ap.add_argument('--model', default='opus', help='Model alias (default: opus).')
+    ap.add_argument('--corpus', help='Use this corpus file instead of harvesting.')
+    ap.add_argument('--use-api-key', action='store_true',
+                    help='Authenticate with ANTHROPIC_API_KEY from the '
+                         'environment instead of your Claude subscription.')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='Harvest and report scope, then stop. No model call.')
+    args = ap.parse_args()
+
+    corpus = (Path(args.corpus).read_text(encoding='utf-8') if args.corpus
+              else harvest())
+    tools = operator_tools(corpus)
+    print(f"corpus: {len(corpus)} bytes; {len(tools)} tool(s): "
+          f"{', '.join(tools)}", file=sys.stderr)
+
+    missing = [t for t in tools if t not in POLICY]
+    if missing:
+        die(f"no safety policy declared for: {', '.join(missing)}. "
+            f"Add an entry to POLICY in {Path(__file__).name} — a new tool "
+            f"must have its blast radius decided deliberately.")
+    if args.dry_run:
+        return
+
+    auth = 'API key' if args.use_api_key else 'Claude subscription'
+    print(f"generating with {args.model} via {auth} ...", file=sys.stderr)
+    descriptions = parse_descriptions(generate(corpus, args.model, args.use_api_key))
+
+    absent = [t for t in tools if t not in descriptions]
+    if absent:
+        die(f"model omitted descriptions for: {', '.join(absent)}")
+
+    out_dir = Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Clear stale definitions so a removed tool cannot linger on disk.
+    for stale in out_dir.glob('*.json'):
+        if stale.stem not in tools:
+            stale.unlink()
+            print(f"  removed stale {stale.name}", file=sys.stderr)
+
+    for tool in tools:
+        path = out_dir / f"{tool}.json"
+        path.write_text(json.dumps(build(tool, descriptions[tool]), indent=2)
+                        + '\n', encoding='utf-8')
+        print(f"  wrote {rel(path)} "
+              f"({len(descriptions[tool])} chars of description)",
+              file=sys.stderr)
+
+    print(f"\nbuilt {len(tools)} tool definition(s) in {rel(out_dir)}.",
+          file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

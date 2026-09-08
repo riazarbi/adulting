@@ -1,0 +1,7 @@
+{
+  "command": "people",
+  "description": "Manage person files in people/. People are link targets for note.people and task assignees; they cannot be threads.\n\nSubcommands:\n  list [QUERY] [--all] [--json] \u2014 list person files, open only by default; QUERY is a fuzzy search that ranks by similarity\n  show PERSON [--json] \u2014 show one person file; PERSON is the full name, matching the filename without .md\n  new [--name N] [--category C] \u2014 create a person file; prompts interactively for any field not supplied\n  delete PERSON [-y] \u2014 permanently delete a person file\n\nFlags:\n  list: --all include closed people; --json JSON output.\n  show: --json JSON output.\n  new: --name FULL NAME; --category one of professional, personal, voluntary.\n  delete: -y skip the confirmation prompt.\n\nExamples:\n  [\"list\", \"--json\"]\n  [\"show\", \"Riaz Arbi\", \"--json\"]\n  [\"new\", \"--name\", \"Riaz Arbi\", \"--category\", \"professional\"]\n  [\"delete\", \"Old Contact\", \"-y\"]\n\nNotes:\n  `new` prompts on stdin for any omitted field \u2014 always pass both --name and --category.\n  `delete` is destructive and prompts unless -y is given.\n  A person file must exist before that name can be used as a task assignee; `tasks set-assignee` exits 1 if it does not resolve.\n",
+  "forbidden_args": [
+    "delete"
+  ]
+}

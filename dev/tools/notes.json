@@ -1,0 +1,16 @@
+{
+  "command": "notes",
+  "description": "Dispatcher for note operations: create, render, edit, query notes in notes/. With no subcommand it runs `new`.\n\nSubcommands:\n  new \u2014 create a new note and open it (INTERACTIVE)\n  copy [FILTER] \u2014 pick a note, copy contents to a new timestamped note (INTERACTIVE)\n  strip [FILTER] \u2014 pick a note, copy it with the body removed, for templating (INTERACTIVE)\n  edit [FILTER] \u2014 pick a note, open in the default editor (INTERACTIVE)\n  nano [FILTER] \u2014 pick a note, open in nano (INTERACTIVE)\n  last \u2014 open the most recently-created note; the only non-interactive subcommand\n  delete [FILTER] \u2014 pick a note and permanently delete it (INTERACTIVE, DESTRUCTIVE)\n  cat [FILTER] \u2014 pick a note and print it to stdout (INTERACTIVE)\n  pdf [FILTER] \u2014 pick a note, render to PDF + markdown (INTERACTIVE)\n  minutes [FILTER] \u2014 pick a note, render meeting minutes: TOC plus AGREED/RESOLVED/ACTION summary (INTERACTIVE)\n  agenda [FILTER] \u2014 pick a note, render a meeting agenda (INTERACTIVE)\n\nArgs:\n  SUBCOMMAND \u2014 optional; defaults to new\n  FILTER \u2014 optional case-insensitive substring filter applied to the picker list\n\nBody keywords recognised in a note: ACTION: (ingested by `tasks`), TASK: (already ingested; never write by hand), AGREED:, RESOLVED:, !: (callout surfaced in pdf).\n\nRendering output goes to the export directory, default the user's Downloads folder. pdf, minutes and agenda need pandoc and a LaTeX engine.\n\nExamples:\n  [\"last\"]\n\nNotes:\n  Every subcommand except `last` opens an interactive picker that reads a selection from stdin. With no TTY they consume EOF and behave unpredictably instead of failing \u2014 never call them. Only [\"last\"] is safe.\n  To create or edit note content without a TTY, capture through `buffer` (add-text, add-action, add-ref) and run `buffer flush`, or edit the note file directly.\n  Invoking with no arguments runs `new`, which is interactive \u2014 never call with an empty array.\n",
+  "forbidden_args": [
+    "new",
+    "copy",
+    "strip",
+    "edit",
+    "nano",
+    "delete",
+    "cat",
+    "pdf",
+    "minutes",
+    "agenda"
+  ]
+}

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Validate the committed agent tool definitions in dev/tools/.
+
+Developer tool. Runs in the CI gate: no model call, no network, fast — so
+every push checks that what is committed is something the agent can actually
+load, and that it still matches the tools in this repo.
+
+Checks, all fatal:
+  schema     only fields the agent's loader accepts, with the right types
+  naming     filename stem == "command" (the loader derives the name from
+             the filename, so a mismatch silently misnames the tool)
+  scope      exactly one file per operator tool; no extras, none missing
+  content    description non-empty, names every subcommand the tool reports,
+             and mentions each of the tool's own flags
+  hygiene    no absolute filesystem paths baked into a description
+  policy     forbidden_args name real subcommands of that tool
+
+Usage:
+    dev/tools-check [--dir dev/tools] [--corpus-json FILE]
+
+With no --corpus-json it harvests the tree itself, which is what the CI gate
+wants: the committed definitions are checked against the code as it stands.
+A pipeline that has already harvested can pass that corpus in to avoid
+re-running every binary.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
+                  'prepend_args', 'forbidden_args', 'allow_user_args'}
+BOOL_FIELDS = {'builtin', 'read_only', 'allow_user_args'}
+LIST_FIELDS = {'prepend_args', 'forbidden_args'}
+
+# Matches an absolute path that would have come from the build machine.
+ABS_PATH_RE = re.compile(r'(?<![\w/])/(?:Users|home|private|var|opt)/\S+')
+
+
+def operator_tools(corpus_json=None):
+    """The harvested view of the repo, so scope has one definition."""
+    if corpus_json:
+        return json.loads(Path(corpus_json).read_text(encoding='utf-8'))
+    p = subprocess.run([str(REPO / 'dev' / 'manual-harvest'), '--format', 'json'],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.exit(f"tools-check: harvest failed: {p.stderr.strip()}")
+    return json.loads(p.stdout)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Validate dev/tools/ definitions.")
+    ap.add_argument('--dir', default=str(REPO / 'dev' / 'tools'))
+    ap.add_argument('--corpus-json', metavar='FILE',
+                    help='Validate against this harvested JSON corpus '
+                         'instead of harvesting the tree again.')
+    args = ap.parse_args()
+
+    d = Path(args.dir)
+    if not d.is_dir():
+        sys.exit(f"tools-check: {d} does not exist. Run dev/tools-build.")
+
+    harvested = operator_tools(args.corpus_json)
+    expected = list(harvested['operator_tools'])
+    manifests = {t['name']: t['help_json'] for t in harvested['tools']}
+
+    errors = []
+    found = sorted(p.stem for p in d.glob('*.json'))
+
+    for missing in [t for t in expected if t not in found]:
+        errors.append(f"{missing}.json: missing (tool exists in the repo)")
+    for extra in [t for t in found if t not in expected]:
+        errors.append(f"{extra}.json: not an operator tool of this repo")
+
+    for tool in [t for t in expected if t in found]:
+        path = d / f"{tool}.json"
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except json.JSONDecodeError as e:
+            errors.append(f"{path.name}: invalid JSON: {e}")
+            continue
+
+        unknown = set(data) - ALLOWED_FIELDS
+        if unknown:
+            errors.append(f"{path.name}: fields the agent loader rejects: "
+                          f"{', '.join(sorted(unknown))}")
+        for field in BOOL_FIELDS & set(data):
+            if not isinstance(data[field], bool):
+                errors.append(f"{path.name}: {field} must be a boolean")
+        for field in LIST_FIELDS & set(data):
+            if not (isinstance(data[field], list)
+                    and all(isinstance(x, str) for x in data[field])):
+                errors.append(f"{path.name}: {field} must be a list of strings")
+
+        if data.get('command') != tool:
+            errors.append(f"{path.name}: command is {data.get('command')!r}, "
+                          f"but the loader will name this tool {tool!r}")
+
+        desc = data.get('description', '')
+        if not desc.strip():
+            errors.append(f"{path.name}: description is empty")
+            continue
+
+        for m in ABS_PATH_RE.findall(desc):
+            errors.append(f"{path.name}: description leaks a build-machine "
+                          f"path: {m}")
+
+        manifest = manifests.get(tool, {})
+        subs = [s['name'] for s in manifest.get('subcommands', [])]
+        for sub in subs:
+            if not re.search(rf'(?<![\w-]){re.escape(sub)}(?![\w-])', desc):
+                errors.append(f"{path.name}: description never mentions "
+                              f"subcommand {sub!r}")
+        for flag in [f['name'] for f in manifest.get('flags', [])]:
+            if flag in ('--help-json',) or flag in desc:
+                continue
+            errors.append(f"{path.name}: description never mentions flag {flag!r}")
+
+        for bad in data.get('forbidden_args', []):
+            if subs and bad not in subs:
+                errors.append(f"{path.name}: forbidden_args entry {bad!r} is "
+                              f"not a subcommand of {tool}")
+
+    if errors:
+        print(f"\033[31m{len(errors)} problem(s):\033[0m", file=sys.stderr)
+        for e in errors:
+            print(f"  {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"dev/tools: {len(expected)} definition(s) valid.")
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,5 @@
+{
+  "command": "lint",
+  "description": "Validate vault files against the schemas directory.\n\nUsage: [PATH ...] \u2014 with no paths, walks the whole vault and validates everything.\n\nArgs:\n  PATHS \u2014 zero or more files to validate.\n\nFlags:\n  --schemas DIR \u2014 schemas directory; defaults to the schemas directory shipped alongside the tools.\n  --quiet \u2014 suppress per-violation output, leaving only the exit code.\n\nViolations print as <path>:<line>: <message>.\n\nExamples:\n  []\n  [\"--quiet\"]\n  [\"notes/2026-06-01-14-30-00.md\"]\n\nNotes:\n  Exit 0 means clean, exit 1 means violations were found, exit 2 is a tool-level failure.\n  Read-only; it never rewrites files.\n  Run after `buffer flush` and after `tasks` ingest to confirm the vault still validates.\n",
+  "read_only": true
+}

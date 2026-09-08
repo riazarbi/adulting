@@ -108,17 +108,11 @@ open_note() {
     fi
 }
 
-# Nano  note
+# Nano  note. $1 is the note's full path.
 nano_note() {
-    # Check the operating system
-    if [[ $(uname) == "Linux" ]]; then
-        nano -"$@" note
-        #open -g $note
-    elif [[ $(uname) == "Darwin" ]]; then
-        nano "$@" note
-        #open -g $note
+    if [[ $(uname) == "Linux" || $(uname) == "Darwin" ]]; then
+        nano "$1"
     else
-        # If it's neither Linux nor macOS, print an error message
         echo "Unsupported operating system"
     fi
 }

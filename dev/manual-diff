@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Compare two generated manuals structurally.
+
+Developer tool, used while tuning dev/manual-prompt.md. An LLM never emits
+the same words twice, so byte-diffing two runs tells you nothing. What must
+be stable is the *shape*: the same headings in the same order, sections of
+roughly the same size, and the same set of commands documented.
+
+Reports, and exits non-zero if any check fails:
+  - headings      identical heading tree (text and order)
+  - commands      identical set of `tool subcommand` pairs mentioned
+  - size          per-section word counts within a tolerance
+  - leakage       no developer-tool names anywhere
+
+Usage:
+    dev/manual-diff A.md B.md [--tolerance 0.35]
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+# Names the manual must never contain: the machinery that produces it.
+FORBIDDEN = ['manual-harvest', 'manual-build', 'manual-diff', 'manual-prompt',
+             'ci.sh', 'agent-build', 'help-json']
+
+OPERATOR_TOOLS = ['tasks', 'notes', 'threads', 'people', 'hours', 'payments',
+                  'buffer', 'lint', 'commit']
+
+# A command is only counted where it is presented as code — a fenced block
+# or inline backticks. Matching bare prose picks up phrases like "tasks whose
+# source note" and drowns the signal.
+CMD_RE = re.compile(
+    r'^(' + '|'.join(OPERATOR_TOOLS) + r')(?:\s+([a-z][a-z-]{1,24}))?\b')
+
+
+def headings(text):
+    return [(len(m.group(1)), m.group(2).strip())
+            for m in re.finditer(r'^(#{1,3})\s+(.+)$', text, re.M)]
+
+
+def sections(text):
+    """Map top-level heading -> word count of its body."""
+    out, current, buf = {}, None, []
+    for line in text.splitlines():
+        m = re.match(r'^##\s+(.+)$', line)
+        if m:
+            if current:
+                out[current] = len(' '.join(buf).split())
+            current, buf = m.group(1).strip(), []
+        elif current:
+            buf.append(line)
+    if current:
+        out[current] = len(' '.join(buf).split())
+    return out
+
+
+def code_spans(text):
+    """Every fenced block body and every inline-backtick span."""
+    spans = re.findall(r'^```[a-zA-Z]*\n(.*?)^```', text, re.M | re.S)
+    spans += re.findall(r'`([^`\n]+)`', text)
+    return spans
+
+
+def commands(text):
+    """Every `tool [subcommand]` invocation the manual presents as code."""
+    found = set()
+    for span in code_spans(text):
+        for line in span.splitlines():
+            m = CMD_RE.match(line.strip())
+            if m:
+                found.add(f"{m.group(1)} {m.group(2)}" if m.group(2)
+                          else m.group(1))
+    return found
+
+
+def leakage(text):
+    low = text.lower()
+    return sorted({w for w in FORBIDDEN if w in low})
+
+
+def report(label, ok, detail=''):
+    mark = '\033[32mOK  \033[0m' if ok else '\033[31mDIFF\033[0m'
+    print(f"{mark} {label}")
+    if detail:
+        print(detail)
+    return ok
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Structurally compare two manuals.")
+    ap.add_argument('a')
+    ap.add_argument('b')
+    ap.add_argument('--tolerance', type=float, default=0.35,
+                    help='Allowed fractional drift in section word count.')
+    args = ap.parse_args()
+
+    a = Path(args.a).read_text(encoding='utf-8')
+    b = Path(args.b).read_text(encoding='utf-8')
+    passed = True
+
+    ha, hb = headings(a), headings(b)
+    if ha == hb:
+        passed &= report(f"headings ({len(ha)} identical)", True)
+    else:
+        only_a = [h for h in ha if h not in hb]
+        only_b = [h for h in hb if h not in ha]
+        detail = ''.join(f"       only in A: {'#'*l} {t}\n" for l, t in only_a)
+        detail += ''.join(f"       only in B: {'#'*l} {t}\n" for l, t in only_b)
+        if not detail:
+            detail = "       same headings, different order\n"
+        passed &= report("headings", False, detail.rstrip())
+
+    ca, cb = commands(a), commands(b)
+    if ca == cb:
+        passed &= report(f"commands ({len(ca)} identical)", True)
+    else:
+        detail = ''.join(f"       only in A: {c}\n" for c in sorted(ca - cb))
+        detail += ''.join(f"       only in B: {c}\n" for c in sorted(cb - ca))
+        passed &= report("commands", False, detail.rstrip())
+
+    sa, sb = sections(a), sections(b)
+    drifted = []
+    for k in sorted(set(sa) | set(sb)):
+        wa, wb = sa.get(k, 0), sb.get(k, 0)
+        base = max(wa, wb, 1)
+        if abs(wa - wb) / base > args.tolerance:
+            drifted.append(f"       {k}: {wa} -> {wb} words")
+    passed &= report(f"section sizes (tolerance {args.tolerance:.0%})",
+                     not drifted, '\n'.join(drifted))
+
+    la, lb = leakage(a), leakage(b)
+    passed &= report("no developer-tool leakage",
+                     not la and not lb,
+                     f"       A leaks: {la}\n       B leaks: {lb}"
+                     if (la or lb) else '')
+
+    print(f"\nA: {len(a.split())} words / {len(a.splitlines())} lines")
+    print(f"B: {len(b.split())} words / {len(b.splitlines())} lines")
+    sys.exit(0 if passed else 1)
+
+
+if __name__ == '__main__':
+    main()

@@ -49,12 +49,12 @@ Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files wi
 | Field        | Required | Notes                                                                                  |
 |--------------|----------|----------------------------------------------------------------------------------------|
 | topic        | yes      | Free-form title                                                                        |
-| type         | yes      | `Meeting`, `Correspondence`, `Workshop`, `Report`, `Log`, `Research`                   |
-| thread       | yes      | Single wikilink `[[Projects/X]]` / `[[Processes/Y]]` / `[[Topics/Z]]`                  |
+| type         | yes      | `Meeting`, `Correspondence`, `Workshop`, `Report`, `Log`, `Research`, `Recipe`         |
+| threads      | yes      | List of wikilinks `[[Projects/X]]` / `[[Processes/Y]]` / `[[Topics/Z]]`; a note may belong to several |
 | timestamp    | yes      | `YYYY-MM-DD-HH-MM-SS`, matches filename prefix                                         |
 | people       | optional | List of wikilinks `[[people/<name>]]` (or plain strings for untracked attendees)       |
 | counterparty | optional | Meeting only                                                                           |
-| location     | yes      | Meeting only                                                                           |
+| location     | optional | Meeting only                                                                           |
 
 ### Body keywords
 
@@ -297,7 +297,8 @@ The visible top level (what Obsidian shows in its sidebar) is only user content:
 |-------------------------------|-----------------------------------------------------------------|
 | `note_meeting.md`             | Meeting notes                                                   |
 | `note_correspondence.md`      | Correspondence notes                                            |
-| `note_simple.md`              | Workshop / Report / Log / Research notes                        |
+| `note_simple.md`              | Workshop / Report / Log / Research / Recipe notes                |
+| `log.md`                      | Per-thread per-day log files in `logs/`                         |
 | `thread.md`                   | Thread files in `threads/{Projects,Processes,Topics}/`          |
 | `person.md`                   | Person files in `people/`                                       |
 | `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |

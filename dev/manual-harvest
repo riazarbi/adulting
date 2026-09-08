@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Harvest every fact needed to write the operators manual.
+
+Developer tool. Not on the operator's PATH, not documented in the manual.
+
+Emits a single corpus — markdown by default, JSON with --format json — built
+entirely from the codebase, so the same tree always produces the same corpus.
+The corpus is the *only* input the manual writer is given: if a fact is not in
+here, it cannot end up in the manual.
+
+Sources, in order of authority for the command surface:
+  1. `<tool> --help-json`        structured argparse manifest (authoritative)
+  2. `<tool> --help` (+ per-subcommand --help)  rendered usage text
+  3. the tool's module docstring  intent, worked examples
+  4. schemas/*.md                 on-disk data formats
+  5. constants in the sources     vault paths, environment variables
+  6. README.md                    authored background prose
+
+Usage:
+    dev/manual-harvest [--format md|json] [--out FILE]
+"""
+
+import argparse
+import ast
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+# The operator surface. agent-build, and everything under dev/, are developer
+# tools and are deliberately absent — they must not appear in the manual.
+TOOLS = ['tasks', 'notes', 'threads', 'people', 'hours', 'payments',
+         'buffer', 'lint', 'commit']
+
+# README sections worth carrying as background. Everything else in the README
+# is either install boilerplate or restates the command surface.
+README_SECTIONS = ['Conceptual model', 'Dependencies', 'Data store',
+                   'Schemas', 'Vault hygiene', 'Known issues', 'Design goals']
+
+
+def run(binary, args):
+    """Run a repo binary, return (rc, stdout, stderr). Never raises."""
+    env = dict(os.environ)
+    env['COLUMNS'] = '100'          # pin argparse wrapping so output is stable
+    env.pop('ADULTING_HOME', None)  # keep default-path help text stable
+    try:
+        p = subprocess.run([str(REPO / binary)] + args, capture_output=True,
+                           text=True, env=env, timeout=20,
+                           stdin=subprocess.DEVNULL)
+        return p.returncode, p.stdout, p.stderr
+    except Exception as e:  # noqa: BLE001 - a broken tool must not abort harvest
+        return 127, '', str(e)
+
+
+def help_json(tool):
+    rc, out, err = run(tool, ['--help-json'])
+    if rc != 0:
+        sys.exit(f"error: {tool} --help-json failed (rc={rc}): {err.strip()}")
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: {tool} --help-json emitted invalid JSON: {e}")
+
+
+def help_text(tool, subcommand=None):
+    argv = ([subcommand] if subcommand else []) + ['--help']
+    rc, out, err = run(tool, argv)
+    text = (out or err).strip()
+    return text if rc == 0 and text else None
+
+
+def docstring(tool):
+    """Module docstring for a python tool; leading comment block for bash."""
+    src = (REPO / tool).read_text(encoding='utf-8')
+    if src.startswith('#!/usr/bin/env python'):
+        try:
+            return (ast.get_docstring(ast.parse(src)) or '').strip() or None
+        except SyntaxError:
+            return None
+    lines = src.splitlines()[1:]
+    block = []
+    for line in lines:
+        if line.startswith('#'):
+            block.append(line.lstrip('#').strip())
+        elif block:
+            break
+        elif line.strip():
+            break
+    return '\n'.join(block).strip() or None
+
+
+def exit_codes(tool):
+    """Distinct non-zero exit codes, each with the source line that raises it.
+
+    Python tools are parsed with ast; bash tools are grepped. Only literal
+    integer codes are reported — anything computed is left out rather than
+    guessed at.
+    """
+    src = (REPO / tool).read_text(encoding='utf-8')
+    lines = src.splitlines()
+    found = {}
+    if src.startswith('#!/usr/bin/env python'):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            return []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = (fn.attr if isinstance(fn, ast.Attribute) else
+                    fn.id if isinstance(fn, ast.Name) else None)
+            if name not in ('exit', 'die'):
+                continue
+            code = None
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, int):
+                    code = arg.value
+            for kw in node.keywords:
+                if kw.arg == 'code' and isinstance(kw.value, ast.Constant):
+                    code = kw.value.value
+            if code is None and name == 'die':
+                code = 1  # die()'s documented default across these tools
+            if not isinstance(code, int) or code == 0:
+                continue
+            found.setdefault(code, set()).add(
+                lines[node.lineno - 1].strip()[:120])
+    else:
+        for line in lines:
+            m = re.search(r'\bexit\s+([1-9][0-9]*)\b', line)
+            if m:
+                found.setdefault(int(m.group(1)), set()).add(line.strip()[:120])
+    return [{'code': c, 'raised_at': sorted(found[c])[:6]}
+            for c in sorted(found)]
+
+
+def vault_paths(tool):
+    """Vault subdirectories the tool reads or writes, from its constants."""
+    src = (REPO / tool).read_text(encoding='utf-8')
+    hits = set(re.findall(r"HOME\s*/\s*'([^']+)'", src))
+    hits |= set(re.findall(r'\$ADULTING_HOME/([A-Za-z0-9_./-]+)', src))
+    return sorted(hits)
+
+
+def env_vars(tool):
+    src = (REPO / tool).read_text(encoding='utf-8')
+    hits = set(re.findall(r"environ(?:\.get)?[\(\[]\s*'([A-Z][A-Z0-9_]*)'", src))
+    hits |= set(re.findall(r'\$\{([A-Z][A-Z0-9_]*):-', src))
+    return sorted(hits)
+
+
+def subcommand_names(manifest):
+    return [s['name'] for s in manifest.get('subcommands', [])]
+
+
+def harvest_tool(tool):
+    manifest = help_json(tool)
+    is_python = (REPO / tool).read_text(
+        encoding='utf-8').startswith('#!/usr/bin/env python')
+    # Only argparse tools get their subcommands probed. Bash dispatchers have
+    # no per-subcommand --help and several subcommands are interactive, so
+    # invoking them would block; their manifest is hand-maintained instead.
+    subs = subcommand_names(manifest) if is_python else []
+    return {
+        'name': tool,
+        'interpreter': 'python3' if is_python else 'bash',
+        'docstring': docstring(tool),
+        'help_json': manifest,
+        'help_text': help_text(tool),
+        'subcommand_help': {s: t for s in subs
+                            if (t := help_text(tool, s)) is not None},
+        'exit_codes': exit_codes(tool),
+        'vault_paths': vault_paths(tool),
+        'env_vars': env_vars(tool),
+    }
+
+
+def harvest_schemas():
+    out = []
+    for path in sorted((REPO / 'schemas').glob('*.md')):
+        out.append({'name': path.stem, 'text': path.read_text(encoding='utf-8').strip()})
+    return out
+
+
+def harvest_readme():
+    text = (REPO / 'README.md').read_text(encoding='utf-8')
+    # Split on ATX headings, keep each section with its heading.
+    parts = re.split(r'^(#{1,3} .+)$', text, flags=re.M)
+    sections = []
+    for i in range(1, len(parts), 2):
+        heading = parts[i].lstrip('#').strip()
+        if heading in README_SECTIONS:
+            sections.append({'heading': heading,
+                             'text': parts[i + 1].strip()})
+    return sections
+
+
+def harvest():
+    return {
+        'repo': 'adulting',
+        'operator_tools': TOOLS,
+        'tools': [harvest_tool(t) for t in TOOLS],
+        'schemas': harvest_schemas(),
+        'readme_sections': harvest_readme(),
+    }
+
+
+# ---- markdown rendering ----
+
+def fence(text, lang=''):
+    return f"```{lang}\n{text.rstrip()}\n```"
+
+
+def render_md(data):
+    L = []
+    w = L.append
+    w("# Manual corpus")
+    w("")
+    w("Machine-harvested from the adulting codebase. Every fact needed to")
+    w("write the operators manual is below; nothing outside this document")
+    w("is an input. `help_json` is authoritative for the command surface.")
+    w("")
+    w(f"Operator tools: {', '.join(data['operator_tools'])}")
+    w("")
+    for t in data['tools']:
+        w(f"## Tool: `{t['name']}`")
+        w("")
+        w(f"- interpreter: {t['interpreter']}")
+        w(f"- vault paths: {', '.join(t['vault_paths']) or '(none detected)'}")
+        w(f"- environment: {', '.join(t['env_vars']) or '(none detected)'}")
+        w("")
+        if t['docstring']:
+            w("### Source docstring (author's intent)")
+            w("")
+            w(fence(t['docstring']))
+            w("")
+        w("### Argparse manifest (authoritative)")
+        w("")
+        w(fence(json.dumps(t['help_json'], indent=2), 'json'))
+        w("")
+        if t['help_text']:
+            w("### `--help`")
+            w("")
+            w(fence(t['help_text']))
+            w("")
+        for sub, text in t['subcommand_help'].items():
+            w(f"### `{t['name']} {sub} --help`")
+            w("")
+            w(fence(text))
+            w("")
+        if t['exit_codes']:
+            w("### Non-zero exit codes")
+            w("")
+            for e in t['exit_codes']:
+                w(f"- `{e['code']}` — raised at:")
+                for line in e['raised_at']:
+                    w(f"  - `{line}`")
+            w("")
+    w("## Data schemas")
+    w("")
+    w("On-disk formats the tools read and write.")
+    w("")
+    for s in data['schemas']:
+        w(f"### Schema: `{s['name']}`")
+        w("")
+        w(fence(s['text'], 'markdown'))
+        w("")
+    w("## Background prose (from README — context only, not command truth)")
+    w("")
+    for s in data['readme_sections']:
+        w(f"### {s['heading']}")
+        w("")
+        w(s['text'])
+        w("")
+    return '\n'.join(L).rstrip() + '\n'
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Harvest the codebase into a corpus for the manual writer.")
+    ap.add_argument('--format', choices=['md', 'json'], default='md',
+                    help='Output format (default: md).')
+    ap.add_argument('--out', help='Write here instead of stdout.')
+    args = ap.parse_args()
+
+    data = harvest()
+    text = render_md(data) if args.format == 'md' else json.dumps(data, indent=2) + '\n'
+    if args.out:
+        Path(args.out).write_text(text, encoding='utf-8')
+        print(f"wrote {args.out} ({len(text)} bytes)", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == '__main__':
+    main()

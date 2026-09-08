@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Generate MANUAL.md from the codebase.
+
+Developer tool. Not on the operator's PATH, not documented in the manual.
+
+Pipeline:
+    dev/manual-harvest  ->  corpus (deterministic, from the code)
+    corpus + dev/manual-prompt.md  ->  `claude -p`  ->  MANUAL.md
+
+The manual is always written from scratch. The model is given the corpus and
+nothing else: no tools, no repository access, and the CLI runs from an empty
+temporary directory so no CLAUDE.md, memory file or existing MANUAL.md can
+reach its context. A previous manual can therefore never shape the next one.
+
+Authentication defaults to your Claude subscription. ANTHROPIC_API_KEY and
+ANTHROPIC_AUTH_TOKEN are removed from the child environment, because the
+`claude` CLI prefers a key over your login whenever one is set — so a stale or
+unfunded key in your shell would otherwise take precedence and fail. Pass
+--use-api-key where a funded key is the intended credential.
+
+Usage:
+    dev/manual-build [--out MANUAL.md] [--model opus] [--corpus FILE]
+                     [--keep-corpus DIR] [--use-api-key] [--dry-run]
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+HARVEST = REPO / 'dev' / 'manual-harvest'
+PROMPT = REPO / 'dev' / 'manual-prompt.md'
+
+
+def die(msg, code=1):
+    print(f"manual-build: error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def harvest():
+    p = subprocess.run([str(HARVEST), '--format', 'md'],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        die(f"harvest failed: {p.stderr.strip()}")
+    return p.stdout
+
+
+def clean(text):
+    """Strip anything the model wrapped around the manual.
+
+    The prompt asks for raw markdown, but a stray preamble or an outer code
+    fence should not end up committed. Both are removed idempotently.
+    """
+    text = text.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```[a-zA-Z]*\n', '', text)
+        text = re.sub(r'\n```$', '', text)
+    # Drop any chatter before the title.
+    i = text.find('# adulting')
+    if i > 0:
+        text = text[i:]
+    return text.rstrip() + '\n'
+
+
+# The CLI takes a key over an interactive login whenever one is present, and
+# says so on stderr. Dropping these makes the subscription the default.
+API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
+
+
+def generate(corpus, model, use_api_key=False):
+    claude = shutil.which('claude')
+    if not claude:
+        die("the `claude` CLI is not on PATH; cannot generate the manual")
+
+    # Run from an empty directory. This is what keeps the generation clean:
+    # with no repository in scope there is nothing for the model to discover.
+    with tempfile.TemporaryDirectory() as sandbox:
+        cmd = [claude, '-p', corpus,
+               '--model', model,
+               '--system-prompt', PROMPT.read_text(encoding='utf-8'),
+               '--output-format', 'text',
+               '--allowedTools', '']
+        env = dict(os.environ)
+        env.pop('ADULTING_HOME', None)
+        if not use_api_key:
+            for var in API_KEY_VARS:
+                env.pop(var, None)
+        p = subprocess.run(cmd, capture_output=True, text=True,
+                           cwd=sandbox, env=env)
+    if p.returncode != 0:
+        die(f"claude failed (rc={p.returncode}): {p.stderr.strip()[:2000]}")
+    if not p.stdout.strip():
+        die("claude returned no output")
+    return p.stdout
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate MANUAL.md from the codebase.")
+    ap.add_argument('--out', default=str(REPO / 'MANUAL.md'),
+                    help='Where to write the manual (default: MANUAL.md).')
+    ap.add_argument('--model', default='opus', help='Model alias (default: opus).')
+    ap.add_argument('--corpus', help='Use this corpus file instead of harvesting.')
+    ap.add_argument('--keep-corpus', metavar='DIR',
+                    help='Also save the corpus here, for inspection.')
+    ap.add_argument('--use-api-key', action='store_true',
+                    help='Authenticate with ANTHROPIC_API_KEY from the '
+                         'environment instead of your Claude subscription.')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='Harvest and print corpus size, then stop. No model call.')
+    args = ap.parse_args()
+
+    corpus = (Path(args.corpus).read_text(encoding='utf-8') if args.corpus
+              else harvest())
+    print(f"corpus: {len(corpus)} bytes", file=sys.stderr)
+    if args.keep_corpus:
+        d = Path(args.keep_corpus)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / 'corpus.md').write_text(corpus, encoding='utf-8')
+        print(f"corpus saved to {d / 'corpus.md'}", file=sys.stderr)
+    if args.dry_run:
+        return
+
+    auth = 'API key' if args.use_api_key else 'Claude subscription'
+    print(f"generating with {args.model} via {auth} ...", file=sys.stderr)
+    text = clean(generate(corpus, args.model, args.use_api_key))
+    Path(args.out).write_text(text, encoding='utf-8')
+    print(f"wrote {args.out} ({len(text)} bytes, "
+          f"{len(text.splitlines())} lines)", file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

@@ -9,6 +9,8 @@ activity rollup agreeing with `hours` on duration.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -152,3 +154,42 @@ def test_unparseable_file_is_skipped_not_fatal(stocked):
     r = sh(stocked, "notes")
     assert r.returncode == 0
     assert "2026-08-29" not in r.stdout
+
+
+# ---- the path contract ----
+#
+# search exists to hand a path to a reader, and a reader resolves a relative
+# path against its own working directory. In the agent's container the vault
+# is bind-mounted at /vault while the process runs in /workspace, so a
+# vault-relative path silently resolves to nothing. Emitting relative paths
+# once cost ~57 tool calls and a wrong answer; these pin the contract.
+
+def test_paths_are_absolute(stocked):
+    for argv in (["notes"], ["logs"]):
+        rows = json.loads(sh(stocked, *argv, "--json").stdout)
+        assert rows, argv
+        for r in rows:
+            assert r["path"].startswith("/"), f"{argv}: {r['path']} is not absolute"
+
+
+def test_paths_resolve_from_an_unrelated_working_directory(stocked, tmp_path):
+    """The real failure: a path that only works if you happen to be standing
+    in the vault is not a usable path."""
+    elsewhere = tmp_path / "workspace"
+    elsewhere.mkdir()
+    rows = json.loads(sh(stocked, "notes", "--json").stdout)
+    cwd = os.getcwd()
+    try:
+        os.chdir(elsewhere)
+        for r in rows:
+            assert Path(r["path"]).is_file(), \
+                f"{r['path']} does not resolve from {elsewhere}"
+    finally:
+        os.chdir(cwd)
+
+
+def test_overview_recent_paths_are_absolute_too(stocked):
+    d = json.loads(sh(stocked, "overview", "SGB", "--json").stdout)
+    assert d["recent"]
+    for r in d["recent"]:
+        assert r["path"].startswith("/"), r["path"]

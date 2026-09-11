@@ -14,6 +14,12 @@ Subcommands:
   activity  rank threads by what happened in a window
   overview  the whole picture of one thread
 
+Paths are emitted ABSOLUTE, resolved against ADULTING_HOME. They exist to be
+handed straight to a reader, and a reader resolves a relative path against
+its own working directory — which is not the vault. In the agent's container
+the vault is a bind mount at /vault while the process runs in /workspace, so
+a vault-relative path silently resolves to nothing.
+
 Dates are the EVENT date, not the capture date: a note's frontmatter
 `timestamp` is when the thing happened, while its filename is when the note
 was written. They differ in both directions — an agenda drafted days before
@@ -79,7 +85,7 @@ def note_records():
         threads = [V.unwiki(t) or t for t in raw]
         out.append({
             'kind': 'note',
-            'path': str(path.relative_to(HOME)),
+            'path': str(path),
             'date': event_date(fm.get('timestamp'), path.stem),
             'type': str(fm.get('type', '') or '').strip(),
             'topic': str(fm.get('topic', '') or '').strip(),
@@ -111,7 +117,7 @@ def log_records():
             ref = '/'.join(rel[:2]) if len(rel) >= 3 else ''
         out.append({
             'kind': 'log',
-            'path': str(path.relative_to(HOME)),
+            'path': str(path),
             'date': event_date(fm.get('date'), path.stem),
             'type': 'Log',
             'topic': '',

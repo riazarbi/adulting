@@ -286,3 +286,89 @@ def test_statement_ignores_unbilled_time(vault):
     out = vault.run("statement", cli="payments").stdout
     assert "Projects/SANA" in out
     assert "Topics/Reading" not in out
+
+
+# ---- every record drops a REF into the buffer, so the thread's daily log
+# ---- is a complete chronology. `notes new` has always done this; hours and
+# ---- payments simply predated the convention.
+#
+# These matter because buffer_ref is best-effort and silent by design: the
+# harness discards a tool's stdout whenever stderr is non-empty, so it cannot
+# warn without breaking `hours log` for the agent. A silent failure is only
+# catchable here.
+
+def test_log_writes_a_buffer_ref(vault):
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "Reviewed the finance pack", "-m", "90",
+              cli="hours")
+    buf = vault.read("buffer.md")
+    assert "REF: [[hours/Projects/SANA]]" in buf, buf
+    assert "1h 30m" in buf
+    assert "Reviewed the finance pack" in buf
+
+
+def test_buffer_ref_uses_the_directory_form_of_the_kind(vault):
+    """`kind` is the frontmatter value (`project`); the path needs the
+    directory (`Projects`). Getting this wrong made the REF unresolvable,
+    and the silent swallow hid it completely."""
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "x", "-m", "10", cli="hours")
+    buf = vault.read("buffer.md")
+    assert "hours/project/" not in buf
+    assert "hours/Projects/SANA" in buf
+
+
+def test_the_ref_survives_a_flush_into_the_log(vault):
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "Reviewed the finance pack", "-m", "90",
+              cli="hours")
+    assert vault.run("flush", cli="buffer").returncode == 0
+    logs = list((vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    assert logs, "no log file was written"
+    assert "REF: [[hours/Projects/SANA]]" in logs[0].read_text()
+
+
+def test_an_unbilled_entry_also_refs(vault):
+    vault.write_thread("Topics", "Wellness")
+    vault.run("log", "Topics/Wellness", "5k run", "-m", "30", cli="hours")
+    assert "REF: [[hours/Topics/Wellness]]" in vault.read("buffer.md")
+
+
+def test_a_failing_buffer_never_breaks_the_hours_write(vault, monkeypatch):
+    """Best-effort means best-effort: the time entry is the record that
+    matters and must land even if the buffer cannot be written."""
+    (vault.home / "buffer.md").write_text("", encoding="utf-8")
+    (vault.home / "buffer.md").chmod(0o444)
+    try:
+        vault.write_thread("Topics", "Wellness")
+        r = vault.run("log", "Topics/Wellness", "5k run", "-m", "30", cli="hours")
+        assert r.returncode == 0, r.stderr
+        assert vault.entries("Topics", "Wellness")[0]["name"] == "5k run"
+    finally:
+        (vault.home / "buffer.md").chmod(0o644)
+
+
+def test_backdated_entry_refs_into_the_right_days_log(vault):
+    """A REF must be filed under the day the work happened, not the day the
+    buffer was flushed. Without --date a backdated entry landed in today's
+    log and the chronology lied."""
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "Backdated work", "-m", "90",
+              "-d", "2026-08-04", cli="hours")
+    vault.run("flush", cli="buffer")
+    day = vault.home / "logs" / "Projects" / "SANA" / "2026-08-04.md"
+    assert day.is_file(), sorted(
+        p.name for p in (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    assert "Backdated work" in day.read_text()
+
+
+def test_entries_on_different_days_split_across_log_files(vault):
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "Older", "-m", "60", "-d", "2026-08-01",
+              cli="hours")
+    vault.run("log", "Projects/SANA", "Newer", "-m", "60", "-d", "2026-08-09",
+              cli="hours")
+    vault.run("flush", cli="buffer")
+    days = sorted(p.stem for p in
+                  (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    assert days == ["2026-08-01", "2026-08-09"], days

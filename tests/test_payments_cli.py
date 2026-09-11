@@ -230,3 +230,15 @@ def test_lint_walks_payments_dir(vault):
     r = vault.run(cli="lint")
     assert r.returncode == 1
     assert "payments/Projects/X.md" in r.stdout
+
+
+def test_payment_writes_a_buffer_ref(vault):
+    """Same convention as notes and hours: the receipt shows up in the
+    thread's daily log on the next flush."""
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Projects/SANA", "15000", "-a", "Business current",
+              cli="payments")
+    buf = vault.read("buffer.md")
+    assert "REF: [[payments/Projects/SANA]]" in buf, buf
+    assert "15000 ZAR" in buf
+    assert "payments/project/" not in buf     # directory form, not frontmatter

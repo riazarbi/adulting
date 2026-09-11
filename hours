@@ -25,11 +25,20 @@ inventing a currency for them.
 Rate 0 means unbillable and is an ordinary value -- hours still count.
 Asking for a rate with no currency to express it in is the one refused
 combination.
+
+Every logged entry also drops a `REF:` into the buffer, so it appears in the
+thread's daily log on the next `buffer flush` -- the same thing `notes new`
+has always done. The pointer is filed under the day the work happened, not
+the day of the flush, so a backdated entry lands in the right day's log. That keeps the log a complete chronology of the thread
+rather than one that silently omits time. Best-effort: if the buffer cannot
+be written the entry is still recorded, and nothing is reported, because a
+warning on stderr would cost the caller its stdout.
 """
 
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -113,11 +122,39 @@ def save(path, entries, ref, currency):
                     sort_key=BY_START, heading=HEADING)
 
 
+def buffer_ref(ref, target, summary, date=None):
+    """Drop a REF into the buffer so this record shows up in the thread's
+    daily log on the next `buffer flush`.
+
+    Best-effort, exactly as `notes new` has always done it: a record that
+    was written must not be undone or reported as failed because the buffer
+    was unavailable. Resolved next to this script rather than through PATH,
+    so it works from a checkout as well as an install.
+    """
+    exe = Path(__file__).resolve().parent / 'buffer'
+    cmd = [str(exe), '--quiet', 'add-ref', ref, target, summary]
+    if date:
+        # File the pointer under the day the work happened, not the day the
+        # buffer happens to be flushed. Without this a backdated entry lands
+        # in today's log and the chronology lies.
+        cmd += ['--date', date]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=15)
+    except Exception:  # noqa: BLE001 - never let the log pointer break the write
+        pass
+
+
 def append_entry(kind, name, entry):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
     save(path, V.read_records(path, FENCE) + [entry], ref,
          entry.get('currency'))
+    # `ref` is already the directory form (Processes/SGB); `kind` is the
+    # frontmatter form (process) and would not resolve as a path.
+    buffer_ref(ref, f"hours/{ref}",
+               f"{V.fmt_duration(minutes_of(entry))} {entry['name']} "
+               f"({entry['id']})",
+               date=V.local(entry['startTime']).strftime('%Y-%m-%d'))
     return path
 
 

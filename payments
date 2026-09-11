@@ -13,11 +13,17 @@ greppable, and produce clean git diffs.
 Unlike `hours`, there is no Obsidian plugin to be compatible with here, so the
 fence is our own. Amounts are handled as Decimal throughout: these figures get
 reconciled against invoices, and float drift is not acceptable in money.
+
+Every recorded payment also drops a `REF:` into the buffer, so it appears
+in the thread's daily log on the next `buffer flush`, as `notes new` and
+`hours log` do, filed under the day the money was received. Best-effort: a payment is recorded whether or not the
+buffer can be written.
 """
 
 import argparse
 import json
 import re
+import subprocess
 import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -80,10 +86,37 @@ def save(path, records, ref, currency):
                     sort_key=BY_RECEIVED, heading=HEADING)
 
 
+def buffer_ref(ref, target, summary, date=None):
+    """Drop a REF into the buffer so this record shows up in the thread's
+    daily log on the next `buffer flush`.
+
+    Best-effort, exactly as `notes new` has always done it: a record that was
+    written must not be undone or reported as failed because the buffer was
+    unavailable. Resolved next to this script rather than through PATH, so it
+    works from a checkout as well as an install.
+    """
+    exe = Path(__file__).resolve().parent / 'buffer'
+    cmd = [str(exe), '--quiet', 'add-ref', ref, target, summary]
+    if date:
+        # File the pointer under the day the work happened, not the day the
+        # buffer happens to be flushed. Without this a backdated entry lands
+        # in today's log and the chronology lies.
+        cmd += ['--date', date]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=15)
+    except Exception:  # noqa: BLE001 - never let the log pointer break the write
+        pass
+
+
 def append_payment(kind, name, payment):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
     save(path, V.read_records(path, FENCE, KEY) + [payment], ref, payment['currency'])
+    # `ref` is already the directory form; `kind` is the frontmatter form.
+    buffer_ref(ref, f"payments/{ref}",
+               f"{V.fmt_money(V.dec(payment['amount']), payment['currency'])} "
+               f"received ({payment['id']})",
+               date=V.local(payment['received']).strftime('%Y-%m-%d'))
     return path
 
 

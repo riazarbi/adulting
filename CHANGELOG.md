@@ -2,6 +2,27 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-11 - every record points at itself from the log
+
+`notes new` has always dropped a `REF:` into the buffer so a new note shows up in its thread's daily log. `hours` and `payments` postdate that convention and never adopted it, so a day's log silently omitted the time worked and the money received — the two things most likely to be the whole of a day's activity. The inconsistency was the bug.
+
+- **`hours log` and `payments log` now write a `REF:` too**, best-effort, in the same shape `notes_new` uses. A thread's log for a day is now the chronology of everything that touched it.
+- **The CLI writes it, not the agent.** This is the point: over one afternoon the model forgot the accompanying log line twice, in different ways. It cannot forget what `hours log` does itself, and the `activity-capture` skill gets *simpler* — recording *that* the work happened is no longer its job, only the detail beyond the label.
+- **`buffer add-ref` rejected the targets outright.** `ref_target_resolves` accepted `notes/`, `logs/`, `people/` and `<Kind>/` — it predates both stores, so a REF could not point at a time entry or a receipt at all. Extended, with the error message and `--help` updated to match.
+- **Two bugs hid inside the best-effort swallow.** `--quiet` is a leading flag on `buffer`, not a subcommand flag; and the target was built from `kind` (the frontmatter value, `process`) rather than the directory form (`Processes`), producing an unresolvable `hours/process/SGB`. Both failed silently — entries logged fine, buffer stayed empty, nothing said why. Found only by instrumenting the swallow.
+- **The swallow has to stay silent.** The agent harness discards a tool's stdout whenever stderr is non-empty, so `hours log` cannot warn without breaking itself for its main caller. That makes CI the only place this class of failure is catchable, hence 9 new tests — including one asserting the directory form specifically, and one that makes `buffer.md` read-only to prove a failing buffer never costs you the time entry. **208 passing**, up from 201.
+- **`buffer add-ref` gains an optional `--date`, and the REF is filed under the day the thing happened.** The first cut used the flush date, so time logged with `-d 2026-09-04` put the entry at 2026-09-04 and its REF in `2026-09-11.md` — the log said the work happened on the day someone got round to recording it. `flush` groups on the date portion of the buffer stamp, so passing the record's own date is enough; the clock time is kept, since it orders entries within a day. Three records dated 09-02, 09-04 and 09-11 now produce three log files, each holding its own.
+- **Logs are still not a chronology on their own**, which matters for the planned `search stream`. A REF exists only after a flush and only for records written since this convention landed — the vault's 127 existing hours entries and 4 payments have none. So `stream` reads every source directly and must exclude `hours/` and `payments/` REFs, or each record appears twice.
+- **`search activity` now double-counts presence, not arithmetic.** The `HOURS` column is unaffected — it reads `hours/` directly — but `LOGS` and `ENTRIES` rise, because those log lines genuinely exist. Left as-is deliberately: the columns are honest about the logs' contents, and it fixes a real defect along the way, since a thread with time but no writing used to show `LAST -`.
+
+## 2026-09-11 - a named person forces a log line
+
+An hours entry recorded "Call with sisters Nadia and Taz Arbi" and no log line, so the names went nowhere. The mechanical split — a six-word label, leftovers to a log line — permitted the names to be absorbed into the label, leaving nothing over.
+
+- **People cannot live in an hours entry.** A `[[wikilink]]` in an entry's `name` renders but creates no backlink and no graph edge, because Obsidian's metadata cache skips fenced code blocks, and `search` does not index hours either. A name in a label is a name that has gone nowhere.
+- The `activity-capture` skill now treats a named person as an unconditional trigger for a log line, with names kept out of the label and wikilinked in the log body, resolved against `people list`. An unresolvable name means loading `create-person`, never inventing one and never quietly dropping it.
+- Same root cause as the thread-resolution failure the same day: guidance that *permits* the cheap path rather than *forecloses* it. Both rules are now unconditional.
+
 ## 2026-09-11 - half-day activity check-ins, and the notes/logs/hours boundary
 
 Most of a working day leaves no artefact. An email sent, a call taken, a problem chewed over — none of it reaches the vault, so `search activity` reported quiet days that were not quiet. Two weekday check-ins now ask what happened and file the answer, and settling where that answer goes forced the boundary between the three content stores to be written down.

@@ -31,6 +31,8 @@ Three stores, three questions. They are not competing for the same content.
 
 So a rich afternoon produces both: a log line carrying what actually happened, and a time entry carrying the duration under a short label.
 
+**Every record points at itself from the log.** `notes new`, `hours log` and `payments log` each drop a `REF:` into the buffer, which lands in the thread's daily log on the next `buffer flush`. A thread's log for a day is therefore the chronology of everything that touched it — notes written, time worked, money received, tasks opened and closed — and not just the part somebody remembered to write down. Each pointer is filed under the day the thing happened, not the day of the flush, so backdated work lands in the right day's log. These pointers are best-effort: the record is written whether or not the buffer can be.
+
 ```
 log:    TEXT: Validated the SQL detection patterns with [[people/Igor ...]]; the
               join semantics on multi-repo commits are still unresolved.

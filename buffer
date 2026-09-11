@@ -89,6 +89,21 @@ def now_ts():
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
 
+def stamp(date=None):
+    """Buffer timestamp, optionally filed under a different day.
+
+    `flush` groups entries by the date portion of this stamp, so a record
+    about last Tuesday belongs in last Tuesday's log, not in the log for the
+    day somebody got round to flushing. The clock time is kept as-is: it
+    orders entries within the day and is not otherwise load-bearing.
+    """
+    if not date:
+        return now_ts()
+    if not DATE_RE.match(date):
+        die(f"--date must be YYYY-MM-DD; got {date!r}")
+    return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
+
+
 def thread_resolves(target):
     if not target or '/' not in target:
         return False
@@ -152,14 +167,19 @@ def format_action_attrs(attrs):
 
 
 def ref_target_resolves(target):
-    """REF targets can point to notes, threads, people, or logs.
-    Returns the absolute path if it would exist; else None."""
+    """REF targets can point at any vault record file.
+
+    hours/ and payments/ were added after this function and were simply
+    missing from it, so a REF could not point at a time entry or a receipt.
+    Returns the absolute path if it would exist; else None.
+    """
     target = target.strip()
     if not target:
         return None
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
         path = THREADS_DIR / f"{target}.md"
-    elif target.startswith(('people/', 'notes/', 'logs/')):
+    elif target.startswith(('people/', 'notes/', 'logs/', 'hours/',
+                            'payments/')):
         path = HOME / f"{target}.md"
     else:
         return None
@@ -227,9 +247,9 @@ def cmd_add_ref(args):
         die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md")
     if not ref_target_resolves(target):
         die(f"ref target {target!r} does not resolve to a vault file "
-            f"(expected notes/X, logs/X, people/X, or <Kind>/X)")
+            f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
     body = f"[[{target}]]" + (f" {summary}" if summary else "")
-    line = f"- [[{thread}]] REF: {body} <!--{now_ts()}-->"
+    line = f"- [[{thread}]] REF: {body} <!--{stamp(args.date)}-->"
     append_line(line)
     print(f"buffered: {line}")
     return 0
@@ -674,8 +694,14 @@ def main():
     p_at.set_defaults(func=cmd_add_text)
 
     p_ar = sub.add_parser('add-ref', help="Append a REF entry.")
+    p_ar.add_argument('--date', metavar='YYYY-MM-DD',
+                      help="File under this day instead of today. Use the "
+                           "date the thing happened, not the date you are "
+                           "recording it.")
     p_ar.add_argument('thread')
-    p_ar.add_argument('target', help="Wikilink target like notes/<stem> or Projects/X.")
+    p_ar.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
+                         "hours/<Kind>/<Thread>, payments/<Kind>/<Thread>, "
+                         "or <Kind>/<Thread>.")
     p_ar.add_argument('summary', nargs='?', default='')
     p_ar.set_defaults(func=cmd_add_ref)
 

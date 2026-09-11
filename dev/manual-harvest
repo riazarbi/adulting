@@ -39,8 +39,8 @@ REPO = Path(__file__).resolve().parent.parent
 
 # The operator surface. agent-build, and everything under dev/, are developer
 # tools and are deliberately absent — they must not appear in the manual.
-TOOLS = ['tasks', 'notes', 'threads', 'people', 'hours', 'payments',
-         'buffer', 'lint', 'commit']
+TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
+         'payments', 'buffer', 'lint', 'commit']
 
 # README sections worth carrying as background. Everything else in the README
 # is either install boilerplate or restates the command surface.

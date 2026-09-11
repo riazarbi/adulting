@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Search the vault's notes and logs, and summarise activity.
+
+Notes and logs are the only vault entities without a filtered query — tasks,
+hours, payments, threads and people all have one. This closes that gap.
+
+`search` returns pointers, never bodies: a path plus enough metadata to
+decide whether to open it. Retrieval is a separate step, so a broad search
+never drags whole documents along with it.
+
+Subcommands:
+  notes     find notes by thread, type, date range or text
+  logs      find daily logs by thread, date range or text
+  activity  rank threads by what happened in a window
+  overview  the whole picture of one thread
+
+Dates are the EVENT date, not the capture date: a note's frontmatter
+`timestamp` is when the thing happened, while its filename is when the note
+was written. They differ in both directions — an agenda drafted days before
+its meeting, a session written up days after. The filename is used only when
+the frontmatter date is missing or malformed.
+"""
+
+import argparse
+import os
+import re
+import sys
+from collections import defaultdict
+from datetime import date, timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _vault as V  # noqa: E402
+from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+
+TOOL = 'search'
+HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+NOTES_DIR = HOME / 'notes'
+LOGS_DIR = HOME / 'logs'
+HOURS_FENCE = '```simple-time-tracker'
+
+DEFAULT_LIMIT = 20
+DEFAULT_WINDOW_DAYS = 7
+
+# Body lines that count as a log entry.
+ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE):', re.M)
+DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
+
+
+def die(msg, code=1):
+    sys.exit(f"{TOOL}: {msg}")
+
+
+def event_date(fm_value, fallback_stem):
+    """Event date as YYYY-MM-DD. Frontmatter wins; filename is the fallback."""
+    for candidate in (str(fm_value or ''), fallback_stem):
+        m = DATE_RE.match(candidate.strip().strip('"\''))
+        if m:
+            return m.group(1)
+    return ''
+
+
+def note_records():
+    """Every parseable note, as a dict. Unparseable files are skipped."""
+    out = []
+    if not NOTES_DIR.is_dir():
+        return out
+    for path in sorted(NOTES_DIR.glob('*.md')):
+        try:
+            text = path.read_text(encoding='utf-8')
+            fm, body = V.parse_frontmatter_doc(text)
+        except Exception:  # noqa: BLE001 - a bad file must not break the query
+            continue
+        if not fm:
+            continue
+        raw = fm.get('threads') or fm.get('thread') or []
+        if isinstance(raw, str):
+            raw = [raw]
+        threads = [V.unwiki(t) or t for t in raw]
+        out.append({
+            'kind': 'note',
+            'path': str(path.relative_to(HOME)),
+            'date': event_date(fm.get('timestamp'), path.stem),
+            'type': str(fm.get('type', '') or '').strip(),
+            'topic': str(fm.get('topic', '') or '').strip(),
+            'threads': [t for t in threads if t],
+            'body': body,
+        })
+    return out
+
+
+def log_records():
+    out = []
+    if not LOGS_DIR.is_dir():
+        return out
+    for path in sorted(LOGS_DIR.rglob('*.md')):
+        try:
+            text = path.read_text(encoding='utf-8')
+            fm, body = V.parse_frontmatter_doc(text)
+        except Exception:  # noqa: BLE001
+            continue
+        if not fm:
+            continue
+        t = fm.get('thread') or ''
+        if isinstance(t, list):
+            t = t[0] if t else ''
+        ref = V.unwiki(str(t)) or str(t)
+        if not ref:
+            # logs/<Kind>/<Name>/<date>.md — recover the thread from the path
+            rel = path.relative_to(LOGS_DIR).parts
+            ref = '/'.join(rel[:2]) if len(rel) >= 3 else ''
+        out.append({
+            'kind': 'log',
+            'path': str(path.relative_to(HOME)),
+            'date': event_date(fm.get('date'), path.stem),
+            'type': 'Log',
+            'topic': '',
+            'threads': [ref] if ref else [],
+            'entries': len(ENTRY_RE.findall(body)),
+            'body': body,
+        })
+    return out
+
+
+def resolve_thread_arg(arg):
+    """Accept 'SGB', 'Processes/SGB' or a wikilink. Returns the canonical ref."""
+    if not arg:
+        return None
+    try:
+        kind, name, _ = V.resolve_target(TOOL, arg, fold_case=True)
+        return V.thread_ref(kind, name)
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001
+        die(f"could not resolve thread {arg!r}")
+
+
+def apply_filters(records, thread=None, type_=None, since=None, until=None,
+                  text=None):
+    out = []
+    needle = text.lower() if text else None
+    want_type = type_.lower() if type_ else None
+    for r in records:
+        if thread and thread not in r['threads']:
+            continue
+        if want_type and r['type'].lower() != want_type:
+            continue
+        if since and (not r['date'] or r['date'] < since):
+            continue
+        if until and (not r['date'] or r['date'] > until):
+            continue
+        if needle:
+            hay = f"{r['topic']}\n{r['body']}".lower()
+            if needle not in hay:
+                continue
+        out.append(r)
+    out.sort(key=lambda r: (r['date'], r['path']), reverse=True)
+    return out
+
+
+def snippet(body, needle, width=90):
+    """One line of context around the first match, whitespace collapsed."""
+    flat = ' '.join(body.split())
+    i = flat.lower().find(needle.lower())
+    if i < 0:
+        return ''
+    start = max(0, i - width // 3)
+    piece = flat[start:start + width]
+    return ('…' if start else '') + piece + ('…' if start + width < len(flat) else '')
+
+
+def hours_in_window(since=None, until=None):
+    """Minutes logged per thread ref within the window."""
+    mins = defaultdict(int)
+    try:
+        records = list(V.load_all('hours', HOURS_FENCE))
+    except Exception:  # noqa: BLE001 - no hours yet is not an error
+        return mins
+    for _path, ref, rec in records:
+        start, end = rec.get('startTime'), rec.get('endTime')
+        if not start or not end:
+            continue
+        # Mirror `hours` exactly: local date for bucketing, ISO delta for
+        # duration. Slicing the UTC string instead would misfile evening work.
+        try:
+            d = V.local(start).strftime('%Y-%m-%d')
+            minutes = int((V.from_iso(end) - V.from_iso(start)).total_seconds() // 60)
+        except Exception:  # noqa: BLE001 - a malformed entry is skipped, not fatal
+            continue
+        if since and d < since:
+            continue
+        if until and d > until:
+            continue
+        if minutes > 0:
+            mins[ref] += minutes
+    return mins
+
+
+def fmt_hours(minutes):
+    return V.fmt_duration(minutes) if minutes else '-'
+
+
+def window_default(since, until):
+    if since is None:
+        since = (date.today() - timedelta(days=DEFAULT_WINDOW_DAYS)).isoformat()
+    return since, until
+
+
+# ---- output ----
+
+def emit(rows, as_json, render):
+    if as_json:
+        import json
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no matches)")
+        return
+    render(rows)
+
+
+def render_docs(rows):
+    width = max(len(r['path']) for r in rows)
+    for r in rows:
+        parts = [r['path'].ljust(width), r['date'] or '?'.ljust(10)]
+        if r['kind'] == 'note':
+            parts += [r['type'] or '-', ', '.join(r['threads']) or '-', r['topic']]
+        else:
+            parts += [', '.join(r['threads']) or '-', f"{r['entries']} entries"]
+        print('  '.join(p for p in parts if p != ''))
+        if r.get('snippet'):
+            print(f"    {r['snippet']}")
+
+
+def cmd_notes(args):
+    rows = apply_filters(note_records(), resolve_thread_arg(args.thread),
+                         args.type, args.since, args.until, args.text)
+    rows = rows[:args.limit] if args.limit else rows
+    for r in rows:
+        r['snippet'] = snippet(r['body'], args.text) if args.text else ''
+        r.pop('body', None)
+    emit(rows, args.json, render_docs)
+
+
+def cmd_logs(args):
+    rows = apply_filters(log_records(), resolve_thread_arg(args.thread),
+                         None, args.since, args.until, args.text)
+    rows = rows[:args.limit] if args.limit else rows
+    for r in rows:
+        r['snippet'] = snippet(r['body'], args.text) if args.text else ''
+        r.pop('body', None)
+    emit(rows, args.json, render_docs)
+
+
+def cmd_activity(args):
+    since, until = window_default(args.since, args.until)
+    thread = resolve_thread_arg(args.thread)
+    notes = apply_filters(note_records(), thread, None, since, until)
+    logs = apply_filters(log_records(), thread, None, since, until)
+    mins = hours_in_window(since, until)
+
+    agg = defaultdict(lambda: {'notes': 0, 'logs': 0, 'entries': 0,
+                               'minutes': 0, 'last': ''})
+    for r in notes:
+        for t in r['threads']:
+            a = agg[t]; a['notes'] += 1; a['last'] = max(a['last'], r['date'])
+    for r in logs:
+        for t in r['threads']:
+            a = agg[t]
+            a['logs'] += 1; a['entries'] += r['entries']
+            a['last'] = max(a['last'], r['date'])
+    for ref, m in mins.items():
+        if thread and ref != thread:
+            continue
+        agg[ref]['minutes'] += m
+        
+    rows = [{'thread': t, **v} for t, v in agg.items()]
+    rows.sort(key=lambda r: (r['notes'] + r['logs'], r['minutes'], r['last']),
+              reverse=True)
+
+    def render(rs):
+        w = max(len(r['thread']) for r in rs)
+        print(f"{'THREAD'.ljust(w)}  NOTES  LOGS  ENTRIES     HOURS  LAST")
+        for r in rs:
+            print(f"{r['thread'].ljust(w)}  {r['notes']:>5}  {r['logs']:>4}  "
+                  f"{r['entries']:>7}  {fmt_hours(r['minutes']):>8}  {r['last'] or '-'}")
+        print(f"\nwindow: {since} to {until or 'today'}")
+
+    emit(rows, args.json, render)
+
+
+def cmd_overview(args):
+    thread = resolve_thread_arg(args.thread)
+    notes = apply_filters(note_records(), thread, None, args.since, args.until)
+    logs = apply_filters(log_records(), thread, None, args.since, args.until)
+    mins = hours_in_window(args.since, args.until).get(thread, 0)
+
+    by_type = defaultdict(int)
+    for r in notes:
+        by_type[r['type'] or '-'] += 1
+    entries = sum(r['entries'] for r in logs)
+
+    anchors = {'open': 0, 'done': 0}
+    for r in notes + logs:
+        anchors['open'] += len(re.findall(r'^TASK:', r['body'], re.M))
+        anchors['done'] += len(re.findall(r'^DONE:', r['body'], re.M))
+
+    recent = sorted(notes + logs, key=lambda r: (r['date'], r['path']),
+                    reverse=True)[:args.limit or 5]
+
+    data = {
+        'thread': thread,
+        'notes': len(notes), 'notes_by_type': dict(by_type),
+        'logs': len(logs), 'entries': entries,
+        'tasks_open': anchors['open'], 'tasks_done': anchors['done'],
+        'minutes': mins,
+        'last': max([r['date'] for r in notes + logs], default=''),
+        'recent': [{k: r[k] for k in ('path', 'date', 'type', 'topic')}
+                   for r in recent],
+    }
+
+    def render(_):
+        print(f"{data['thread']}")
+        if args.since or args.until:
+            print(f"window: {args.since or 'start'} to {args.until or 'today'}")
+        print()
+        types = ', '.join(f"{k} {v}" for k, v in sorted(by_type.items())) or '-'
+        print(f"  notes      {data['notes']:>4}   ({types})")
+        print(f"  logs       {data['logs']:>4}   {entries} entries")
+        print(f"  tasks      {data['tasks_open']:>4} open, {data['tasks_done']} done")
+        print(f"  hours      {fmt_hours(mins):>4}")
+        print(f"  last       {data['last'] or '-'}")
+        if recent:
+            print("\n  recent:")
+            w = max(len(r['path']) for r in recent)
+            for r in recent:
+                label = r['topic'] or f"{r.get('entries', 0)} entries"
+                print(f"    {r['path'].ljust(w)}  {r['date']}  "
+                      f"{r['type'] or '-'}  {label}")
+
+    if args.json:
+        import json
+        print(json.dumps(data, indent=2))
+    else:
+        render(None)
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Search notes and logs, and summarise thread activity.")
+    sub = p.add_subparsers(dest='cmd', required=True)
+
+    def add_range(sp):
+        sp.add_argument('--since', metavar='YYYY-MM-DD', help='On or after this date.')
+        sp.add_argument('--until', metavar='YYYY-MM-DD', help='On or before this date.')
+        sp.add_argument('--json', action='store_true', help='JSON output.')
+
+    n = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
+    n.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    n.add_argument('--type', help='Note type, e.g. Meeting. Case-insensitive.')
+    n.add_argument('--text', help='Case-insensitive literal, over topic and body.')
+    n.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
+                   help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
+    add_range(n)
+    n.set_defaults(func=cmd_notes)
+
+    l = sub.add_parser('logs', help="Find daily logs by thread, date or text.")
+    l.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    l.add_argument('--text', help='Case-insensitive literal, over the entry lines.')
+    l.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
+                   help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
+    add_range(l)
+    l.set_defaults(func=cmd_logs)
+
+    a = sub.add_parser('activity',
+                       help="Rank threads by what happened in a window.")
+    a.add_argument('--thread', help='Limit to one thread.')
+    add_range(a)
+    a.set_defaults(func=cmd_activity)
+
+    o = sub.add_parser('overview', help="The whole picture of one thread.")
+    o.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    o.add_argument('--limit', type=int, default=5,
+                   help='Recent items to list (default 5).')
+    add_range(o)
+    o.set_defaults(func=cmd_overview)
+
+    emit_helpjson_if_requested(p)
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == '__main__':
+    main()

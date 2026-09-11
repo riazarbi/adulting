@@ -143,7 +143,7 @@ Consulting time tracking. One file per thread at `~/vault/hours/<Kind>/<Thread>.
 | `hours log <thread> <description...>` | Append an entry |
 | `hours log` | Interactive: pick thread → description → minutes → rate |
 | `hours list [thread] [--since] [--until] [--json]` | List entries |
-| `hours report [--thread] [--since] [--until] [--json]` | Totals by thread **and currency** |
+| `hours report [--thread] [--since] [--until] [--json]` | Totals by thread **and currency**; unbilled time totalled separately |
 | `hours show <id> [--json]` | One entry |
 | `hours edit <id> [-m/-r/-c/-d/-t/--description]` | Change one field |
 | `hours rm <id> [-y]` | Delete an entry |
@@ -158,9 +158,9 @@ Defaults resolve most-specific-first and are **stored literally on each entry at
 |---|---|---|---|
 | minutes | `--minutes` | — | 60 |
 | rate | `--rate` | `rate:` | 2500 (`.adulting/config.yaml` → `hours.rate`) |
-| currency | `--currency` | `currency:` | none — hard error |
+| currency | `--currency` | `currency:` | none — the entry is unbilled |
 
-Currency is never guessed: a wrong one silently corrupts totals. Set `currency: ZAR` on the thread, or pass `--currency`.
+Currency is never guessed: a wrong one silently corrupts totals. Where none is available the entry is simply **unbilled** — rate 0, no currency stored — because `hours` tracks time and money is an overlay on it. That is what makes it usable for personal threads (reading, exercise, admin) alongside client work. `hours report` totals unbilled duration in its own row, and `payments statement` ignores it. Asking for a `--rate` with no currency to express it in is the one refused combination.
 
 `rate: 0` means unbillable. It is an ordinary value, not a sentinel — the hours still count, the money is just zero.
 
@@ -189,6 +189,8 @@ currency: ZAR
 }
 ```
 ```
+
+The frontmatter `currency` and the per-entry `currency` are both optional: a file holding only unbilled time omits them.
 
 `name` holds the description, not a label — it is the only field the plugin renders, and these descriptions are invoice line items. `id`, `rate`, and `currency` are extra keys; the plugin round-trips unknown keys unharmed. Duration is derived from `endTime - startTime` (the plugin has no duration field), so a logged start plus a duration is written as an interval. JSON is pretty-printed rather than the plugin's single-line default, so appends produce readable git diffs.
 

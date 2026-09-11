@@ -101,13 +101,26 @@ def test_interactive_lists_only_open_threads(vault):
 
 # ---- 4. currency is never guessed ----
 
-def test_missing_currency_fails_with_remediation(vault):
+def test_missing_currency_logs_unbilled_rather_than_failing(vault):
+    """A thread with no currency is not billable, and that is a normal thing
+    to record: `hours` tracks time, and money is an overlay on it. This used
+    to be a hard error, which made non-billable threads untrackable."""
     vault.write_thread("Projects", "NoCcy")
     r = run(vault, "log", "NoCcy", "x")
+    assert r.returncode == 0, r.stderr
+    assert "unbilled" in r.stdout
+    e = vault.entries("Projects", "NoCcy")[0]
+    assert e["rate"] == 0 and "currency" not in e
+
+
+def test_currency_is_still_never_guessed_for_a_charge(vault):
+    """The no-guessing rule survives where it matters: a rate with no
+    currency to express it in is refused, with remediation."""
+    vault.write_thread("Projects", "NoCcy")
+    r = run(vault, "log", "NoCcy", "x", "-r", "500")
     assert r.returncode != 0
     out = r.stdout + r.stderr
     assert "currency" in out
-    assert "threads/Projects/NoCcy.md" in out
 
 
 def test_currency_flag_satisfies_missing_thread_currency(vault):
@@ -199,3 +212,77 @@ def test_ids_are_unique_across_many_logs(vault):
         run(vault, "log", "SANA Partners", f"entry {i}")
     ids = [e["id"] for e in vault.entries("Projects", "SANA Partners")]
     assert len(set(ids)) == 15
+
+
+# ---- unbilled time: currency is optional because hours records time,
+# ---- and money is an overlay on it.
+
+def test_log_without_currency_records_unbilled(vault):
+    vault.write_thread("Topics", "Reading")          # no currency, no rate
+    r = vault.run("log", "Topics/Reading", "Read two chapters", "-m", "30",
+                  cli="hours")
+    assert r.returncode == 0, r.stderr
+    assert "unbilled" in r.stdout
+    e = vault.entries("Topics", "Reading")[0]
+    assert e["rate"] == 0
+    assert "currency" not in e          # absent, not null
+
+
+def test_unbilled_hours_file_omits_currency_frontmatter(vault):
+    vault.write_thread("Topics", "Reading")
+    vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
+    assert "currency:" not in vault.read("hours/Topics/Reading.md")
+
+
+def test_rate_without_currency_is_refused(vault):
+    """The one incoherent combination: a charge with nothing to charge in."""
+    vault.write_thread("Topics", "Reading")
+    r = vault.run("log", "Topics/Reading", "Reading", "-m", "30", "-r", "500",
+                  cli="hours")
+    assert r.returncode != 0
+    assert "needs a currency" in r.stderr
+
+
+def test_billable_thread_is_unaffected(vault):
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    r = vault.run("log", "Projects/SANA", "Spec work", "-m", "120", cli="hours")
+    assert "5000 ZAR" in r.stdout
+    assert vault.entries("Projects", "SANA")[0]["currency"] == "ZAR"
+
+
+def test_report_totals_unbilled_separately(vault):
+    vault.write_thread("Topics", "Reading")
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
+    vault.run("log", "Projects/SANA", "Spec", "-m", "60", cli="hours")
+    out = vault.run("report", cli="hours").stdout
+    assert "TOTAL unbilled" in out
+    assert "TOTAL ZAR" in out
+
+
+def test_edit_an_unbilled_entry(vault):
+    vault.write_thread("Topics", "Reading")
+    vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
+    eid = vault.entries("Topics", "Reading")[0]["id"]
+    r = vault.run("edit", eid, "-m", "45", cli="hours")
+    assert r.returncode == 0, r.stderr
+    assert vault.entries("Topics", "Reading")[0]["rate"] == 0
+
+
+def test_unbilled_hours_pass_lint(vault):
+    vault.write_thread("Topics", "Reading")
+    vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
+    r = vault.run(cli="lint")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_statement_ignores_unbilled_time(vault):
+    """Unbilled time can never be charged for, so it must not reach a
+    statement of account."""
+    vault.write_thread("Topics", "Reading")
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    vault.run("log", "Topics/Reading", "Reading", "-m", "600", cli="hours")
+    vault.run("log", "Projects/SANA", "Spec", "-m", "60", cli="hours")
+    out = vault.run("statement", cli="payments").stdout
+    assert "Projects/SANA" in out
+    assert "Topics/Reading" not in out

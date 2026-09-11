@@ -474,7 +474,9 @@ def validate_file(path, schemas, registry=None):
 # ---------- hours_file: tracker block + vault-wide rules ----------
 
 TRACKER_FENCE = '```simple-time-tracker'
-ENTRY_FIELDS = ('name', 'startTime', 'endTime', 'id', 'rate', 'currency')
+# currency is optional on an hours entry: absent means unbilled time.
+# The ISO-code check further down still applies when one is present.
+ENTRY_FIELDS = ('name', 'startTime', 'endTime', 'id', 'rate')
 ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 
 

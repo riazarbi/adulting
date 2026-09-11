@@ -27,7 +27,7 @@ cd "$(dirname "$0")"
 FAILED=()
 
 # Executables that make up the operator surface, plus the developer tools.
-PY_TOOLS=(tasks threads people hours payments buffer lint commit)
+PY_TOOLS=(tasks search threads people hours payments buffer lint commit)
 SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
 DEV_TOOLS=(dev/manual-harvest dev/manual-build dev/manual-diff
            dev/tools-build dev/tools-check)
@@ -73,7 +73,7 @@ stage_lint() {
   # and the agent tool definitions all depend on it, so a tool that loses it
   # silently breaks the manual.
   local hj_fail=0
-  for t in tasks notes threads people hours payments buffer lint commit; do
+  for t in tasks notes search threads people hours payments buffer lint commit; do
     ./"$t" --help-json >/dev/null 2>&1 || { echo "    $t --help-json"; hj_fail=1; }
   done
   [ $hj_fail -eq 0 ] && ok "--help-json contract" || bad "--help-json contract"

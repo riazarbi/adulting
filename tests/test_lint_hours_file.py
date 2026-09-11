@@ -40,10 +40,23 @@ def test_unresolvable_thread_is_flagged(vault):
     assert "does not resolve" in r.stdout
 
 
-def test_missing_currency_frontmatter_is_flagged(vault):
+def test_missing_currency_frontmatter_is_allowed(vault):
+    """An hours file with no currency holds unbilled time, which is valid:
+    `hours` records time and money is an overlay. Previously required."""
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
     p = vault.write_hours_file("Projects", "SANA Partners", [entry()])
     p.write_text(p.read_text().replace("currency: ZAR\n", ""), encoding="utf-8")
+    r = lint(vault, str(p))
+    assert r.returncode == 0, r.stdout
+
+
+def test_malformed_currency_is_still_flagged(vault):
+    """Optional does not mean unchecked: a currency that is present must
+    still be a 3-letter ISO code."""
+    vault.write_thread("Projects", "SANA Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SANA Partners", [entry()])
+    p.write_text(p.read_text().replace("currency: ZAR", "currency: rand"),
+                 encoding="utf-8")
     r = lint(vault, str(p))
     assert r.returncode == 1
     assert "currency" in r.stdout

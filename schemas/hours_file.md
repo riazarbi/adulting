@@ -21,7 +21,7 @@ them. Written and maintained by the `hours` CLI.
 | name     | required | type   | constraint                        |
 |----------|----------|--------|-----------------------------------|
 | thread   | yes      | string |                                   |
-| currency | yes      | string | regex=^[A-Z]{3}$                  |
+| currency | no       | string | regex=^[A-Z]{3}$                  |
 
 ## Body
 
@@ -41,7 +41,7 @@ Each element of `entries` is one logged session.
 | endTime   | yes      | string | same form; must be >= startTime                      |
 | id        | yes      | string | 8 hex chars, unique across the whole vault           |
 | rate      | yes      | int    | per-hour charge; `0` means unbillable and is ordinary |
-| currency  | yes      | string | ISO 4217, `^[A-Z]{3}$`                               |
+| currency  | no       | string | ISO 4217, `^[A-Z]{3}$`; absent or null means unbilled |
 
 ## Notes
 
@@ -53,6 +53,12 @@ Each element of `entries` is one logged session.
   renders, and these descriptions are invoice line items.
 - `rate: 0` is a normal value, not a sentinel. Hours still count toward
   duration totals; the money is simply zero.
+- `currency` is optional because `hours` records time, and money is an
+  overlay on it. A thread with no currency is not billable: its entries are
+  written with `rate: 0` and no currency, and `hours report` totals their
+  duration under an `unbilled` row rather than in a money bucket. The
+  file-level `currency` is likewise omitted for such a file. `payments` has
+  no equivalent relaxation — money received must always name its currency.
 - `rate` and `currency` are stored per entry, resolved at write time, so that
   changing a thread's defaults never retroactively re-prices or
   re-denominates history. The redundancy against frontmatter is deliberate.

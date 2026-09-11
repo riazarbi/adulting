@@ -25,8 +25,8 @@ from pathlib import Path
 FORBIDDEN = ['manual-harvest', 'manual-build', 'manual-diff', 'manual-prompt',
              'ci.sh', 'agent-build', 'help-json']
 
-OPERATOR_TOOLS = ['tasks', 'notes', 'threads', 'people', 'hours', 'payments',
-                  'buffer', 'lint', 'commit']
+OPERATOR_TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
+                  'payments', 'buffer', 'lint', 'commit']
 
 # A command is only counted where it is presented as code — a fenced block
 # or inline backticks. Matching bare prose picks up phrases like "tasks whose

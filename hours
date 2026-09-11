@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Consulting time tracking for the adulting vault.
+"""Time tracking for the adulting vault, billable and not.
 
 Entries live in $ADULTING_HOME/hours/<Kind>/<Thread>.md as JSON inside a
 ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker plugin
@@ -14,7 +14,17 @@ renders, and these descriptions are invoice line items. Extra keys (id, rate,
 currency) ride alongside; the plugin round-trips unknown keys unharmed because
 loadTracker() casts rather than maps.
 
+Money is an overlay on time, not a precondition for recording it. A thread
+carrying a `currency` is billable: entries take its rate and are costed. A
+thread with no currency is not: its entries are written with rate 0 and no
+currency at all, `hours report` totals their duration under an `unbilled`
+row, and `payments statement` ignores them. So personal threads -- reading,
+exercise, admin -- can be tracked in the same place as client work without
+inventing a currency for them.
+
 Rate 0 means unbillable and is an ordinary value -- hours still count.
+Asking for a rate with no currency to express it in is the one refused
+combination.
 """
 
 import argparse
@@ -61,15 +71,41 @@ def resolve_rate(tpath, flag):
     return V.config_default('hours', 'rate', DEFAULT_RATE)
 
 
+def resolve_billing(tpath, ref, currency_flag, rate_flag):
+    """Return (currency, rate). A thread with no currency is not billable.
+
+    `hours` records time; money is an overlay. Where no currency is available
+    the entry is unbilled: currency None, rate 0. Asking for a rate without a
+    currency is the one incoherent combination, and it is an error rather
+    than a guess. This is deliberately NOT V.resolve_currency, which stays
+    strict for `payments` — money received must name its currency.
+    """
+    currency = currency_flag or V.thread_meta(tpath)[0]
+    if not currency:
+        if rate_flag is not None and int(rate_flag) != 0:
+            sys.exit(f"{TOOL}: --rate needs a currency\n"
+                     f"  pass --currency, or set `currency:` on the thread; "
+                     f"omit --rate to log the time as unbilled")
+        return None, 0
+    currency = currency.upper()
+    if not re.match(r'^[A-Z]{3}$', currency):
+        sys.exit(f"{TOOL}: currency {currency!r} is not a 3-letter ISO code")
+    return currency, resolve_rate(tpath, rate_flag)
+
+
 def build_entry(desc, when, minutes, rate, currency, ids):
-    return {
+    entry = {
         'name': desc,
         'startTime': V.to_iso(when),
         'endTime': V.to_iso(when + timedelta(minutes=minutes)),
         'id': V.new_id(ids),
         'rate': int(rate),
-        'currency': currency,
     }
+    # Omitted rather than null for unbilled time: the key's absence is the
+    # signal, and a null reads as a currency somebody forgot to fill in.
+    if currency:
+        entry['currency'] = currency
+    return entry
 
 
 def save(path, entries, ref, currency):
@@ -80,15 +116,20 @@ def save(path, entries, ref, currency):
 def append_entry(kind, name, entry):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
-    save(path, V.read_records(path, FENCE) + [entry], ref, entry['currency'])
+    save(path, V.read_records(path, FENCE) + [entry], ref,
+         entry.get('currency'))
     return path
 
 
 def report_logged(entry, ref):
     when = V.local(entry['startTime']).strftime('%Y-%m-%d %H:%M')
+    if entry.get('currency'):
+        tail = (f"@ {entry['rate']} {entry['currency']} = "
+                f"{V.fmt_money(money_of(entry), entry['currency'])}")
+    else:
+        tail = "unbilled"
     print(f"logged {entry['id']}  {ref}  {when}  "
-          f"{V.fmt_duration(minutes_of(entry))} @ {entry['rate']} "
-          f"{entry['currency']} = {V.fmt_money(money_of(entry), entry['currency'])}")
+          f"{V.fmt_duration(minutes_of(entry))} {tail}")
 
 
 # ---------- log ----------
@@ -102,8 +143,7 @@ def cmd_log(args):
 
     kind, name, tpath = V.resolve_target(TOOL, args.thread)
     ref = V.thread_ref(kind, name)
-    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
-    rate = resolve_rate(tpath, args.rate)
+    currency, rate = resolve_billing(tpath, ref, args.currency, args.rate)
     minutes = args.minutes if args.minutes is not None else V.config_default(
         'hours', 'minutes', DEFAULT_MINUTES)
     if minutes <= 0:
@@ -203,7 +243,8 @@ def cmd_report(args):
         b['minutes'] += minutes_of(e)
         b['amount'] += money_of(e)
         b['entries'] += 1
-    out = sorted(buckets.values(), key=lambda b: (b['thread'], b['currency']))
+    out = sorted(buckets.values(),
+                 key=lambda b: (b['thread'], b['currency'] or ''))
     if args.json:
         print(json.dumps([{**b, 'amount': float(b['amount']),
                            'hours': round(b['minutes'] / 60, 2)} for b in out], indent=2))
@@ -224,8 +265,11 @@ def cmd_report(args):
         t['minutes'] += b['minutes']
         t['amount'] += b['amount']
     print()
-    for ccy, t in sorted(per_ccy.items()):
-        print(f"{'TOTAL ' + ccy:<{tw}}  {'':>7}  {V.fmt_duration(t['minutes']):>10}  "
+    # Unbilled time has no currency to total against, so it gets its own row
+    # rather than being folded into a money bucket or dropped.
+    for ccy, t in sorted(per_ccy.items(), key=lambda kv: kv[0] or ''):
+        label = ('TOTAL ' + ccy) if ccy else 'TOTAL unbilled'
+        print(f"{label:<{tw}}  {'':>7}  {V.fmt_duration(t['minutes']):>10}  "
               f"{V.fmt_money(t['amount'], ccy):>16}")
 
 
@@ -276,7 +320,7 @@ def cmd_edit(args):
             V.from_iso(target['startTime']) + timedelta(minutes=args.minutes))
 
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
-    save(path, entries, ref, fm.get('currency', target['currency']))
+    save(path, entries, ref, fm.get('currency') or target.get('currency'))
     report_logged(target, ref)
 
 
@@ -306,7 +350,9 @@ def main():
     log.add_argument('description', nargs='*', help="What was done.")
     log.add_argument('-m', '--minutes', type=int, help="Duration (default 60).")
     log.add_argument('-r', '--rate', type=int, help="Hourly rate; 0 = unbillable.")
-    log.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
+    log.add_argument('-c', '--currency',
+                     help="ISO code; defaults to the thread's. Without either, "
+                          "the entry is recorded as unbilled.")
     log.add_argument('-d', '--date', help="YYYY-MM-DD (default today).")
     log.add_argument('-t', '--time', help="HH:MM (default now).")
     log.add_argument('--all', action='store_true',
@@ -320,7 +366,9 @@ def main():
     ls.add_argument('--json', action='store_true')
     ls.set_defaults(func=cmd_list)
 
-    rep = sub.add_parser('report', help="Totals by thread and currency.")
+    rep = sub.add_parser('report',
+                         help="Totals by thread and currency, with unbilled "
+                              "time totalled separately.")
     rep.add_argument('--thread')
     rep.add_argument('--since')
     rep.add_argument('--until')

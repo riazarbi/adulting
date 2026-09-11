@@ -94,6 +94,42 @@ def parse_frontmatter(text):
     return fm, 0
 
 
+def parse_frontmatter_doc(text):
+    """Return (frontmatter, body) for a note or log.
+
+    Unlike parse_frontmatter, which returns scalars and a line index, this
+    understands the block-list form notes use for `threads:` and `people:`,
+    and hands back the body as text. List values come back as lists; scalars
+    as strings. Wikilinks are left as written — call unwiki() on them.
+    """
+    lines = text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return {}, text
+    fm = {}
+    key = None
+    end = 0
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == '---':
+            end = i + 1
+            break
+        if (line.startswith(' ') or line.startswith('\t')) and key:
+            stripped = line.lstrip()
+            if stripped.startswith('- '):
+                val = stripped[2:].strip().strip('"').strip("'")
+                fm.setdefault(key, [])
+                if isinstance(fm[key], list):
+                    fm[key].append(val)
+            continue
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*?)\s*$', line)
+        if m:
+            key = m.group(1)
+            val = m.group(2).strip().strip('"').strip("'")
+            fm[key] = val if val else []
+        else:
+            key = None
+    return fm, '\n'.join(lines[end:])
+
+
 def unwiki(s):
     m = re.match(r'^\[\[([^\]]+)\]\]$', (s or '').strip())
     return m.group(1) if m else (s or '').strip()
@@ -285,8 +321,12 @@ def write_records(path, records, fence, ref, currency, key='entries',
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         title = f"# {path.stem}{heading}"
-        out = (['---', f'thread: "[[{ref}]]"', f'currency: {currency}', '---',
-                '', title, '', fence] + payload + [CLOSE, ''])
+        # currency is omitted for a file that only ever holds unbilled time:
+        # money is an overlay on hours, not a precondition for recording them.
+        head = ['---', f'thread: "[[{ref}]]"']
+        if currency:
+            head.append(f'currency: {currency}')
+        out = (head + ['---', '', title, '', fence] + payload + [CLOSE, ''])
     path.write_text('\n'.join(out), encoding='utf-8')
 
 
@@ -365,6 +405,9 @@ def dec(x):
 
 
 def fmt_money(amount, currency):
+    """Money as text. A currency-less amount is unbilled time, not zero money."""
+    if not currency:
+        return 'unbilled'
     q = Decimal(amount).quantize(Decimal('0.01'))
     whole = format(q, 'f').rstrip('0').rstrip('.')
     return f"{whole or '0'} {currency}"

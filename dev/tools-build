@@ -56,19 +56,39 @@ API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
 #                   the same word used as a filter, which is an acceptable
 #                   trade for not letting an agent delete a note.
 POLICY = {
+    # Interactive paths that CANNOT be expressed here, because forbidden_args
+    # matches an argv element and these turn on an argument being *absent*:
+    #   hours log / payments log  with no thread -> interactive capture
+    #   threads new / people new  with fields missing -> prompts per field
+    # All four are needed non-interactively, so blocking the subcommand would
+    # remove the capability. They fail cleanly on EOF ("aborted"), and the
+    # generated descriptions state the requirement instead.
     'tasks': {},
-    # Every notes subcommand except `last` opens a picker and reads a
-    # selection from stdin. With no TTY the read takes EOF and the script
-    # carries on with a garbage selection rather than failing, so these are
-    # blocked outright rather than merely discouraged.
+    # Every notes subcommand is unusable without a terminal, for one of two
+    # reasons, and several for both:
+    #   picker    reads a selection from stdin. Bash `read` takes EOF and
+    #             carries on with a garbage selection instead of failing.
+    #   external  launches an application — `last` and `edit` open Obsidian,
+    #             `nano` opens nano, and pdf/minutes/agenda `open -g` the
+    #             rendered PDF.
+    # That is the complete subcommand list, so nothing here is callable. The
+    # agent reads notes with read_file and rg instead.
     'notes': {'forbidden_args': ['new', 'copy', 'strip', 'edit', 'nano',
-                                 'delete', 'cat', 'pdf', 'minutes',
+                                 'last', 'delete', 'cat', 'pdf', 'minutes',
                                  'agenda']},
+    # Read-only by construction: it never writes, never prompts, never
+    # launches anything. Nothing to block.
+    'search': {'read_only': True},
     'threads': {'forbidden_args': ['delete']},
     'people': {'forbidden_args': ['delete']},
-    'hours': {},
-    'payments': {},
-    'buffer': {},
+    # rm destroys a billing record. Correcting is what is actually wanted
+    # nine times in ten, and `edit` covers that; a genuine deletion is rare
+    # enough to be worth doing by hand.
+    'hours': {'forbidden_args': ['rm']},
+    'payments': {'forbidden_args': ['rm']},
+    # suggest prompts for accept/reject unless -y is passed. Nothing routes
+    # through it, so block it rather than rely on the flag being remembered.
+    'buffer': {'forbidden_args': ['suggest']},
     'lint': {'read_only': True},
     'commit': {},
 }
@@ -143,10 +163,29 @@ def parse_descriptions(text):
     return data
 
 
+# Appended to the description of any tool with forbidden_args, so the model
+# is told what is blocked instead of discovering it by being refused. Written
+# here rather than by the model: enforcement and prose then cannot disagree.
+BLOCKED_MARKER = 'BLOCKED:'
+
+
+def strip_blocked(description):
+    """Remove a previously appended BLOCKED paragraph, so re-applying is idempotent."""
+    i = description.find('\n\n' + BLOCKED_MARKER)
+    return description[:i] if i >= 0 else description
+
+
 def build(tool, description):
     """Assemble one tool definition: generated prose + declared policy."""
-    out = {'command': tool, 'description': description.strip() + '\n'}
-    out.update(POLICY.get(tool, {}))
+    policy = POLICY.get(tool, {})
+    text = strip_blocked(description.strip())
+    blocked = policy.get('forbidden_args')
+    if blocked:
+        text += (f"\n\n{BLOCKED_MARKER} {', '.join(blocked)}. "
+                 f"These subcommands are refused and calling one returns an "
+                 f"error. Do not attempt them.")
+    out = {'command': tool, 'description': text + '\n'}
+    out.update(policy)
     return out
 
 
@@ -162,6 +201,10 @@ def main():
                          'environment instead of your Claude subscription.')
     ap.add_argument('--dry-run', action='store_true',
                     help='Harvest and report scope, then stop. No model call.')
+    ap.add_argument('--repolicy', action='store_true',
+                    help='Re-apply POLICY to the existing definitions and '
+                         'exit. Keeps the generated descriptions as they are; '
+                         'no model call. Use after editing POLICY.')
     args = ap.parse_args()
 
     corpus = (Path(args.corpus).read_text(encoding='utf-8') if args.corpus
@@ -176,6 +219,20 @@ def main():
             f"Add an entry to POLICY in {Path(__file__).name} — a new tool "
             f"must have its blast radius decided deliberately.")
     if args.dry_run:
+        return
+
+    if args.repolicy:
+        out_dir = Path(args.out).resolve()
+        for tool in tools:
+            path = out_dir / f"{tool}.json"
+            if not path.exists():
+                die(f"{rel(path)} does not exist; run a full build first")
+            existing = json.loads(path.read_text(encoding='utf-8'))
+            path.write_text(json.dumps(build(tool, existing['description']),
+                                       indent=2) + '\n', encoding='utf-8')
+            fa = POLICY.get(tool, {}).get('forbidden_args')
+            print(f"  {rel(path)}: blocked={fa or 'none'}", file=sys.stderr)
+        print(f"\nre-applied policy to {len(tools)} definition(s).", file=sys.stderr)
         return
 
     auth = 'API key' if args.use_api_key else 'Claude subscription'

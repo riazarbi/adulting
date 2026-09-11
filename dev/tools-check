@@ -13,7 +13,9 @@ Checks, all fatal:
   content    description non-empty, names every subcommand the tool reports,
              and mentions each of the tool's own flags
   hygiene    no absolute filesystem paths baked into a description
-  policy     forbidden_args name real subcommands of that tool
+  policy     forbidden_args name real subcommands of that tool, and the
+             description declares exactly those blocks — so what the agent
+             is told and what the loader enforces cannot drift apart
 
 Usage:
     dev/tools-check [--dir dev/tools] [--corpus-json FILE]
@@ -121,10 +123,19 @@ def main():
                 continue
             errors.append(f"{path.name}: description never mentions flag {flag!r}")
 
-        for bad in data.get('forbidden_args', []):
+        blocked = data.get('forbidden_args', [])
+        for bad in blocked:
             if subs and bad not in subs:
                 errors.append(f"{path.name}: forbidden_args entry {bad!r} is "
                               f"not a subcommand of {tool}")
+
+        # The description must declare exactly what the loader blocks.
+        m = re.search(r'^BLOCKED: (.+?)\.', desc, re.M | re.S)
+        declared = ([x.strip() for x in m.group(1).split(',')] if m else [])
+        if sorted(declared) != sorted(blocked):
+            errors.append(f"{path.name}: description declares blocked "
+                          f"{declared or 'none'} but forbidden_args is "
+                          f"{blocked or 'none'}")
 
     if errors:
         print(f"\033[31m{len(errors)} problem(s):\033[0m", file=sys.stderr)

@@ -252,6 +252,10 @@ def billed(thread=None, since=None, until=None):
             continue
         if not e.get('startTime') or not e.get('endTime'):
             continue
+        # Unbilled time carries no currency and can never be charged for, so
+        # it has no place on a statement of account.
+        if not e.get('currency'):
+            continue
         day = V.local(e['startTime']).strftime('%Y-%m-%d')
         if since and day < since:
             continue

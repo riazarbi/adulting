@@ -2,6 +2,36 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-11 - half-day activity check-ins, and the notes/logs/hours boundary
+
+Most of a working day leaves no artefact. An email sent, a call taken, a problem chewed over — none of it reaches the vault, so `search activity` reported quiet days that were not quiet. Two weekday check-ins now ask what happened and file the answer, and settling where that answer goes forced the boundary between the three content stores to be written down.
+
+- **Two timer jobs** in `.agent/jobs.yaml`: `midday-checkin` at 13:10 and `evening-checkin` at 17:30, weekdays. Both ask a question and stop; the reply is the input. **13:10 rather than 13:00 is deliberate** — `clear-context` wipes the conversation at 13:05, so a check-in started on the hour would have its own context erased mid-exchange. Starting just after the wipe means it begins clean. The evening job first calls `search activity --since <today>` so it can say what it already has and not make him repeat himself.
+- **The prompt wording carries the objective.** "Include anything you spent time on even if nothing came of it: emails, calls, a problem you chewed on." That clause is the point of the exercise; without it the reply lists only things that produced something.
+- **New `activity-capture` skill** turns one sentence — "i had a 5k run, fixed the broken alarm, and circulated the sgb minutes" — into records. It splits the reply, resolves threads, **estimates durations and shows them** so they are corrected in one word rather than asked about one at a time, checks `tasks list` for matching pending tasks to close, and proposes the whole batch for a single confirm. Role-prompt classification gains intent 10, with the boundary against intent 4 stated: one finished task closes that task; a list covering a stretch of the day becomes time entries.
+- **It does not commit.** The 21:00 `nightly-commit` job does that. Committing per check-in would fragment the history and duplicate an existing job.
+- **The boundary, written into the README's conceptual model and thereby into `MANUAL.md`.** Three stores, three questions: a **note** is what was said or decided (heavyweight, a document); a **log line** is what happened on a thread today (lightweight, the general-purpose capture surface that exists so recording something need not mean writing a note); a **time entry** is how long it took.
+- **Hours hold a label, not a narrative** — and the deciding argument is mechanical rather than aesthetic: **`search` indexes notes and logs, not hours.** Detail written into an entry's `name` cannot be found again by `search --text`. It is also the only field the Obsidian tracker renders and it appears verbatim on a client's statement of account. So a rich afternoon produces both records: a log line with what actually happened, and a time entry with the duration under a short label. A trivial item — "5k run, 30 minutes" — needs no log line, because manufacturing narrative to fill a slot is the duplication worth avoiding.
+- **Considered and rejected: synthesising hours from logs.** Logs carry no duration, so synthesis would have to invent one, and it creates a derived store that can drift from its source.
+- **`commit-workflow` gains `hours/` as a third timeline source.** Its Activity timeline read only notes and logs; with a day's work now living in time entries, the nightly commit would have reported it as a file modification under "Vault changes". A changed hours file is always activity.
+- **An empirical check first, not an assumption.** A census of all 145 log files: 194 task anchors (73%), 53 `REF:`, 19 `TEXT:`, 0 `ACTION:`. Logs are currently a task substrate. That describes usage, not design intent — `buffer add-text` and `add-ref` exist precisely for the capture role — and reading it as a vacancy was the wrong conclusion, corrected before it reached the tools.
+
+## 2026-09-11 - search returned paths nothing could open
+
+Deployed, `search` cost the agent ~57 tool calls on "what were the key takeaways from the last SGB meeting" and it still failed. Two independent defects compounded, and either alone would have been survivable.
+
+- **`search` emitted vault-relative paths** (`notes/2026-08-31-08-03-32.md`, from `path.relative_to(HOME)`). A reader resolves a relative path against its own working directory, which is not the vault. Paths are now absolute.
+- **The container's working directory is an empty, unmounted `/workspace`.** The image sets `WORKDIR /workspace` and nothing is bind-mounted there, so `rg .` reported "No files were searched" and `list_files "."` returned null — the agent could not even discover where the vault was. It guessed `vault/`, `vault/notebooks/`, `/home/riaz/vault` (the *host* path, absent inside the container) and `/`, never `/vault`. `working_dir: /vault` added to the compose service; safe because the agent has no file-writing tool, so nothing can litter the cwd.
+- **Neither the prompt nor any skill said where the vault was**, or that `load_skill` exists — `load_skill` was called zero times and the agent tried to `read_file` the skill instead. Both now stated, along with the rule that a failed read is not a cue to guess prefixes.
+- **The tests passed against the broken code**, which is the lesson worth keeping. They asserted the filename appeared in the output, never that the path was usable — the wrong contract, tested on a host where the distinction is invisible. Three new tests pin it, one of which `chdir`s to an unrelated empty directory and asserts every returned path still resolves. Confirmed to fail against the old code.
+
+## 2026-09-11 - the harvester silently dropped README subsections
+
+`harvest_readme` split on `#{1,3}`, so a `###` subsection under a harvested `##` heading became a section in its own right, was dropped for not appearing in `README_SECTIONS`, and truncated its parent at that point. The notes/logs/hours boundary was written to the README and never reached the corpus, `MANUAL.md`, or the tool definitions — with nothing downstream to notice.
+
+- Splits on levels 1 and 2 only. Verified surgical: the corpus gains exactly the one intended section, +2106 bytes, nothing else.
+- **`tests/test_manual_harvest.py`** — the harvester had no tests at all, despite its output being the sole input to both generated artefacts. Four now: subsections survive, every declared README section is present, every operator tool appears with a non-empty manifest, and two runs are byte-identical (the no-pollution argument rests on that). Confirmed to fail against the old split.
+
 ## 2026-09-11 - `hours` records time, billable or not
 
 `hours log` hard-refused any thread without a `currency`, so tracking non-billable time meant attaching a currency to a thread that would never involve money. The tool is called `hours`, not billed-hours: money is an overlay on time, not a precondition for recording it.

@@ -9,7 +9,39 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 - **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
 - **Time entry** — a billable (or unbillable) session of work on a thread. Entries live in `~/vault/hours/` as JSON inside a ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker format renders them natively.
 - **Payment** — money received against a thread. Records live in `~/vault/payments/`, same shape as hours.
-- **Action** — a task. Notes contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source notes are the only store — there is no backend.
+- **Log** — a per-thread, per-day file at `~/vault/logs/<Kind>/<Name>/<date>.md`, written by `buffer flush`. Its body is a list of statements: `TEXT:` observations, `REF:` pointers to other vault files, and the `TASK:`/`DONE:` anchors that `tasks` manages.
+- **Action** — a task. Notes and logs contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source files are the only store — there is no backend.
+
+### Notes, logs and hours
+
+Three stores, three questions. They are not competing for the same content.
+
+| Store | Answers | Weight |
+|---|---|---|
+| **Note** | what was said, decided, researched | heavyweight — frontmatter, structure, a document |
+| **Log** | what happened on this thread today | lightweight — one line, no ceremony |
+| **Time entry** | how long it took | a label and a duration |
+
+**Logs are the general-purpose capture surface.** They exist so that recording something about a thread does not require writing a note. Anything worth remembering that does not justify a document belongs there: an observation, a decision, a pointer to another file, a half-formed thought.
+
+**Hours answer a different question and should not be asked to hold content.** An entry's `name` is an invoice line item — a short label naming the work, not a narrative. Two reasons to keep it that way:
+
+- It is the only field the Obsidian tracker plugin renders, and it appears verbatim on a client's statement of account.
+- **`search` indexes notes and logs, not hours.** Detail written into an entry's `name` cannot be found later by `search --text`. Content in hours is content you have hidden.
+
+So a rich afternoon produces both: a log line carrying what actually happened, and a time entry carrying the duration under a short label.
+
+```
+log:    TEXT: Validated the SQL detection patterns with [[people/Igor ...]]; the
+              join semantics on multi-repo commits are still unresolved.
+hours:  Projects/AXA DORA   3h 0m   "DORA metric validation"
+```
+
+A trivial item needs no log line — "5k run, 30 minutes" is a duration and a label and nothing more. Write a log line when there is something to say beyond the label.
+
+Commitments are neither: `tasks add` writes an `ACTION:` line that becomes a `TASK:` anchor inside a log.
+
+This division is why `hours` accepts threads with no currency: a 5k run and a client's afternoon are both blocks of time, and only one is billable. `search activity` rolls notes, logs and hours together, so a thread you worked on but never wrote about still shows up.
 
 # Installation
 

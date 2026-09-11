@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-11 - `search stream` — one chronology of the whole vault
+
+Every store answered its own question and nothing put them side by side: `hours list` showed hours, `tasks list` tasks, `search logs` logs. When a check-in reported four time entries and wrote one, nothing surfaced the gap. `stream` merges every dated record into a single time-ordered view.
+
+- **Nine event kinds** — notes, log lines, tasks opened, tasks completed, hours, payments, threads opened, people added, and unflushed buffer entries as `pending`. Filterable by `--kind`, `--thread`, `--text`, `--since`/`--until`, with `--today` for the verification case and `--reverse` for oldest-first.
+- **Effective time throughout.** Each event carries the date the thing happened, taken from the record — never file mtime. A `DONE:` anchor yields **two** events from one line: created at `entry:`, completed at `end:`. That matters because a completion is rewritten in place, so **136 of 167** completed tasks live in a log file filed under a different day than the day they were finished. `due:` and `scheduled:` are intent, not activity, and are not event times.
+- **No time column.** 1079 of 1316 events (81%) are date-only — only hours, payments and most notes carry a clock. A dedicated column would have been mostly blank, and filling it with `00:00` would have been a visible lie. The time is appended in parentheses where a record knows it.
+- **`hours/` and `payments/` REFs are excluded**, whether flushed or still pending. Those records are already events read from their own files; counting their pointer back into the log would list each one twice. The pending half of that rule was missed at first and found by testing a flush — a test now asserts the record appears exactly once on both sides of one.
+- **`notes/` REFs stay in.** A note's REF is its only trace in that thread's log, and the note itself is a separate event at its own date.
+- **Reads every source directly rather than tailing logs.** The REF convention makes logs a good human index but not a chronology: a REF exists only after a flush and only for records written since the convention landed, so the vault's 127 existing hours entries have none.
+- **1313 events across the whole vault**, 66 in a typical week, 1–15 on a normal day and 32 on one bulk tidy-up. Built in memory, the same order of work `search notes` already does. 9 tests, **219 passing**.
+- Immediately useful on real data: the malformed anchors carrying `--due` in their description are visible at a glance, and a 30-completion day reads as one grouped block rather than a wall.
+
 ## 2026-09-11 - every record points at itself from the log
 
 `notes new` has always dropped a `REF:` into the buffer so a new note shows up in its thread's daily log. `hours` and `payments` postdate that convention and never adopted it, so a day's log silently omitted the time worked and the money received — the two things most likely to be the whole of a day's activity. The inconsistency was the bug.

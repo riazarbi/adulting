@@ -151,20 +151,33 @@ changed in the vault". Conflating them would make both worse.
 by weight over a window; `overview` is one thread in full; `stream` is the
 flat chronology. Different questions.
 
-## Open questions
+## Built
 
-1. **Should `thread` and `person` events be in the default set?** They are
-   rare — 88 events all-time — and arguably structural rather than activity.
-   Including them costs almost nothing and makes "when did I start this?"
-   answerable.
-2. **Is a blank time column right for date-only events**, or should they
-   carry the day's start and sort first?
-3. **Should `buffer add-ref` take a `--date`?** If a REF could carry the
-   effective date rather than the flush date, `buffer flush` would file it
-   under the right day and the logs really would become the chronology —
-   much closer to the "head of logs" aspiration. It is a small change to
-   the buffer's grouping, but it changes a contract, so it is a decision
-   rather than an implementation detail.
-4. **Should `stream` gain a `--today` shorthand?** The verification use is
-   almost always "show me today", and `--since $(date +%F)` is clumsy to
-   type and worse to get an agent to construct.
+All four questions were answered and the subcommand exists.
+
+1. **Threads and people are in the default set** — they read `started:`.
+2. **The time column was dropped.** 81% of events (1079 of 1316) are
+   date-only, so a dedicated column would have been mostly blank and a
+   `00:00` on everything would have been a visible lie. The clock time is
+   appended in parentheses on the rows that have one.
+3. **Unflushed buffer entries appear as `pending`.** `search` never flushes:
+   it is declared `read_only` to the agent, and flushing writes logs, clears
+   the buffer and runs task ingest.
+4. **`--today`** bounds both ends.
+
+One correction found during the build: the `hours/`/`payments/` self-REF
+exclusion had to apply to *pending* entries as well as flushed log lines.
+Without it an unflushed hours REF duplicated its own entry. A test now
+asserts the record appears exactly once both before and after a flush,
+which is the property that actually matters.
+
+## Still open
+
+- **`buffer add-text` has no `--date`.** `add-ref` got one so that hours and
+  payments file under the day the work happened. A `TEXT:` line written
+  about last week still lands on today's date. It has not bitten yet because
+  the agent writes detail lines about work it is recording in the moment.
+- **`search activity` counts REF lines**, so a thread's `ENTRIES` now
+  includes the pointers from hours and payments. Deliberately left: no
+  figure is inflated, the `HOURS` column reads its own store, and the
+  columns are honest about what the logs contain.

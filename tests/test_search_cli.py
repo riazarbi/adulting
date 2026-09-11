@@ -193,3 +193,98 @@ def test_overview_recent_paths_are_absolute_too(stocked):
     assert d["recent"]
     for r in d["recent"]:
         assert r["path"].startswith("/"), r["path"]
+
+
+# ---- stream: one chronology, ordered by when things happened ----
+
+def _log_with(vault, kind, name, day, body):
+    p = vault.home / "logs" / kind / name / f"{day}.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f'---\nthread: "[[{kind}/{name}]]"\ndate: {day}\n'
+                 f'type: Log\n---\n\n# log\n\n{body}\n', encoding="utf-8")
+    return p
+
+
+def test_one_anchor_yields_two_events_on_different_days(stocked):
+    """A DONE anchor is created on one day and finished on another. Both are
+    events, and the completion belongs on the day it happened — not the day
+    the file is filed under."""
+    _log_with(stocked, "Processes", "SGB", "2026-06-02",
+              "DONE: Sew the button <!--e845abea entry:2026-06-02 end:2026-09-10-->")
+    rows = json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                         "--kind", "task,done", "--json").stdout)
+    by_kind = {r["kind"]: r["date"] for r in rows}
+    assert by_kind == {"task": "2026-06-02", "done": "2026-09-10"}, rows
+
+
+def test_hours_appear_once_before_and_after_flush(stocked):
+    """hours log writes a REF back into the log. The record is already a
+    stream event from its own file, so the REF must not double it —
+    pending or flushed."""
+    stocked.run("log", "Projects/Alpha", "Unmistakable marker", "-m", "60",
+                "-d", "2026-08-26", cli="hours")
+
+    def marked(rows):
+        return [r for r in rows if "Unmistakable marker" in r["summary"]]
+
+    before = marked(json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                                  "--kind", "hours,pending,log", "--json").stdout))
+    stocked.run("flush", cli="buffer")
+    after = marked(json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                                 "--kind", "hours,pending,log", "--json").stdout))
+    assert len(before) == 1, before
+    assert len(after) == 1, after
+    assert after[0]["kind"] == "hours"
+
+
+def test_unflushed_buffer_entries_show_as_pending(stocked):
+    stocked.run("add-text", "Processes/SGB", "Something worth keeping",
+                cli="buffer")
+    rows = json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                         "--kind", "pending", "--json").stdout)
+    assert rows and rows[0]["kind"] == "pending"
+    assert "Something worth keeping" in rows[0]["summary"]
+
+
+def test_threads_and_people_are_events(stocked):
+    rows = json.loads(sh(stocked, "stream", "--since", "2020-01-01",
+                         "--kind", "thread,person", "--json").stdout)
+    kinds = {r["kind"] for r in rows}
+    assert "thread" in kinds, rows
+
+
+def test_today_shorthand_bounds_both_ends(stocked):
+    from datetime import date
+    today = date.today().isoformat()
+    stocked.run("log", "Projects/Alpha", "Now", "-m", "30", cli="hours")
+    rows = json.loads(sh(stocked, "stream", "--today", "--json").stdout)
+    assert rows, "expected today's entry"
+    assert all(r["date"] == today for r in rows), rows
+
+
+def test_events_carry_a_time_only_when_the_record_does(stocked):
+    stocked.run("log", "Projects/Alpha", "Timed", "-m", "30", cli="hours")
+    rows = json.loads(sh(stocked, "stream", "--since", "2026-01-01", "--json").stdout)
+    hours = [r for r in rows if r["kind"] == "hours"]
+    notes = [r for r in rows if r["kind"] == "log"]
+    assert hours and hours[0]["time"], "an hours entry knows its clock time"
+    assert all(not r["time"] for r in notes), "a log line is date-only"
+
+
+def test_unknown_kind_is_refused(stocked):
+    r = sh(stocked, "stream", "--kind", "nonsense")
+    assert r.returncode != 0
+    assert "unknown kind" in (r.stdout + r.stderr)
+
+
+def test_reverse_flips_the_order(stocked):
+    _log_with(stocked, "Processes", "SGB", "2026-06-02",
+              "TEXT: older thing")
+    _log_with(stocked, "Processes", "SGB", "2026-08-30",
+              "TEXT: newer thing")
+    fwd = json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                        "--kind", "log", "--json").stdout)
+    rev = json.loads(sh(stocked, "stream", "--since", "2026-01-01",
+                        "--kind", "log", "--reverse", "--json").stdout)
+    assert fwd[0]["date"] > fwd[-1]["date"]
+    assert rev[0]["date"] < rev[-1]["date"]

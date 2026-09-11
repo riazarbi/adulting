@@ -13,6 +13,7 @@ Subcommands:
   logs      find daily logs by thread, date range or text
   activity  rank threads by what happened in a window
   overview  the whole picture of one thread
+  stream    every dated record, merged into one chronology
 
 Paths are emitted ABSOLUTE, resolved against ADULTING_HOME. They exist to be
 handed straight to a reader, and a reader resolves a relative path against
@@ -44,6 +45,28 @@ HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 NOTES_DIR = HOME / 'notes'
 LOGS_DIR = HOME / 'logs'
 HOURS_FENCE = '```simple-time-tracker'
+PAYMENTS_FENCE = '```adulting-payments'
+BUFFER_FILE = HOME / 'buffer.md'
+
+STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
+                'thread', 'person', 'pending')
+
+# A buffer line: thread wikilink, type tag, body, timestamp comment.
+BUFFER_LINE_RE = re.compile(
+    r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF):\s+(.+?)\s+'
+    r'<!--(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}')
+
+# A task anchor, in a note or a log. `entry:` is when it was taken on and
+# `end:` when it was finished — two events from one line, on different days.
+ANCHOR_RE = re.compile(
+    r'^(TASK|DONE):\s+(?:\[#[^\]]+\]\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s+'
+    r'<!--\s*([a-f0-9]{8})\s+entry:(\d{4}-\d{2}-\d{2})'
+    r'(?:\s+end:(\d{4}-\d{2}-\d{2}))?')
+
+# REF lines pointing at these are the record's own pointer back into the
+# log. The record is already a stream event read from its own file, so
+# counting the REF too would list it twice.
+SELF_REF_RE = re.compile(r'^REF:\s*\[\[(hours|payments)/')
 
 DEFAULT_LIMIT = 20
 DEFAULT_WINDOW_DAYS = 7
@@ -125,6 +148,134 @@ def log_records():
             'entries': len(ENTRY_RE.findall(body)),
             'body': body,
         })
+    return out
+
+
+# ---- stream event collection ----
+#
+# Every event carries the date the thing HAPPENED, taken from the record
+# itself. Not file mtime, not the moment it was written down. Where a record
+# knows the clock time it is kept; four fifths of them do not, which is why
+# there is no time column.
+
+def _event(kind, date, thread, summary, path, time=''):
+    return {'kind': kind, 'date': date, 'time': time, 'thread': thread,
+            'summary': summary, 'path': path}
+
+
+def stream_documents():
+    """Notes, log lines, and the task anchors inside both."""
+    out = []
+    for r in note_records():
+        out.append(_event('note', r['date'], ', '.join(r['threads']) or '-',
+                          r['topic'] or '(untitled)', r['path']))
+    for r in log_records():
+        thread = ', '.join(r['threads']) or '-'
+        for line in r['body'].splitlines():
+            line = line.strip()
+            if not line or SELF_REF_RE.match(line):
+                continue
+            if line.startswith(('TEXT:', 'REF:')):
+                out.append(_event('log', r['date'], thread,
+                                  line.split(':', 1)[1].strip(), r['path']))
+    for r in note_records() + log_records():
+        thread = ', '.join(r['threads']) or '-'
+        for line in r['body'].splitlines():
+            m = ANCHOR_RE.match(line.strip())
+            if not m:
+                continue
+            body = m.group(3)
+            if m.group(2):
+                body = f"({m.group(2)}) {body}"
+            out.append(_event('task', m.group(5), thread, body, r['path']))
+            if m.group(6):
+                out.append(_event('done', m.group(6), thread, body, r['path']))
+    return out
+
+
+def stream_records():
+    """Hours and payments, from their own files at their own times."""
+    out = []
+    for path, ref, e in _safe_load('hours', HOURS_FENCE):
+        if not e.get('startTime'):
+            continue
+        when = V.local(e['startTime'])
+        out.append(_event('hours', when.strftime('%Y-%m-%d'), ref,
+                          f"{V.fmt_duration(minutes_between(e))} {e.get('name','')}",
+                          str(path), when.strftime('%H:%M')))
+    for path, ref, p in _safe_load('payments', PAYMENTS_FENCE, 'payments'):
+        if not p.get('received'):
+            continue
+        when = V.local(p['received'])
+        out.append(_event('payment', when.strftime('%Y-%m-%d'), ref,
+                          f"{V.fmt_money(V.dec(p.get('amount', 0)), p.get('currency'))} received",
+                          str(path), when.strftime('%H:%M')))
+    return out
+
+
+def _safe_load(subdir, fence, key='entries'):
+    try:
+        return list(V.load_all(subdir, fence, key))
+    except Exception:  # noqa: BLE001 - an empty or absent store is not an error
+        return []
+
+
+def minutes_between(e):
+    try:
+        return int((V.from_iso(e['endTime'])
+                    - V.from_iso(e['startTime'])).total_seconds() // 60)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def stream_entities():
+    """Threads opened and people added, from their `started:` date."""
+    out = []
+    for sub, kind in (('threads', 'thread'), ('people', 'person')):
+        base = HOME / sub
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob('*.md')):
+            try:
+                fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+            except Exception:  # noqa: BLE001
+                continue
+            started = str(fm.get('started') or '')[:10]
+            if not DATE_RE.match(started):
+                continue
+            rel = path.relative_to(base).with_suffix('')
+            thread = str(rel) if kind == 'thread' else '-'
+            verb = 'thread opened' if kind == 'thread' else 'person added'
+            out.append(_event(kind, started, thread, f"{verb}: {rel}",
+                              str(path)))
+    return out
+
+
+def stream_pending():
+    """Buffer entries that have not been flushed into a log yet.
+
+    They are real activity; omitting them would make the stream briefly
+    wrong in exactly the window someone is checking. `search` never flushes
+    — it is read-only, and flushing writes logs, clears the buffer and runs
+    task ingest.
+    """
+    if not BUFFER_FILE.exists():
+        return []
+    out = []
+    for line in BUFFER_FILE.read_text(encoding='utf-8').splitlines():
+        m = BUFFER_LINE_RE.match(line.strip())
+        if not m:
+            continue
+        thread, tag, body, date, clock = (m.group(1), m.group(2), m.group(3),
+                                          m.group(4), m.group(5))
+        # A buffered REF back at an hours or payments record is that
+        # record's own pointer. The record is already a stream event read
+        # from its own file, so showing the pointer too would list it twice
+        # — the same exclusion applied to flushed log lines.
+        if SELF_REF_RE.match(f"{tag}: {body}"):
+            continue
+        out.append(_event('pending', date, V.unwiki(thread) or thread,
+                          f"{tag}: {body}", str(BUFFER_FILE), clock))
     return out
 
 
@@ -351,6 +502,72 @@ def cmd_overview(args):
         render(None)
 
 
+def cmd_stream(args):
+    if args.today:
+        args.since = args.until = date.today().isoformat()
+    since = args.since if args.since is not None else (
+        date.today() - timedelta(days=DEFAULT_WINDOW_DAYS)).isoformat()
+
+    kinds = STREAM_KINDS
+    if args.kind:
+        kinds = tuple(k.strip() for k in args.kind.split(',') if k.strip())
+        bad = [k for k in kinds if k not in STREAM_KINDS]
+        if bad:
+            die(f"unknown kind(s) {', '.join(bad)}; "
+                f"choose from {', '.join(STREAM_KINDS)}")
+
+    events = (stream_documents() + stream_records() + stream_entities()
+              + stream_pending())
+
+    thread = resolve_thread_arg(args.thread)
+    needle = args.text.lower() if args.text else None
+    rows = []
+    for e in events:
+        if e['kind'] not in kinds:
+            continue
+        if thread and thread not in e['thread']:
+            continue
+        if not e['date'] or e['date'] < since:
+            continue
+        if args.until and e['date'] > args.until:
+            continue
+        if needle and needle not in f"{e['thread']} {e['summary']}".lower():
+            continue
+        rows.append(e)
+
+    # Newest first by default: today is where the eye lands. Within a day,
+    # timed events in time order, then the date-only ones.
+    rows.sort(key=lambda e: (e['date'], e['time'] or '99:99', e['kind']),
+              reverse=not args.reverse)
+
+    total = len(rows)
+    if args.limit:
+        rows = rows[:args.limit]
+
+    if args.json:
+        import json
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("(no events)")
+        print(f"\nwindow: {since} to {args.until or 'today'}")
+        return
+
+    kw = max(len(e['kind']) for e in rows)
+    tw = min(max(len(e['thread']) for e in rows), 30)
+    day = None
+    for e in rows:
+        if e['date'] != day:
+            day = e['date']
+            print(f"\n{day}")
+        clock = f"  ({e['time']})" if e['time'] else ''
+        print(f"  {e['kind']:<{kw}}  {e['thread'][:tw]:<{tw}}  "
+              f"{e['summary']}{clock}")
+    print(f"\n{total} event(s); window {since} to {args.until or 'today'}")
+    if total > len(rows):
+        print(f"{total - len(rows)} more not shown — raise --limit")
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Search notes and logs, and summarise thread activity.")
@@ -390,6 +607,21 @@ def main():
                    help='Recent items to list (default 5).')
     add_range(o)
     o.set_defaults(func=cmd_overview)
+
+    st = sub.add_parser('stream',
+                        help="Every dated record, merged into one chronology.")
+    st.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    st.add_argument('--kind', help=f"Comma-separated: {', '.join(STREAM_KINDS)}. "
+                                   f"Default all.")
+    st.add_argument('--text', help='Case-insensitive literal over thread and summary.')
+    st.add_argument('--today', action='store_true',
+                    help="Just today. Shorthand for --since and --until today.")
+    st.add_argument('--reverse', action='store_true',
+                    help='Oldest first (default is newest first).')
+    st.add_argument('--limit', type=int, default=100,
+                    help='Max events (default 100; 0 for all).')
+    add_range(st)
+    st.set_defaults(func=cmd_stream)
 
     emit_helpjson_if_requested(p)
     args = p.parse_args()

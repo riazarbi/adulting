@@ -220,3 +220,136 @@ def test_non_repo_home_fails_cleanly(gitvault, tmp_path):
     assert r.returncode != 0
     assert "not a git repository" in r.stderr
     assert r.stdout == ""
+
+
+# ---------- characterisation added before the port (refactor unit 1) ----------
+
+def test_home_that_is_not_a_directory_fails_cleanly(gitvault, tmp_path):
+    gitvault.env["ADULTING_HOME"] = str(tmp_path / "missing")
+    r = gitvault.run("review")
+    assert r.returncode == 1
+    assert r.stderr.startswith("error: ADULTING_HOME is not a directory:")
+    assert r.stdout == ""
+
+
+def test_home_that_is_a_subdirectory_of_a_repo_is_refused(gitvault):
+    """`git add -A` from a subdirectory would sweep in files outside the vault."""
+    gitvault.env["ADULTING_HOME"] = str(gitvault.home / "notes")
+    gitvault.write("outside.md", "not vault content\n")
+    r = gitvault.run("save", "--message", "should not happen")
+    assert r.returncode == 1
+    assert "is not the root of its git repository" in r.stderr
+    assert gitvault.git("diff", "--cached", "--name-only") == ""
+
+
+def test_empty_message_is_rejected(gitvault):
+    gitvault.write("notes/new.md", "hello\n")
+    r = gitvault.run("save", "--message", "   ")
+    assert r.returncode == 1
+    assert r.stderr == "error: --message must not be empty\n"
+
+
+def test_review_listing_format(gitvault):
+    gitvault.write("notes/seed.md", "edited\n")
+    gitvault.write("notes/new.md", "hello\n")
+    (gitvault.home / "notes" / "gone.md").write_text("x\n")
+    gitvault.git("add", "notes/gone.md")
+    gitvault.git("commit", "-qm", "add gone")
+    (gitvault.home / "notes" / "gone.md").unlink()
+
+    r = gitvault.run("review")
+    lines = r.stdout.split("\n")
+    assert lines[0] == "Changed paths:"
+    assert "  modified    notes/seed.md" in lines
+    assert "  deleted     notes/gone.md" in lines
+    assert "  untracked   notes/new.md" in lines
+    assert "Changes to tracked files:" in lines
+    assert "New files:" in lines
+
+
+def test_review_shows_a_staged_rename_as_old_arrow_new(gitvault):
+    gitvault.git("mv", "notes/seed.md", "notes/renamed.md")
+    r = gitvault.run("review")
+    assert r.returncode == 0, r.stderr
+    assert "  renamed     notes/seed.md -> notes/renamed.md" in r.stdout.split("\n")
+
+
+def test_review_shows_an_empty_new_file_as_a_bare_diff_header(gitvault):
+    """git still emits a header for an empty file, so the tool's
+    `[new empty file: ...]` fallback is not reached with current git."""
+    gitvault.write("notes/empty.md", "")
+    r = gitvault.run("review")
+    assert "diff --git a/notes/empty.md b/notes/empty.md" in r.stdout
+    assert "new file mode 100644" in r.stdout
+
+
+def test_review_before_the_first_commit_lists_new_files(tmp_path):
+    home = tmp_path / "fresh"
+    home.mkdir()
+    v = GitVault(home)
+    v.git("init", "-q", ".")
+    v.write("notes/first.md", "first\n")
+    r = v.run("review")
+    assert r.returncode == 0, r.stderr
+    assert "  untracked   notes/first.md" in r.stdout
+    assert "+first" in r.stdout
+    assert "Changes to tracked files:" not in r.stdout
+
+
+def test_filenames_with_spaces_and_non_ascii_are_readable(gitvault):
+    gitvault.write("people/José Núñez.md", "hola\n")
+    r = gitvault.run("review")
+    assert "  untracked   people/José Núñez.md" in r.stdout
+    s = gitvault.run("save", "--message", "Add José")
+    assert s.returncode == 0, s.stderr
+    assert "people/José Núñez.md" in gitvault.git(
+        "-c", "core.quotepath=false", "show", "--name-only", "--format=", "HEAD")
+
+
+def test_dry_run_output_format(gitvault):
+    gitvault.write("notes/new.md", "hello\n")
+    r = gitvault.run("save", "--message", "Subject", "--body", "Line one\nLine two",
+                     "--dry-run")
+    assert r.stdout == (
+        "dry run — nothing staged, nothing committed.\n"
+        "\n"
+        "Would stage 1 path(s):\n"
+        "  untracked   notes/new.md\n"
+        "\n"
+        "Would commit with message:\n"
+        "  Subject\n"
+        "\n"
+        "  Line one\n"
+        "  Line two\n")
+
+
+def test_save_output_format(gitvault):
+    gitvault.write("notes/new.md", "hello\n")
+    gitvault.write("notes/seed.md", "edited\n")
+    r = gitvault.run("save", "--message", "Two changes")
+    sha = gitvault.git("rev-parse", "--short", "HEAD").strip()
+    assert r.stdout == (f"committed {sha}: Two changes\n"
+                        "2 path(s) staged and committed.\n")
+
+
+def test_a_failing_git_commit_is_reported(gitvault):
+    """A real pre-commit hook that refuses: git's own failure path."""
+    hook = gitvault.home / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'hook says no' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    gitvault.write("notes/new.md", "hello\n")
+    before = len(gitvault.log_subjects())
+
+    r = gitvault.run("save", "--message", "Refused")
+    assert r.returncode == 1
+    assert r.stderr.startswith("error: git commit failed:")
+    assert "hook says no" in r.stderr
+    assert len(gitvault.log_subjects()) == before
+
+
+def test_help_json_describes_both_subcommands(gitvault):
+    import json
+    r = gitvault.run("--help-json")
+    assert r.returncode == 0
+    manifest = json.loads(r.stdout)
+    assert [s["name"] for s in manifest["subcommands"]] == ["review", "save"]

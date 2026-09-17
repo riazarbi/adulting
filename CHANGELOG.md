@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 1: `commit` is the first packaged command
+
+`commit` moves from a root script to `src/adulting/commit.py` and is installed as a console script (`[project.scripts]`). No behaviour change: `commit` never prompted, so nothing was removed.
+
+- **Characterised before the port.** 12 CLI tests added and run green against the old script first. They cover: a vault that isn't a directory, a vault that is a subdirectory of a repo (refused before `git add -A` can sweep in outside files), an empty message, and the exact `review`, `save` and `--dry-run` output. Also renames shown as `old -> new`, a repo with no commits yet, filenames with spaces and non-ASCII, a real pre-commit hook making `git commit` fail, and `--help-json`.
+- **Found dead code.** Current git emits a header even for an empty new file, so `review`'s `[new empty file: ...]` fallback is never reached. The test pins what actually happens. The fallback stays until the cleanup pass.
+- **`ADULTING_HOME` is read on every call** (`vault_home()`), not frozen at import, so functions can be unit-tested against a temp repo. The git argv is built per call for the same reason.
+- **New `tests/unit/test_commit.py`** (10 tests). Covers `describe`, `split_diff`, `cap_block`, and `status_entries` parsing modified, untracked and renamed paths from a real repo. Also `require_repo` accepting the root and refusing a subdirectory.
+- **Verified on the vault copy.** A note was edited, a person file deleted, and a non-ASCII file added in a new directory. Old and new then produced identical `review` output (40 lines), `save --dry-run` output, commit subject and author, and a clean tree afterwards. The only difference was the commit sha. `--help-json` is identical, and the harvested manual corpus differs only in two quoted source lines (`HOME` → `home`).
+- **Tooling follows ported commands.** `ci.sh` puts `.venv/bin` and the repo root on PATH and calls each tool by name. `dev/manual-harvest` finds a tool's source and executable in either place, and treats a `.py` module as Python.
+- `commit.py` coverage 90% → 96%. **272 passing.**
+
 ## 2026-09-17 - refactor unit 0: shared modules move into the `adulting` package
 
 First step of the Python-only refactor (`stories/2026-09-17-python-package-refactor.md`, branch `refactor2`). The five shared modules every command imports now live in `src/adulting/`, so each command can be ported on its own without a `sys.path` hack pointing back at the repo root.

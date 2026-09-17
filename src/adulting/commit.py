@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Review and commit changes to the vault.
 
 Two steps, meant to be used in order: `review` prints everything that has
@@ -16,17 +15,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
-# The vault is a bind mount inside the agent container, so git otherwise
-# refuses it as "dubious ownership". Passed per-command via -c; never
-# written to a config file. core.quotepath=false keeps non-ASCII note
-# filenames readable instead of \303\251-escaped.
-GIT = ['git', '-C', str(HOME),
-       '-c', 'safe.directory=*',
-       '-c', 'core.quotepath=false']
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 DEFAULT_MAX_FILE_LINES = 150
 DEFAULT_MAX_LINES = 3000
@@ -49,7 +44,14 @@ def die(msg):
 def git(*args, check=True):
     """Run a git command against the vault. Subprocess stderr is always
     captured, never passed through to ours."""
-    r = subprocess.run(GIT + list(args), capture_output=True, text=True)
+    # The vault is a bind mount inside the agent container, so git otherwise
+    # refuses it as "dubious ownership". Passed per-command via -c; never
+    # written to a config file. core.quotepath=false keeps non-ASCII note
+    # filenames readable instead of \303\251-escaped.
+    cmd = ['git', '-C', str(vault_home()),
+           '-c', 'safe.directory=*',
+           '-c', 'core.quotepath=false']
+    r = subprocess.run(cmd + list(args), capture_output=True, text=True)
     if check and r.returncode != 0:
         die(f"git {' '.join(args)} failed: {(r.stderr or r.stdout).strip()}")
     return r
@@ -58,14 +60,15 @@ def git(*args, check=True):
 def require_repo():
     """The vault must be the root of a git repo. If it were merely a
     subdirectory of one, `git add -A` would sweep in files outside it."""
-    if not HOME.is_dir():
-        die(f"ADULTING_HOME is not a directory: {HOME}")
+    home = vault_home()
+    if not home.is_dir():
+        die(f"ADULTING_HOME is not a directory: {home}")
     r = git('rev-parse', '--show-toplevel', check=False)
     if r.returncode != 0:
-        die(f"not a git repository: {HOME}")
+        die(f"not a git repository: {home}")
     top = Path(r.stdout.strip()).resolve()
-    if top != HOME.resolve():
-        die(f"ADULTING_HOME ({HOME}) is not the root of its git repository ({top})")
+    if top != home.resolve():
+        die(f"ADULTING_HOME ({home}) is not the root of its git repository ({top})")
 
 
 def has_head():

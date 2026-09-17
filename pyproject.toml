@@ -19,8 +19,8 @@ dev = ["pytest>=8", "coverage>=7.10"]
 
 # One entry per ported command. A command appears here in the same change
 # that deletes its old script from the repo root.
-# [project.scripts]
-# lint = "adulting.lint:main"
+[project.scripts]
+commit = "adulting.commit:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

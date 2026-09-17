@@ -64,18 +64,10 @@ POLICY = {
     # remove the capability. They fail cleanly on EOF ("aborted"), and the
     # generated descriptions state the requirement instead.
     'tasks': {},
-    # Every notes subcommand is unusable without a terminal, for one of two
-    # reasons, and several for both:
-    #   picker    reads a selection from stdin. Bash `read` takes EOF and
-    #             carries on with a garbage selection instead of failing.
-    #   external  launches an application — `last` and `edit` open Obsidian,
-    #             `nano` opens nano, and pdf/minutes/agenda `open -g` the
-    #             rendered PDF.
-    # That is the complete subcommand list, so nothing here is callable. The
-    # agent reads notes with read_file and rg instead.
-    'notes': {'forbidden_args': ['new', 'copy', 'strip', 'edit', 'nano',
-                                 'last', 'delete', 'cat', 'pdf', 'minutes',
-                                 'agenda']},
+    # notes no longer prompts or opens applications: a note is named by its
+    # stem and every subcommand runs from flags, so the agent can use them.
+    # delete is blocked for the same reason as threads and people.
+    'notes': {'forbidden_args': ['delete']},
     # Read-only by construction: it never writes, never prompts, never
     # launches anything. Nothing to block.
     'search': {'read_only': True},

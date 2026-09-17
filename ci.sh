@@ -38,7 +38,6 @@ export PATH="$PWD/.venv/bin:$PWD:$PATH"
 
 # Every Python operator command is a module in src/adulting/. The developer
 # tools are still scripts under dev/.
-SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
 DEV_TOOLS=(dev/manual-harvest dev/manual-build dev/manual-diff
            dev/tools-build dev/tools-check)
 
@@ -59,18 +58,13 @@ stage_lint() {
   done
   [ $py_fail -eq 0 ] && ok "python syntax" || bad "python syntax"
 
-  # Bash: parse-check every script.
-  local sh_fail=0
-  for f in "${SH_TOOLS[@]}" ci.sh; do
-    [ -f "$f" ] || continue
-    bash -n "$f" 2>&1 || { echo "    $f"; sh_fail=1; }
-  done
-  [ $sh_fail -eq 0 ] && ok "bash syntax" || bad "bash syntax"
+  # Bash: only this script is left.
+  if bash -n ci.sh; then ok "bash syntax"; else bad "bash syntax"; fi
 
   # Errors gate the build; warnings do not. Not installed everywhere, so a
   # missing binary skips rather than fails.
   if command -v shellcheck >/dev/null 2>&1; then
-    if shellcheck -S error "${SH_TOOLS[@]}" ci.sh; then
+    if shellcheck -S error ci.sh; then
       ok "shellcheck (errors)"
     else
       bad "shellcheck (errors)"

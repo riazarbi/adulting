@@ -6,8 +6,7 @@ picker on the same fixtures: `cat` prints the file verbatim, `copy` appends
 ` COPY` to every `topic:` line and keeps the rest, and every subcommand
 ingests ACTION lines first.
 
-Until `notes new` and the renderers are ported, the `notes` command is still
-the bash one, so these run the module directly.
+`notes` is this package's command.
 """
 
 import json
@@ -16,9 +15,10 @@ import pty
 import re
 import select
 import subprocess
-import sys
 
 import pytest
+
+from harness import command_path
 
 KICKOFF = ('---\ntopic: Kickoff\ntype: Meeting\nthreads:\n  - "[[Projects/SGB]]"\n'
            '  - "[[Topics/Zeta]]"\ntimestamp: 2026-09-10-14-30-00\n---\n\n'
@@ -26,7 +26,7 @@ KICKOFF = ('---\ntopic: Kickoff\ntype: Meeting\nthreads:\n  - "[[Projects/SGB]]"
 
 
 def notes(vault, *argv):
-    return subprocess.run([sys.executable, "-m", "adulting.notes", *argv], capture_output=True,
+    return subprocess.run([command_path("notes", vault.env), *argv], capture_output=True,
                           text=True, env=vault.env, input="")
 
 
@@ -168,7 +168,7 @@ def test_a_failed_ingest_warns_once_on_a_terminal(v):
     break_an_action(v)
     parent, child = pty.openpty()
     try:
-        r = subprocess.run([sys.executable, "-m", "adulting.notes", "cat", "2026-09-12-07-00-00"],
+        r = subprocess.run([command_path("notes", v.env), "cat", "2026-09-12-07-00-00"],
                            stdout=subprocess.PIPE, stderr=child, stdin=subprocess.DEVNULL,
                            text=True, env=v.env, timeout=30)
         # Read while the child end is still open: closing it first can
@@ -191,7 +191,8 @@ def test_ingest_runs_before_list_too(v):
 
 def test_help_json(vault):
     manifest = json.loads(notes(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == ["new", "list", "cat", "last", "copy", "delete"]
+    assert [s["name"] for s in manifest["subcommands"]] == [
+        "new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]
 
 
 def test_help_json_does_not_ingest(v):

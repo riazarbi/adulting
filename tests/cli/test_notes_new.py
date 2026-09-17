@@ -4,22 +4,22 @@ The old bash `notes new` asked for everything through prompts. The note it
 wrote, and the buffer REFs, were captured by feeding those prompts on stdin;
 these tests pin the same output for the same answers given as flags.
 
-Until the renderers are ported, the `notes` command is still the bash one,
-so these run the module directly.
+`notes` is this package's command.
 """
 
 import json
 import re
 import subprocess
-import sys
 
 import pytest
+
+from harness import command_path
 
 STEM = r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}"
 
 
 def notes(vault, *argv):
-    return subprocess.run([sys.executable, "-m", "adulting.notes", *argv], capture_output=True,
+    return subprocess.run([command_path("notes", vault.env), *argv], capture_output=True,
                           text=True, env=vault.env, input="1\n1\n\nTyped topic\n")
 
 

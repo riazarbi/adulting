@@ -105,18 +105,19 @@ Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files wi
 
 ### Subcommands
 
-| Command              | What it does                                                    |
-|----------------------|-----------------------------------------------------------------|
-| `notes` / `--new`    | Create a new note (interactive: type → thread → topic → people → meeting extras → opens editor) |
-| `--edit` / `--nano`  | Pick a note, edit in default editor / nano                      |
-| `--last`             | Open most recent note                                           |
-| `--copy` / `--strip` / `--delete` / `--cat` | Pick a note, do the thing                |
-| `--pdf` / `--minutes` / `--agenda` | Pick a note, render PDF                           |
-| `--help`             | Full help                                                       |
+A note is named by its stem — the filename without `.md`, e.g. `2026-09-10-14-30-00`. `notes list` shows the stems.
 
-Every non-`--new` invocation runs `tasks` first to ingest any pending `ACTION:` lines.
+| Command | What it does |
+|---|---|
+| `notes new --type T --topic X --thread K/N [--thread ...] [--person N ...] [--counterparty C] [--location L]` | Create a note; print its path. `--person` is for Meeting and Correspondence, `--counterparty`/`--location` for Meeting |
+| `notes list [filter] [--json]` | Stem, date, type, threads and topic of every note, oldest first |
+| `notes cat <stem>` | Print a note |
+| `notes last` | Print the path of the newest note |
+| `notes copy <stem>` | Copy a note to a new timestamp; its topic gets ` COPY` |
+| `notes delete <stem> -y` | Delete a note; refuses without `-y` |
+| `notes pdf\|minutes\|agenda <stem> [--out DIR]` | Render to `<stem>.md` and `<stem>.md.pdf` (default `~/Downloads`); print both paths |
 
-The files `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, `notes_strip` are helpers invoked by `notes`. They fail loudly if called directly (env-var guards).
+Every subcommand except `new` runs a task ingest first, to pick up pending `ACTION:` lines. If any line fails to ingest, a one-line warning goes to stderr when it is a terminal.
 
 ## threads
 
@@ -354,8 +355,7 @@ Constraint cell DSL (single cell, semicolon-separated):
 
 # Vault hygiene
 
-- All `notes_*` helpers fail loudly if invoked outside `notes` (env-var guards)
-- `notes pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD
+- `notes pdf` / `minutes` / `agenda` run pandoc inside a temporary directory — no scratch files leak into your CWD
 
 # Obsidian roadmap
 

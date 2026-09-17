@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 12: the renderers move to Python and the bash is gone
+
+`notes pdf`, `notes minutes` and `notes agenda` are ported to `src/adulting/render.py`, `notes` becomes this package's command, and the six bash scripts are deleted. The repo has no operator bash left.
+
+- **`notes pdf|minutes|agenda <stem> [--out DIR]`** writes `<stem>.md` and `<stem>.md.pdf` and prints both paths. Renders default to `~/Downloads`, as before; `--out` puts them elsewhere. Nothing opens Preview.
+- **`render.py` is a line-by-line port.** Each function names the awk, grep or sed step it replaces: awk's record splitting and `print` newline, `extract_meta`'s quote unescaping, the `people:` list rules, the `--{10,}` section boundary (eleven hyphens or more), `grep | sed | uniq`, the action-table python, the empty-H3 pass and `pad_note_rules`. Files are read and written with `errors='surrogateescape'`, so a note that is not valid UTF-8 survives as it did through awk.
+- **Two mistakes caught while porting, before any test ran:** awk's `print` adds a newline after the Summary block that `minutes` inserts, and a real `AGREED:` line reading like the "no agreements" placeholder would have been mistaken for it. Both are covered by tests.
+- **Verified against every note in the vault copy: 348 of 348 identical.** All 116 notes through all three renderers, markdown byte for byte, with the same PDF successes and failures. The old outputs were captured by driving the old picker; the old `open` calls were intercepted by a scratch script so nothing launched.
+- **Old bugs found, pinned rather than fixed:**
+  - **A topic containing a colon or a quote breaks the PDF.** It goes into the pandoc metadata unquoted, so the YAML will not parse. Two real notes are affected: `Recs x Exp: Interference Analysis` and `Principles for Autonomous System Design: OpenClaw Deep Dive`. Six of the 348 renders produce no PDF for this reason, in old and new alike. The markdown is still written.
+  - **A `TASK:` line with a priority renders as `| Riaz Arbi | [#H] (Riaz Arbi) Circulate minutes |`.** The `[#H]` stops the assignee matching, so the name stays in the task text and the row is credited to the vault owner.
+  - `  -` with nothing after it is not a list item: awk wants a space after the dash.
+- **Changed:** a PDF left from an earlier render is removed first, so a failed render cannot leave a stale file looking current. A failed render exits 1 with pandoc's message, where the bash ignored the failure.
+- **New `tests/cli/test_notes_render.py`** (24 tests). Six synthetic fixture notes in `tests/fixtures/render/` cover every rule; each `<name>.<kind>.expected.md` beside them is the old bash output, and 18 tests compare the port with those files byte for byte. The rest cover the PDF, the two paths printed, the stale-PDF removal, the `~/Downloads` default, a missing note and `--help-json`.
+- **New `tests/unit/test_render.py`** (10 tests) covers the rules one at a time: awk record semantics, quote unescaping, people lists, the owner lookup, horizontal rules and padding, section cutting and filling (ten hyphens are not a boundary, eleven are), `grep | sed | uniq` ordering, action-row dedup and owner fallback, and empty-heading stripping.
+- **`notes` is now the package's console script.** Deleted: `notes`, `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, `notes_strip`. `notes strip`, `edit` and `nano` are gone, as agreed. `ci.sh` no longer has a bash-tools list, and shellcheck now runs on itself only.
+- **Agent tools:** every `notes` subcommand used to be blocked because all of them needed a terminal. They no longer do, so the agent may use them; only `delete` stays blocked, as for `threads` and `people`. `dev/tools/notes.json` was rewritten by hand to match, and is regenerated with the rest in the cleanup unit.
+- README's notes section now documents the stem-based subcommands. `render.py` coverage 99%, `notes.py` 97%. **656 passing.**
+
 ## 2026-09-17 - refactor unit 11: `notes new` from flags
 
 `notes new` joins `src/adulting/notes.py`. Every answer the old prompts asked for is now a flag, and it prints the new note's path instead of opening Obsidian. As in unit 10, it runs as `python -m adulting.notes` until the renderers are ported and `notes` switches to Python.

@@ -9,6 +9,11 @@ A note's stem is its filename without `.md`, e.g. `2026-09-10-14-30-00`.
   notes last                 print the path of the newest note
   notes copy <stem>          copy a note to a new timestamp
   notes delete <stem> -y     delete a note
+  notes pdf <stem>           render to markdown and PDF, print both paths
+  notes minutes <stem>       render meeting minutes
+  notes agenda <stem>        render a meeting agenda
+
+Renders go to ~/Downloads, or --out DIR, as <stem>.md and <stem>.md.pdf.
 
 Non-interactive: nothing prompts, nothing opens an app, and deleting needs -y.
 
@@ -27,7 +32,9 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 
+from adulting import render
 from adulting import tasks
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
@@ -233,6 +240,34 @@ def cmd_delete(args):
     print(f"deleted: {path}")
 
 
+def cmd_render(args):
+    """pdf, minutes or agenda: write <stem>.md and <stem>.md.pdf, print both
+    paths. The markdown is kept even if pandoc fails."""
+    source = note_path(args.stem)
+    out_dir = Path(args.out).expanduser() if args.out else Path.home() / 'Downloads'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    text = source.read_text(**render.ENCODING)
+    owner = render.read_owner(V.vault_home() / '.adulting' / 'config.yaml')
+    if args.subcommand == 'pdf':
+        markdown = render.pdf_markdown(text, owner)
+    elif args.subcommand == 'minutes':
+        markdown = render.minutes_markdown(text, owner)
+    else:
+        markdown = render.agenda_markdown(text)
+
+    md_path = out_dir / source.name
+    pdf_path = out_dir / f"{source.name}.pdf"
+    md_path.write_text(markdown, **render.ENCODING)
+    print(md_path)
+    # A PDF left over from an earlier render must not pass for this one.
+    pdf_path.unlink(missing_ok=True)
+    ok, message = render.to_pdf(md_path, pdf_path)
+    if not ok:
+        sys.stdout.flush()
+        sys.exit(f"{TOOL}: PDF render failed: {message}")
+    print(pdf_path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog=TOOL, description="Create, list, print, copy and delete notes, named by stem.")
@@ -272,6 +307,17 @@ def main():
     p.add_argument('-y', '--yes', action='store_true',
                    help="Required: confirms the permanent delete.")
     p.set_defaults(func=cmd_delete)
+
+    renders = {
+        'pdf': "Render a note to markdown and PDF: callouts and an action table.",
+        'minutes': "Render meeting minutes: agreements, resolutions, action items.",
+        'agenda': "Render a meeting agenda: the note with the outcome sections emptied.",
+    }
+    for name, help_text in renders.items():
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument('stem', help="Note stem to render.")
+        p.add_argument('--out', metavar='DIR', help="Where to write the files (default ~/Downloads).")
+        p.set_defaults(func=cmd_render)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

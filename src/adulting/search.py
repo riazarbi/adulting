@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Search the vault's notes and logs, and summarise activity.
 
 Notes and logs are the only vault entities without a filtered query — tasks,
@@ -29,23 +28,17 @@ the frontmatter date is missing or malformed.
 """
 
 import argparse
-import os
 import re
 import sys
 from collections import defaultdict
 from datetime import date, timedelta
-from pathlib import Path
 
-from adulting import vault as V  # noqa: E402
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting import vault as V
+from adulting.helpjson import emit_helpjson_if_requested
 
 TOOL = 'search'
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-NOTES_DIR = HOME / 'notes'
-LOGS_DIR = HOME / 'logs'
 HOURS_FENCE = '```simple-time-tracker'
 PAYMENTS_FENCE = '```adulting-payments'
-BUFFER_FILE = HOME / 'buffer.md'
 
 STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
                 'thread', 'person', 'pending')
@@ -91,9 +84,10 @@ def event_date(fm_value, fallback_stem):
 def note_records():
     """Every parseable note, as a dict. Unparseable files are skipped."""
     out = []
-    if not NOTES_DIR.is_dir():
+    notes_dir = V.vault_home() / 'notes'
+    if not notes_dir.is_dir():
         return out
-    for path in sorted(NOTES_DIR.glob('*.md')):
+    for path in sorted(notes_dir.glob('*.md')):
         try:
             text = path.read_text(encoding='utf-8')
             fm, body = V.parse_frontmatter_doc(text)
@@ -119,9 +113,10 @@ def note_records():
 
 def log_records():
     out = []
-    if not LOGS_DIR.is_dir():
+    logs_dir = V.vault_home() / 'logs'
+    if not logs_dir.is_dir():
         return out
-    for path in sorted(LOGS_DIR.rglob('*.md')):
+    for path in sorted(logs_dir.rglob('*.md')):
         try:
             text = path.read_text(encoding='utf-8')
             fm, body = V.parse_frontmatter_doc(text)
@@ -135,7 +130,7 @@ def log_records():
         ref = V.unwiki(str(t)) or str(t)
         if not ref:
             # logs/<Kind>/<Name>/<date>.md — recover the thread from the path
-            rel = path.relative_to(LOGS_DIR).parts
+            rel = path.relative_to(logs_dir).parts
             ref = '/'.join(rel[:2]) if len(rel) >= 3 else ''
         out.append({
             'kind': 'log',
@@ -231,7 +226,7 @@ def stream_entities():
     """Threads opened and people added, from their `started:` date."""
     out = []
     for sub, kind in (('threads', 'thread'), ('people', 'person')):
-        base = HOME / sub
+        base = V.vault_home() / sub
         if not base.is_dir():
             continue
         for path in sorted(base.rglob('*.md')):
@@ -258,10 +253,11 @@ def stream_pending():
     — it is read-only, and flushing writes logs, clears the buffer and runs
     task ingest.
     """
-    if not BUFFER_FILE.exists():
+    buffer_file = V.vault_home() / 'buffer.md'
+    if not buffer_file.exists():
         return []
     out = []
-    for line in BUFFER_FILE.read_text(encoding='utf-8').splitlines():
+    for line in buffer_file.read_text(encoding='utf-8').splitlines():
         m = BUFFER_LINE_RE.match(line.strip())
         if not m:
             continue
@@ -274,7 +270,7 @@ def stream_pending():
         if SELF_REF_RE.match(f"{tag}: {body}"):
             continue
         out.append(_event('pending', date, V.unwiki(thread) or thread,
-                          f"{tag}: {body}", str(BUFFER_FILE), clock))
+                          f"{tag}: {body}", str(buffer_file), clock))
     return out
 
 

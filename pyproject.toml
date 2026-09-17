@@ -22,6 +22,7 @@ dev = ["pytest>=8", "coverage>=7.10"]
 [project.scripts]
 commit = "adulting.commit:main"
 lint = "adulting.lint:main"
+search = "adulting.search:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

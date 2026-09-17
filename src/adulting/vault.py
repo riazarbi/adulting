@@ -18,9 +18,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-THREADS_DIR = HOME / 'threads'
-CONFIG = HOME / '.adulting' / 'config.yaml'
+
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+
 
 KIND_DIRS = {'project': 'Projects', 'process': 'Processes', 'topic': 'Topics'}
 
@@ -43,10 +47,11 @@ def read_config():
           minutes: 60
     """
     cfg = {}
-    if not CONFIG.exists():
+    config = vault_home() / '.adulting' / 'config.yaml'
+    if not config.exists():
         return cfg
     section = None
-    for line in CONFIG.read_text(encoding='utf-8').split('\n'):
+    for line in config.read_text(encoding='utf-8').split('\n'):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         m = re.match(r'^(\s*)([A-Za-z_][\w-]*):\s*(.*?)\s*$', line)
@@ -138,7 +143,7 @@ def unwiki(s):
 
 def discover_threads():
     for kind, subdir in KIND_DIRS.items():
-        d = THREADS_DIR / subdir
+        d = vault_home() / 'threads' / subdir
         if not d.is_dir():
             continue
         for f in sorted(d.iterdir()):
@@ -205,7 +210,7 @@ def resolve_currency(tool, tpath, ref, flag):
     currency = flag or thread_meta(tpath)[0]
     if not currency:
         sys.exit(f"{tool}: thread {ref!r} has no currency\n"
-                 f"  set `currency: ZAR` in {tpath.relative_to(HOME)}, "
+                 f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
                  f"or pass --currency")
     currency = currency.upper()
     if not re.match(r'^[A-Z]{3}$', currency):
@@ -271,7 +276,7 @@ def client(tpath):
 # ---------- record files (JSON in a fenced block) ----------
 
 def record_path(subdir, kind, name):
-    return HOME / subdir / KIND_DIRS[kind] / f"{name}.md"
+    return vault_home() / subdir / KIND_DIRS[kind] / f"{name}.md"
 
 
 def find_block(lines, fence):
@@ -330,7 +335,7 @@ def write_records(path, records, fence, ref, currency, key='entries',
 
 
 def record_files(subdir):
-    d = HOME / subdir
+    d = vault_home() / subdir
     if not d.is_dir():
         return
     for root, dirs, files in os.walk(d):

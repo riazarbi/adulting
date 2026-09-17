@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 3: `search` moves into the package; `vault` reads the vault per call
+
+`search` moves to `src/adulting/search.py` with a console-script entry point. `adulting.vault` stops freezing `ADULTING_HOME` at import. No behaviour change.
+
+- **Characterised before the port.** The existing 23 search tests almost all checked `--json`. New `tests/cli/test_search_output.py` (18 tests), run green against the old script first, pins the text people read:
+  - the `notes` and `logs` tables and their match snippets
+  - the `activity` table and its default 7-day window
+  - the `overview` report, with and without a window and `--limit`
+  - the full `stream` chronology: day headers, clock times in local time, the `N more not shown` footer, `--text`, `--reverse`, `--until`, and the empty-window message
+  - case-folded thread resolution, the unresolvable-thread and unknown-kind errors, and an empty vault
+  - notes dated from their filename when `timestamp` is malformed, and logs that recover their thread from their path
+- **Bug found and pinned, not fixed:** `stream --thread` is a substring match. `--thread Processes/SGB` also returns every event of `Processes/SGB Extra`, because the filter asks whether the resolved ref appears inside the event's thread text. It is pinned so the port can't change it silently; fixing it is a separate decision.
+- **Also pinned:** within one day, `stream` orders events reverse-alphabetically by kind (`task` before `note` before `done`). This is a side effect of sorting the whole key newest-first.
+- **`vault.vault_home()`** replaces the import-time `HOME`, `THREADS_DIR` and `CONFIG` constants. `hours` and `payments`, still scripts, pick this up with their tests unchanged. `tests/unit/test_statement.py` no longer reloads the module to change vaults.
+- **New `tests/unit/test_search.py`** (12 tests). Covers event dates, snippets, filters and their newest-first order, the anchor/buffer/self-ref line patterns, and the record readers against a real temp vault: frontmatter-less notes skipped, log thread recovered from the path, self-refs dropped, entities needing a valid `started`, and pending entries. Also thread resolution.
+- **Verified on the vault copy.** Old vs new were identical in exit code, stdout, stderr and files touched for `notes` (all, and with `--type`/`--text`), `logs` (all, and `--text`), `activity` (default and since January), `overview` (AXA DORA; Personal Finance windowed), and `stream`. The `stream` runs covered the full year (867 events), `--today`, `--kind hours,payment,pending --json`, and `--thread "SANA Partners" --reverse`. `hours report`, `payments statement` and `--help-json` were checked too.
+- `search.py` coverage 84% → 94%; total 72% → 75%. **349 passing.**
+
 ## 2026-09-17 - refactor unit 2: `lint` and its schemas move into the package
 
 `lint` moves to `src/adulting/lint.py` with a console-script entry point. `schemas/` moves to `src/adulting/schemas/` and ships as package data, so an installed `lint` finds its schemas without a repo checkout. No behaviour change.

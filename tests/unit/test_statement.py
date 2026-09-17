@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from adulting import statement as S
+from adulting import vault as V
 
 
 HAS_PANDOC = shutil.which("pandoc") is not None
@@ -271,27 +272,15 @@ def write_billing(vault, **over):
     (vault.home / ".adulting" / "config.yaml").write_text(body, encoding="utf-8")
 
 
-def vault_module(vault):
-    """Import vault with ADULTING_HOME pointed at the fixture.
-
-    vault reads ADULTING_HOME once, at import, so it is reloaded here.
-    conftest's `isolated` fixture has already set ADULTING_HOME to this
-    test's vault and restores the environment afterwards.
-    """
-    import importlib
-    from adulting import vault as V
-    return importlib.reload(V)
-
-
 def test_banking_is_complete_when_every_field_is_set(vault):
     """A document that asks for money must say where to send it."""
     write_billing(vault)
-    assert vault_module(vault).banking()["complete"] is True
+    assert V.banking()["complete"] is True
 
 
 def test_banking_is_incomplete_while_a_field_is_a_todo_placeholder(vault):
     write_billing(vault, bank_account_number="TODO")
-    assert vault_module(vault).banking()["complete"] is False
+    assert V.banking()["complete"] is False
 
 
 def test_banking_is_incomplete_when_a_field_is_missing(vault):
@@ -299,12 +288,12 @@ def test_banking_is_incomplete_when_a_field_is_missing(vault):
     cfg = vault.home / ".adulting" / "config.yaml"
     cfg.write_text(cfg.read_text().replace("  bank_branch_code: 470010\n", ""),
                    encoding="utf-8")
-    assert vault_module(vault).banking()["complete"] is False
+    assert V.banking()["complete"] is False
 
 
 def test_supplier_address_is_pipe_separated(vault):
     write_billing(vault, supplier_address="14 Kinnoull Road|Camps Bay|Cape Town")
-    assert vault_module(vault).supplier()["lines"] == [
+    assert V.supplier()["lines"] == [
         "14 Kinnoull Road", "Camps Bay", "Cape Town"]
 
 
@@ -312,7 +301,7 @@ def test_reference_is_the_thread_name_without_its_kind_prefix(vault):
     """Derived, not configured: it cannot drift or carry another client's code."""
     write_billing(vault)
     p = sana(vault)
-    assert vault_module(vault).client(p)["reference"] == "SANA Partners"
+    assert V.client(p)["reference"] == "SANA Partners"
 
 
 def test_reference_ignores_a_frontmatter_override(vault):
@@ -321,4 +310,4 @@ def test_reference_ignores_a_frontmatter_override(vault):
     p.write_text(p.read_text().replace(
         "client_vat:", "client_reference: SOMETHING ELSE\nclient_vat:"),
         encoding="utf-8")
-    assert vault_module(vault).client(p)["reference"] == "SANA Partners"
+    assert V.client(p)["reference"] == "SANA Partners"

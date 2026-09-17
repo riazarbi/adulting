@@ -24,6 +24,7 @@ commit = "adulting.commit:main"
 lint = "adulting.lint:main"
 people = "adulting.people:main"
 search = "adulting.search:main"
+threads = "adulting.threads:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

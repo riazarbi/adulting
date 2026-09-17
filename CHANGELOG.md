@@ -2,6 +2,29 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 5: `threads` moves into the package and stops prompting
+
+`threads` moves to `src/adulting/threads.py` with a console-script entry point and loses its interactivity, following `people`.
+
+- **`threads new` requires `--name`, `--kind` and `--category`.** Missing any of them exits 2 with argparse's usage error, reads nothing from stdin and writes nothing. Previously each missing field opened a prompt, and currency and rate were also prompted unless all three were given.
+- **One behaviour removed with the prompts:** giving a currency at the prompt and leaving the rate blank used to write `rate: 2500` into the thread file. With flags, `--currency` without `--rate` writes no rate. Logged hours come out the same: `hours` falls back to `.adulting/config.yaml` `hours.rate`, then 2500, and a test pins that a new billable thread logs at 2500 immediately.
+- **`threads delete` refuses without `-y`.** It exits 1 with `refusing to delete <path> without -y` and leaves the file, even if stdin says `y`.
+- **Bug fixed: `--name` is now stripped**, as for `people`. `--name "  "` no longer creates `  .md`, and `--name ""` no longer falls through to a prompt.
+- **Characterised before the port.** New `tests/cli/test_threads_cli.py` has 28 tests:
+  - **22 kept behaviours, green against the old script:** the `list` table in kind-then-name order, `--all`, `--json` fields, fuzzy queries, the empty messages, and `show` as raw text and JSON. Resolution by bare name, `Kind/Name`, wikilink and padded name; case-sensitive misses; an unknown kind directory. The ambiguity error when a bare name exists in two kinds. The exact file `new` writes, with and without billing, plus the duplicate and bad currency/rate/kind errors. `delete -y` by wikilink, not-found and ambiguous deletes, and `--help-json`.
+  - **6 changes, each failing against the old script first.**
+- **`tests/cli/test_threads_billing.py`:** its 5 prompt-driven tests now use flags, and it gained a test that currency without rate writes no rate. All 10 passed against the old script before the port.
+- **New `tests/unit/test_threads.py`** (6 tests) covers thread discovery order and filtering, resolution by path, wikilink and bare name, misses, ambiguity, and frontmatter reading.
+- **Verified on the vault copy.** Old vs new were identical for:
+  - `list` (plain, `--all --json`, two fuzzy queries)
+  - `show` (bare `SGB`, `AXA DORA`, `[[Projects/SANA Partners]] --json`, `Projects/Agent --json`)
+  - `delete "Personal Finance" -y`
+  - `new` for an unbilled topic and a ZAR project with a rate, and `new` refusing the existing SANA Partners
+
+  `--help-json` changed only as specified.
+- **Docs.** README's threads section now documents the required flags and the rate fallback. Found while doing it: MANUAL.md names the fallback key `time.rate`, but the code reads `hours.rate`. MANUAL is regenerated in the cleanup unit.
+- Dropped an unused `shutil` import. `threads.py` coverage 48% → 96%; total 78% → 80%. **409 passing.**
+
 ## 2026-09-17 - refactor unit 4: `people` moves into the package and stops prompting
 
 `people` moves to `src/adulting/people.py` with a console-script entry point. It is the first command to lose its interactivity, per the refactor decisions: every value comes from arguments, and a delete needs `-y`.

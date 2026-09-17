@@ -124,14 +124,14 @@ Skeleton management for thread files. Daily-review / tail / overdue tooling will
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `threads new`                        | Interactive: pick kind, category, name, optional currency/rate; creates the file |
-| `threads delete <thread> [-y]`       | Delete a thread (with confirm)                                |
+| `threads new --name N --kind K --category C [--currency X --rate R]` | Create a thread file; name, kind and category required |
+| `threads delete <thread> -y`         | Delete a thread; refuses without `-y`                         |
 | `threads list [--json]`              | List all threads (kind, status, category, name)               |
 | `threads show <thread> [--json]`     | Print frontmatter + body (or JSON of frontmatter)             |
 
 `<thread>` accepts a bare name (`SGB`) or a path (`Processes/SGB`). Bare names error if ambiguous across kinds.
 
-`threads new` also asks for a `currency` (blank to skip) and, if you give one, a `rate` — the billing defaults `hours` reads. Both are optional: most threads are never billed. Flags `--currency` / `--rate` skip the prompts, and passing `--kind --category --name` together suppresses all prompting for scripted use.
+`threads new` also takes `--currency` and `--rate`, the billing defaults `hours` reads. Both are optional: most threads are never billed. `--rate` needs `--currency`. Without `--rate`, `hours` falls back to `.adulting/config.yaml` `hours.rate`, then 2500.
 
 ## people
 

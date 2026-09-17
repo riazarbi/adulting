@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
 """Manage thread files in ~/vault/threads/{Projects,Processes,Topics}/.
+
+Non-interactive: every value comes from arguments, and deleting needs -y.
 
 Skeleton: just create / delete / list / show. The richer reporting tools
 (daily review, tail, overdue, report) are intentionally omitted — they'll
@@ -11,21 +12,28 @@ import difflib
 import json
 import os
 import re
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-THREADS_DIR = HOME / 'threads'
 KIND_DIRS = {
     'project': 'Projects',
     'process': 'Processes',
     'topic': 'Topics',
 }
 CATEGORIES = ['professional', 'personal', 'voluntary']
+
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+
+
+def threads_dir():
+    return vault_home() / 'threads'
 
 
 def today():
@@ -35,7 +43,7 @@ def today():
 def discover_threads():
     """Yield (kind, name, path) for every thread file."""
     for kind, subdir in KIND_DIRS.items():
-        d = THREADS_DIR / subdir
+        d = threads_dir() / subdir
         if not d.is_dir():
             continue
         for f in sorted(d.iterdir()):
@@ -73,7 +81,7 @@ def resolve_thread(arg):
         kind_dir, name = arg.split('/', 1)
         for kind, subdir in KIND_DIRS.items():
             if subdir == kind_dir:
-                p = THREADS_DIR / subdir / f"{name}.md"
+                p = threads_dir() / subdir / f"{name}.md"
                 if p.exists():
                     return kind, name, p
                 return None
@@ -87,59 +95,21 @@ def resolve_thread(arg):
 
 
 def cmd_new(args):
-    """Interactive: prompt for kind, category, name; create the file."""
-    if args.kind:
-        kind = args.kind
-    else:
-        print("Kind:")
-        for i, k in enumerate(KIND_DIRS, start=1):
-            print(f"  {i}. {k}")
-        choice = input("Pick: ").strip()
-        try:
-            kind = list(KIND_DIRS)[int(choice) - 1]
-        except (ValueError, IndexError):
-            sys.exit("invalid choice")
-    if kind not in KIND_DIRS:
-        sys.exit(f"unknown kind: {kind}")
-
-    if args.category:
-        category = args.category
-    else:
-        print("Category:")
-        for i, c in enumerate(CATEGORIES, start=1):
-            print(f"  {i}. {c}")
-        choice = input("Pick: ").strip()
-        try:
-            category = CATEGORIES[int(choice) - 1]
-        except (ValueError, IndexError):
-            sys.exit("invalid choice")
-    if category not in CATEGORIES:
-        sys.exit(f"unknown category: {category}")
-
-    if args.name:
-        name = args.name
-    else:
-        name = input("Name: ").strip()
+    kind = args.kind
+    category = args.category
+    name = args.name.strip()
     if not name:
         sys.exit("empty name")
 
-    # Billing defaults for `hours`. Optional -- most threads are never billed --
-    # so a blank answer leaves them off entirely.
-    currency = args.currency
-    if currency is None and not (args.kind and args.category and args.name):
-        currency = input("Currency (blank for none): ").strip()
-    currency = (currency or '').strip().upper()
+    # Billing defaults for `hours`. Optional -- most threads are never billed.
+    currency = (args.currency or '').strip().upper()
     if currency and not re.match(r'^[A-Z]{3}$', currency):
         sys.exit(f"currency {currency!r} is not a 3-letter ISO code")
-
     rate = args.rate
-    if currency and rate is None and not (args.kind and args.category and args.name):
-        got = input("Rate [2500]: ").strip()
-        rate = int(got) if got.isdigit() else 2500
     if rate is not None and not currency:
         sys.exit("--rate needs a --currency")
 
-    target_dir = THREADS_DIR / KIND_DIRS[kind]
+    target_dir = threads_dir() / KIND_DIRS[kind]
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
     if path.exists():
@@ -166,9 +136,7 @@ def cmd_delete(args):
         sys.exit(f"not found: {args.thread}")
     kind, name, path = match
     if not args.yes:
-        ans = input(f"delete {path}? [y/N] ").strip().lower()
-        if ans not in ('y', 'yes'):
-            sys.exit("aborted")
+        sys.exit(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
 
@@ -201,7 +169,7 @@ def cmd_list(args):
             'kind': kind,
             'name': name,
             'thread': f"{KIND_DIRS[kind]}/{name}",  # resolvable Kind/Name form
-            'path': str(path.relative_to(HOME)),
+            'path': str(path.relative_to(vault_home())),
             'status': fm.get('status', ''),
             'category': fm.get('category', ''),
             'started': fm.get('started', ''),
@@ -247,7 +215,7 @@ def cmd_show(args):
         print(json.dumps({
             'kind': kind,
             'name': name,
-            'path': str(path.relative_to(HOME)),
+            'path': str(path.relative_to(vault_home())),
             **fm,
         }, indent=2))
     else:
@@ -271,17 +239,20 @@ def main():
     p_show.add_argument('--json', action='store_true', help="JSON output.")
     p_show.set_defaults(func=cmd_show)
 
-    p_new = sub.add_parser('new', help="Create a thread file (interactive prompts for missing fields).")
-    p_new.add_argument('--name', help="Thread name (skip prompt).")
-    p_new.add_argument('--kind', choices=list(KIND_DIRS), help="Skip prompt.")
-    p_new.add_argument('--category', choices=CATEGORIES, help="Skip prompt.")
+    p_new = sub.add_parser('new', help="Create a thread file.")
+    p_new.add_argument('--name', required=True, help="Thread name; becomes the filename.")
+    p_new.add_argument('--kind', required=True, choices=list(KIND_DIRS),
+                       help="Which directory the thread lives in.")
+    p_new.add_argument('--category', required=True, choices=CATEGORIES,
+                       help="Thread category.")
     p_new.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
     p_new.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")
     p_new.set_defaults(func=cmd_new)
 
     p_delete = sub.add_parser('delete', help="Permanently delete a thread file.")
     p_delete.add_argument('thread', help="Thread name or 'Kind/Name'.")
-    p_delete.add_argument('-y', '--yes', action='store_true', help="Skip confirmation.")
+    p_delete.add_argument('-y', '--yes', action='store_true',
+                          help="Required: confirms the permanent delete.")
     p_delete.set_defaults(func=cmd_delete)
 
     emit_helpjson_if_requested(parser)

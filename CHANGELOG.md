@@ -2,6 +2,28 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 10: `notes list/cat/last/copy/delete` in Python, named by stem
+
+The first notes subcommands move to `src/adulting/notes.py`, without the numbered picker. A note is named by its stem (`2026-09-10-14-30-00`, with `.md` tolerated), and `notes list` shows the stems.
+
+- **Not yet the `notes` command.** The bash `notes new`, `pdf`, `minutes` and `agenda` only work when launched by the bash `notes` dispatcher, whose exported shell functions they depend on. So the bash `notes` stays on PATH, and the new module runs as `python -m adulting.notes` until those are ported. `notes` switches to Python at the end of unit 12.
+- **`notes list [filter] [--json]`** replaces the picker. It shows stem, date, type, threads and topic, oldest first by the frontmatter `timestamp` (the stem when that is missing or malformed), with a case-insensitive filter over every column.
+- **`notes cat <stem>`** prints the note, as before.
+- **`notes last`** prints the newest note's path instead of opening Obsidian. The old picker sorted on the first ten characters of the timestamp and then on the threads/type/topic text, so on a day with several notes "last" wasn't necessarily the latest. The new one is ordered by full timestamp.
+- **`notes copy <stem>`** copies to a new timestamp exactly as before: every line starting with `topic:` gets ` COPY`, body lines included, and the frontmatter `timestamp` is kept. Both are pinned rather than changed. It now refuses to overwrite a note that already has the new timestamp, where the old `cp` would have clobbered it.
+- **`notes delete <stem>`** needs `-y` and prints `deleted: <path>`. The old one deleted silently after the picker.
+- **Every subcommand still ingests ACTION lines first**, now in-process rather than by shelling out to `tasks`. If any ACTION fails to ingest, it prints `notes: warning: some ACTION lines were not ingested; run \`tasks\` to see why` to stderr and carries on; the old `2>/dev/null || true` hid the failure. `--help-json` does not ingest.
+- **Old bug that goes away: the picker could act on the wrong note.** With a filter (`notes cat zeta`) it showed a filtered, renumbered list but selected from the unfiltered one. Choosing `2` from a list of Zeta notes returned an SGB note, and `notes delete <filter>` could have deleted a note that was never on screen.
+- **Why the tests were not run against the old script:** its interface was a picker, so tests of the stem interface can't. What the new code keeps from it was checked by driving the old picker with stdin on the same fixtures (`cat` verbatim, `copy`'s ` COPY` lines, the ingest pre-pass), then on real data.
+- **New `tests/cli/test_notes_cli.py`** (17 tests) covers:
+  - **`list`:** timestamp order over filename order, the filter and its empty messages, the JSON row, and untimestamped notes.
+  - **`cat` and `last`:** `cat` after ingest, a trailing `.md`, three bad stems, and `last` including with no notes.
+  - **`copy` and `delete`:** `copy` content, and `delete` with and without `-y`.
+  - **the ingest pre-pass:** it warns once and carries on, runs before `list`, and `--help-json` skips it.
+- **New `tests/unit/test_notes.py`** (6 tests) covers stem resolution, frontmatter reading, the sort fallback, and the silent and failing ingest.
+- **Verified on the vault copy.** `list` shows all 116 notes. `cat` output was identical to the old picker's for a 17-note sample spread across the vault. `copy` produced identical files for the oldest, a middle and the newest note. `last` names the note with the newest timestamp.
+- `notes.py` coverage 97%. **595 passing.**
+
 ## 2026-09-17 - refactor unit 9: `tasks` moves into the package
 
 `tasks` moves to `src/adulting/tasks.py` with a console-script entry point. It has no interactivity, so this is a pure port. It is the highest-risk command for data because it rewrites notes and logs in place, so the verification centres on the lines it writes. With this unit every Python command is packaged. What remains at the repo root is the bash `notes` family.

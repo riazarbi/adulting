@@ -2,6 +2,23 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 2: `lint` and its schemas move into the package
+
+`lint` moves to `src/adulting/lint.py` with a console-script entry point. `schemas/` moves to `src/adulting/schemas/` and ships as package data, so an installed `lint` finds its schemas without a repo checkout. No behaviour change.
+
+- **Characterised before the port.** New `tests/cli/test_lint_cli.py` (29 tests), run green against the old script first. It covers:
+  - **the command surface:** the exact summary line, the `path:line: message` format and exit codes, `--quiet`, explicit paths, a missing path, exit 2 on an empty `--schemas` dir, an alternative `--schemas` dir, the walk skipping dot-dirs, dot-files and `.bak`, and `--help-json`
+  - **threads, people and logs:** closed without `ended`, missing required fields, regex constraints, every cadence rule, `thread_entry` lines, and log thread resolution
+  - **notes:** thread and people wikilinks, and `ACTION:` description and assignee checks
+  - **records:** payments and hours block errors not covered elsewhere
+- **Two quirks pinned rather than fixed.** A thread body line like `- 2026-13 — ...` isn't checked at all: it fails `thread_entry`'s `applies_when`, so it is never reported as malformed. A wrong-kind or plain entry in a note's `threads:` is reported twice, once by the field regex and once by wikilink resolution.
+- **New `tests/unit/test_lint.py`** (18 tests). It covers the frontmatter parser (scalars, lists, lists of mappings), markdown tables with escaped pipes, and every constraint form. It also pins the prose-becomes-enum trap from 2026-09-07. Further tests: all 10 packaged schemas load, `applies_when`, value and cadence validation, schema matching by directory, filename and type, file discovery, cycle detection, and the vault-wide task and record-id checks.
+- **`ADULTING_HOME` is read on every call** (`vault_home()`), as in `commit`.
+- **Verified as an installed package.** A wheel built from the tree contains all 10 schemas and the entry point. Installed into a fresh venv, its `lint` validated a scratch vault correctly.
+- **Verified on the vault copy.** `lint` and `lint --quiet` produced identical output and exit codes, old vs new: 381 files, 7 violations. `--help-json` and the harvested corpus differ only in the default schemas path shown in `--schemas` help.
+- **Tooling:** `dev/manual-harvest` reads schemas from the new location and recognises `vault_home() / '...'` when listing a tool's vault paths. README points at `src/adulting/schemas/`.
+- `lint.py` coverage 79% → 96%. **319 passing.**
+
 ## 2026-09-17 - refactor unit 1: `commit` is the first packaged command
 
 `commit` moves from a root script to `src/adulting/commit.py` and is installed as a console script (`[project.scripts]`). No behaviour change: `commit` never prompted, so nothing was removed.

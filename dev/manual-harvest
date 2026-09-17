@@ -12,7 +12,7 @@ Sources, in order of authority for the command surface:
   1. `<tool> --help-json`        structured argparse manifest (authoritative)
   2. `<tool> --help` (+ per-subcommand --help)  rendered usage text
   3. the tool's module docstring  intent, worked examples
-  4. schemas/*.md                 on-disk data formats
+  4. src/adulting/schemas/*.md    on-disk data formats
   5. constants in the sources     vault paths, environment variables
   6. README.md                    authored background prose
 
@@ -165,7 +165,7 @@ def exit_codes(tool):
 def vault_paths(tool):
     """Vault subdirectories the tool reads or writes, from its constants."""
     src = tool_source(tool).read_text(encoding='utf-8')
-    hits = set(re.findall(r"HOME\s*/\s*'([^']+)'", src))
+    hits = set(re.findall(r"(?:HOME|vault_home\(\))\s*/\s*'([^']+)'", src))
     hits |= set(re.findall(r'\$ADULTING_HOME/([A-Za-z0-9_./-]+)', src))
     return sorted(hits)
 
@@ -204,7 +204,7 @@ def harvest_tool(tool):
 
 def harvest_schemas():
     out = []
-    for path in sorted((REPO / 'schemas').glob('*.md')):
+    for path in sorted((REPO / 'src' / 'adulting' / 'schemas').glob('*.md')):
         out.append({'name': path.stem, 'text': path.read_text(encoding='utf-8').strip()})
     return out
 

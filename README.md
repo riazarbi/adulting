@@ -291,7 +291,7 @@ The payment reference printed on the statement is the thread name without its `K
 
 ## lint
 
-Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
+Validates everything in `~/vault/` against schemas in `src/adulting/schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
 
 | Command          | What it does                                              |
 |------------------|-----------------------------------------------------------|
@@ -299,7 +299,7 @@ Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:
 | `lint <path>`    | Validate one file (good for pre-save hooks)               |
 | `lint --quiet`   | Suppress per-violation output, exit-code only             |
 
-Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `schemas/note_meeting.md` for the canonical shape.
+Schemas live in `src/adulting/schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `src/adulting/schemas/note_meeting.md` for the canonical shape.
 
 # Data store
 

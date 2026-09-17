@@ -21,9 +21,14 @@ dev = ["pytest>=8", "coverage>=7.10"]
 # that deletes its old script from the repo root.
 [project.scripts]
 commit = "adulting.commit:main"
+lint = "adulting.lint:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Non-Python files installed with the package.
+[tool.setuptools.package-data]
+adulting = ["schemas/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

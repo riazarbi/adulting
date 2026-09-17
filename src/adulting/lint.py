@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate adulting files against schemas in schemas/.
 
 Usage:
@@ -16,11 +15,16 @@ import re
 import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SCHEMAS_DIR = SCRIPT_DIR / 'schemas'
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+from adulting.helpjson import emit_helpjson_if_requested
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+# The schemas ship inside the package, next to this module.
+SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
+
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
 ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')
@@ -304,9 +308,9 @@ def resolve_wikilink(target):
     return the absolute path it refers to (whether or not it exists)."""
     target = target.strip()
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
-        return HOME / 'threads' / (target + '.md')
+        return vault_home() / 'threads' / (target + '.md')
     if target.startswith('people/'):
-        return HOME / (target + '.md')
+        return vault_home() / (target + '.md')
     return None  # unrecognised prefix
 
 
@@ -321,7 +325,8 @@ def wikilink_exists(target):
 
 def find_file_schema(path, fm, schemas):
     """Match by filename + applies_when + (new) directory scope."""
-    rel = path.relative_to(HOME) if HOME in path.parents or path.parent == HOME else path
+    home = vault_home()
+    rel = path.relative_to(home) if home in path.parents or path.parent == home else path
     rel_str = str(rel)
     for s in schemas.values():
         if s['scope'] != 'file':
@@ -465,7 +470,7 @@ def validate_file(path, schemas, registry=None):
                     yield (line_no, "ACTION: missing description")
                 if assignee_paren:
                     name = assignee_paren.strip()[1:-1].strip()  # strip ( )
-                    person_path = HOME / 'people' / f"{name}.md"
+                    person_path = vault_home() / 'people' / f"{name}.md"
                     if not person_path.exists():
                         yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
 
@@ -621,7 +626,7 @@ def _task_anchor_per_line(captures):
     if end and entry and end < entry:
         yield f"task_anchor: end {end!r} precedes entry {entry!r}"
     if assignee:
-        if not (HOME / 'people' / f"{assignee}.md").exists():
+        if not (vault_home() / 'people' / f"{assignee}.md").exists():
             yield f"task_anchor.assignee: {assignee!r} does not resolve to people/{assignee}.md"
 
 
@@ -727,7 +732,7 @@ def _rotate_to_min(seq):
 
 def discover_files():
     for sub in ('notes', 'threads', 'people', 'logs', 'hours', 'payments'):
-        d = HOME / sub
+        d = vault_home() / sub
         if not d.is_dir():
             continue
         for root, dirs, files in os.walk(d):

@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 8: `buffer` moves into the package; `suggest` stops prompting
+
+`buffer` moves to `src/adulting/buffer.py` with a console-script entry point. It was the least-tested core command: every capture, `tend` and `flush` pass through it, and the suggester behind `buffer suggest` had no tests at all.
+
+- **`buffer suggest` never prompts.** With `-y` it runs the suggestion, as before. Without `-y` it prints the suggested command and stores the raw text as UNKNOWN, with `not accepted (pass -y to accept); storing as UNKNOWN.` That was already the behaviour with no terminal attached, under the message `rejected (no tty, no --yes)`. On a terminal it used to ask `accept? [Y/n]`.
+- **`buffer` and `suggester` read `ADULTING_HOME` per call.** `flush` still runs `tasks` from PATH, as before; that becomes a direct call once `tasks` is ported. The `hours` and `payments` REF calls now resolve to the packaged `buffer`.
+- **Characterised before the port.** New `tests/cli/test_buffer_cli.py` has 35 tests:
+  - **33 kept behaviours, green against the old script.** Covered: every `add-*` line shape, including the fixed attr order and sorted depends; `add-ref --date` filing; all 12 `add-*` errors, none of which writes a buffer; REF targets of every record kind; `list` numbering, filtering and empty messages; `rm` and its errors. For `tend`: the exact regrouped file (groups by thread and date, then UNKNOWN and UNPARSED sections), all nine violation types with the exact stderr, idempotence, and clean and quiet output. For `flush`: the exact log file it creates, appending to an existing log that lacks a trailing newline, attrs carried into the ingested anchor, refusal while `tend` fails, and empty and quiet flushes. For `suggest`: `-y`, no suggestion, and no terminal.
+  - **2 changes, failing against the old script first:** `suggest` on a real pseudo-terminal (Python's `pty`, with `y` waiting on stdin) must not prompt, and its help must not mention prompting.
+- **Quirks found and pinned, not fixed:**
+  - `buffer tend` creates an empty `buffer.md` when there is none.
+  - `--quiet` does not silence the `add-*` commands.
+  - `buffer --quiet flush` still prints the `tasks` ingest summary, because the `tasks` it runs isn't passed `--quiet`.
+  - In the suggester, `!!` never marks high priority: the pattern wraps `!!+` in `\b` word boundaries, which never match around punctuation. URGENT and ASAP work.
+- **New `tests/unit/test_buffer.py`** (10 tests) covers attr parsing and its errors, deterministic attr formatting and round-trip, stamps, line classification, regroup order, thread/assignee/REF-target resolution, entry validation, buffer file reads and writes, and shell-quoted suggestions.
+- **New `tests/unit/test_suggester.py`** (29 tests) covers the rules pipeline against a pinned today: twelve date phrasings (due vs scheduled, never-today weekdays, past months rolling to next year), priority, eight intent classifications, person matching with surname disambiguation, assignee prefixes, explicit `Kind/Name` directives and their spans, body construction, BM25 ranking on rare terms, the vault loaders and thread index, an end-to-end suggestion, and bailing to UNKNOWN.
+- **Verified on the vault copy.** `eval/suggester/score.py` gives identical output for the old and new code against the real vault: 77% full match, 82% thread, 100% out-of-scope, which passes its bar. Old vs new `buffer` was identical for `list`, `list sana`, `tend` and `rm 2`. `flush` differed only in the fresh task uuid from the ingest it triggers, and touched the same files. The `add-*` commands and `suggest -y` differed only in capture timestamps. `suggest` without `-y` and `--help-json` changed only as specified.
+- `buffer.py` coverage 55% → 96%, `suggester.py` 0% → 90%; total 82% → 95%. **538 passing.**
+
 ## 2026-09-17 - `payments` validates `statement --as-of`; `edit` keeps the date or time you don't change
 
 Two quirks pinned in unit 7, fixed.

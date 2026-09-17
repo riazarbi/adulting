@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Operate on the buffer queue at ~/vault/buffer.md.
 
 The buffer is the staging area for captured items. Four line types:
@@ -32,7 +31,7 @@ Subcommands:
     add-text   <thread> <text>
     add-ref    <thread> <target> [<summary>]
     add-action <thread> <text>          (also reachable as `tasks add`)
-    suggest    <text> [-y]               (rules suggester → accept/reject)
+    suggest    <text> [-y]               (rules suggester; -y runs it, else UNKNOWN)
     list       [<grep>]
     rm         <line-number>
     tend                                 (regroup + validate; idempotent)
@@ -50,14 +49,17 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-NOTES_DIR = HOME / 'notes'
-THREADS_DIR = HOME / 'threads'
-PEOPLE_DIR = HOME / 'people'
-LOGS_DIR = HOME / 'logs'
-BUFFER_FILE = HOME / 'buffer.md'
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+
+
+def buffer_file():
+    return vault_home() / 'buffer.md'
 
 ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
@@ -109,13 +111,13 @@ def thread_resolves(target):
     kind, name = target.split('/', 1)
     if kind not in ('Projects', 'Processes', 'Topics'):
         return False
-    return (THREADS_DIR / kind / f"{name}.md").exists()
+    return (vault_home() / 'threads' / kind / f"{name}.md").exists()
 
 
 def assignee_resolves(name):
     if not name:
         return True
-    return (PEOPLE_DIR / f"{name}.md").exists()
+    return (vault_home() / 'people' / f"{name}.md").exists()
 
 
 def parse_action_attrs(tokens):
@@ -176,27 +178,27 @@ def ref_target_resolves(target):
     if not target:
         return None
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
-        path = THREADS_DIR / f"{target}.md"
+        path = vault_home() / 'threads' / f"{target}.md"
     elif target.startswith(('people/', 'notes/', 'logs/', 'hours/',
                             'payments/')):
-        path = HOME / f"{target}.md"
+        path = vault_home() / f"{target}.md"
     else:
         return None
     return path if path.exists() else None
 
 
 def read_buffer():
-    if not BUFFER_FILE.exists():
+    if not buffer_file().exists():
         return []
-    return BUFFER_FILE.read_text(encoding='utf-8').split('\n')
+    return buffer_file().read_text(encoding='utf-8').split('\n')
 
 
 def write_buffer(lines):
-    BUFFER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    buffer_file().parent.mkdir(parents=True, exist_ok=True)
     text = '\n'.join(lines)
     if text and not text.endswith('\n'):
         text += '\n'
-    BUFFER_FILE.write_text(text, encoding='utf-8')
+    buffer_file().write_text(text, encoding='utf-8')
 
 
 def append_line(line):
@@ -523,7 +525,7 @@ def cmd_flush(args):
     written_files = []
     for (thread, date), group in sorted(by_group.items()):
         kind, name = thread.split('/', 1)
-        log_dir = LOGS_DIR / kind / name
+        log_dir = vault_home() / 'logs' / kind / name
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{date}.md"
 
@@ -561,7 +563,7 @@ def cmd_flush(args):
 
     if not args.quiet:
         for path, n in written_files:
-            rel = path.relative_to(HOME)
+            rel = path.relative_to(vault_home())
             print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
         # Flush before invoking the subprocess so our prints appear ahead
@@ -638,8 +640,8 @@ def dispatch_proposal(proposal, raw_text):
 
 
 def cmd_suggest(args):
-    """Propose a structured `buffer add-*` for raw text, then prompt to
-    accept (run it) or reject (fall back to `buffer add` UNKNOWN)."""
+    """Propose a structured `buffer add-*` for raw text. With -y, run it;
+    without, store the raw text as UNKNOWN. Never prompts."""
     from adulting.suggester import suggest
     proposal = suggest(args.text)
     if proposal['subcmd'] == 'add':
@@ -650,22 +652,10 @@ def cmd_suggest(args):
     cmd_str = format_suggestion(proposal)
     print(f"suggested:\n  {cmd_str}")
 
-    accept = args.yes
-    if not accept:
-        if not sys.stdin.isatty():
-            # Non-interactive without --yes: safe default is to drop to
-            # UNKNOWN rather than silently auto-running a suggestion.
-            print("rejected (no tty, no --yes); storing as UNKNOWN.")
-            return cmd_add(argparse.Namespace(text=args.text))
-        try:
-            reply = input("accept? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\naborted; nothing added.", file=sys.stderr)
-            return 1
-        accept = reply in ('', 'y', 'yes')
-
-    if not accept:
-        print("rejected; storing as UNKNOWN.")
+    if not args.yes:
+        # Safe default: capture the raw text rather than run a suggestion
+        # nobody accepted. The printed command can be run as-is instead.
+        print("not accepted (pass -y to accept); storing as UNKNOWN.")
         return cmd_add(argparse.Namespace(text=args.text))
     return dispatch_proposal(proposal, args.text)
 
@@ -682,9 +672,9 @@ def main():
     p_a.add_argument('text')
     p_a.set_defaults(func=cmd_add)
 
-    p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; prompt to accept or fall back to UNKNOWN.")
+    p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; run it with -y, else store as UNKNOWN.")
     p_s.add_argument('text')
-    p_s.add_argument('-y', '--yes', action='store_true', help="Auto-accept the suggestion without prompting.")
+    p_s.add_argument('-y', '--yes', action='store_true', help="Accept and run the suggestion.")
     p_s.set_defaults(func=cmd_suggest)
 
     p_at = sub.add_parser('add-text', help="Append a TEXT entry.")

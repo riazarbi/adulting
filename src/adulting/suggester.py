@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Rules-only capture suggester.
 
 Takes a raw quick-capture string and proposes a structured `buffer add-*`
@@ -21,11 +20,12 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-THREADS_DIR = HOME / 'threads'
-PEOPLE_DIR = HOME / 'people'
-LOGS_DIR = HOME / 'logs'
-NOTES_DIR = HOME / 'notes'
+
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 # Tokens that we never want to count as content (too generic to rank threads).
 STOPWORDS = {
@@ -83,9 +83,10 @@ MONTH_IDX = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
 
 def load_threads():
     threads = []
-    if not THREADS_DIR.exists():
+    threads_dir = vault_home() / 'threads'
+    if not threads_dir.exists():
         return threads
-    for kind_dir in sorted(THREADS_DIR.iterdir()):
+    for kind_dir in sorted(threads_dir.iterdir()):
         if not kind_dir.is_dir():
             continue
         for f in sorted(kind_dir.glob('*.md')):
@@ -94,9 +95,10 @@ def load_threads():
 
 
 def load_people():
-    if not PEOPLE_DIR.exists():
+    people_dir = vault_home() / 'people'
+    if not people_dir.exists():
         return []
-    return sorted(f.stem for f in PEOPLE_DIR.glob('*.md'))
+    return sorted(f.stem for f in people_dir.glob('*.md'))
 
 
 def _tokenize(text):
@@ -120,17 +122,18 @@ def build_thread_index(threads):
     for thread in threads:
         name_tokens = _tokenize(thread.split('/', 1)[1])
         bump(thread, name_tokens, weight=10)
-        thread_file = THREADS_DIR / f"{thread}.md"
+        thread_file = vault_home() / 'threads' / f"{thread}.md"
         if thread_file.exists():
             bump(thread, _tokenize(thread_file.read_text(encoding='utf-8', errors='ignore')))
-        log_dir = LOGS_DIR / thread
+        log_dir = vault_home() / 'logs' / thread
         if log_dir.exists():
             for log in log_dir.glob('*.md'):
                 bump(thread, _tokenize(log.read_text(encoding='utf-8', errors='ignore')))
 
     thread_link_re = re.compile(r'\[\[((?:Projects|Processes|Topics)/[^\]]+)\]\]')
-    if NOTES_DIR.exists():
-        for note in NOTES_DIR.glob('*.md'):
+    notes_dir = vault_home() / 'notes'
+    if notes_dir.exists():
+        for note in notes_dir.glob('*.md'):
             try:
                 text = note.read_text(encoding='utf-8', errors='ignore')
             except Exception:

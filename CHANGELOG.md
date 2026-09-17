@@ -2,6 +2,21 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 6: `hours` moves into the package and stops prompting
+
+`hours` moves to `src/adulting/hours.py` with a console-script entry point and loses its interactivity.
+
+- **`hours log` requires a thread.** Without one it exits 2 with argparse's usage error and writes nothing. Previously it opened a numbered thread picker followed by description, minutes and rate prompts. `log --all`, which only widened that picker, is gone and is now an unrecognised argument.
+- **`hours rm` refuses without `-y`.** It exits 1 with `hours: refusing to delete <id> without -y` and leaves the entry, even if stdin says `y`.
+- **The buffer REF finds `buffer` on PATH.** It used to look for a `buffer` file next to its own script, which doesn't exist inside the package. The best-effort call would then have failed silently and every `hours log` would have lost its log pointer. An install puts all the commands in one bin directory, and the test harness puts this checkout's commands first. If `buffer` can't be found at all, the REF is skipped, as for any other buffer failure. This becomes a direct function call once `buffer` is ported. The existing REF tests cover it: log, directory-form kind, flush, unbilled, backdated, and split across days.
+- **Characterised before the port.** New `tests/cli/test_hours_output.py` has 20 tests:
+  - **16 kept behaviours, green against the old script:** the `log` line for billed, config-rated and unbilled entries (with `hours.minutes`/`hours.rate` from config); five `log` errors, none of which writes a file; the `list` table, filters and JSON row; the `report` table, with per-currency totals and `TOTAL unbilled` first; `report` filters and empty output; `show` text and a missing id; `edit` moving date and time while keeping duration, and upper-casing currency; the `edit` errors; `rm -y`; and `--help-json`
+  - **4 changes, each failing against the old script first:** no thread picker, `--all` removed, no delete confirmation, and help without "interactive"
+- **The two prompt-driven tests in `tests/cli/test_hours_cli.py` were removed**; the no-prompt behaviour they covered is specified above. The other 35 tests pass unchanged.
+- **New `tests/unit/test_hours.py`** (6 tests) covers duration, Decimal money, unbilled entries omitting `currency`, the rate cascade (flag, thread, config, default), billing resolution and its two refusals, and append/collect/find against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list` (plain, `--json`, `"SANA Partners" --since`), `report` (plain and `--since … --json`), `show` (text and JSON), `edit -m` and `rm -y` on a real entry. `log` differed only in the fresh entry id, and touched the same files. `--help-json` changed only as specified.
+- README's hours table updated. `hours.py` coverage 81% → 98%; total 80% → 81%. **433 passing.**
+
 ## 2026-09-17 - refactor unit 5: `threads` moves into the package and stops prompting
 
 `threads` moves to `src/adulting/threads.py` with a console-script entry point and loses its interactivity, following `people`.

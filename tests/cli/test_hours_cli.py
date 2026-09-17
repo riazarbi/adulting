@@ -79,24 +79,8 @@ def test_thread_resolution_is_case_sensitive(vault):
     assert r.returncode != 0
 
 
-# ---- 3. interactive parity ----
-
-def test_interactive_log_matches_noninteractive(vault):
-    vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    r = run(vault, "log", input="1\nSecond close\n180\n\n")
-    assert r.returncode == 0, r.stderr
-    e = vault.entries("Projects", "SANA Partners")[0]
-    assert e["name"] == "Second close"
-    assert e["rate"] == 2500
-    assert json.loads(run(vault, "show", e["id"], "--json").stdout)["minutes"] == 180
-
-
-def test_interactive_lists_only_open_threads(vault):
-    vault.write_thread("Projects", "Open One", currency="ZAR")
-    vault.write_thread("Projects", "Shut", status="closed", currency="ZAR")
-    r = run(vault, "log", input="1\nx\n\n\n")
-    assert "Open One" in r.stdout
-    assert "Shut" not in r.stdout
+# ---- 3. interactive parity: removed with interactivity (refactor unit 6);
+#      see test_hours_output.py for the no-prompt behaviour ----
 
 
 # ---- 4. currency is never guessed ----

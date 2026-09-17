@@ -38,7 +38,7 @@ export PATH="$PWD/.venv/bin:$PWD:$PATH"
 
 # Operator commands still living as scripts at the repo root, plus the
 # developer tools. Ported commands are checked as src/adulting/*.py.
-PY_TOOLS=(tasks hours payments buffer)
+PY_TOOLS=(tasks payments buffer)
 SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
 DEV_TOOLS=(dev/manual-harvest dev/manual-build dev/manual-diff
            dev/tools-build dev/tools-check)

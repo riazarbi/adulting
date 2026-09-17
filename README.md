@@ -175,12 +175,11 @@ Consulting time tracking. One file per thread at `~/vault/hours/<Kind>/<Thread>.
 | Command | What it does |
 |---|---|
 | `hours log <thread> <description...>` | Append an entry |
-| `hours log` | Interactive: pick thread → description → minutes → rate |
 | `hours list [thread] [--since] [--until] [--json]` | List entries |
 | `hours report [--thread] [--since] [--until] [--json]` | Totals by thread **and currency**; unbilled time totalled separately |
 | `hours show <id> [--json]` | One entry |
 | `hours edit <id> [-m/-r/-c/-d/-t/--description]` | Change one field |
-| `hours rm <id> [-y]` | Delete an entry |
+| `hours rm <id> -y` | Delete an entry; refuses without `-y` |
 
 `log` flags: `-m/--minutes` (default 60), `-r/--rate`, `-c/--currency`, `-d/--date`, `-t/--time`.
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Time tracking for the adulting vault, billable and not.
 
 Entries live in $ADULTING_HOME/hours/<Kind>/<Thread>.md as JSON inside a
@@ -6,8 +5,9 @@ Entries live in $ADULTING_HOME/hours/<Kind>/<Thread>.md as JSON inside a
 (and anything that reads its format) can render them natively.
 
   hours log <thread> <description...>   append an entry
-  hours log                            interactive capture
   hours list / report / show / edit / rm
+
+Non-interactive: every value comes from arguments, and deleting needs -y.
 
 The entry `name` field holds the description: it is the only field the plugin
 renders, and these descriptions are invoice line items. Extra keys (id, rate,
@@ -38,13 +38,13 @@ warning on stderr would cost the caller its stdout.
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from datetime import timedelta
-from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
-from adulting import vault as V  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
+from adulting import vault as V
 
 TOOL = 'hours'
 SUBDIR = 'hours'
@@ -127,11 +127,16 @@ def buffer_ref(ref, target, summary, date=None):
 
     Best-effort, exactly as `notes new` has always done it: a record that
     was written must not be undone or reported as failed because the buffer
-    was unavailable. Resolved next to this script rather than through PATH,
-    so it works from a checkout as well as an install.
+    was unavailable.
+
+    `buffer` is found on PATH. An install puts every command in the same bin
+    directory, so it is there. Once `buffer` is part of this package this
+    becomes a direct function call.
     """
-    exe = Path(__file__).resolve().parent / 'buffer'
-    cmd = [str(exe), '--quiet', 'add-ref', ref, target, summary]
+    exe = shutil.which('buffer')
+    if exe is None:
+        return
+    cmd = [exe, '--quiet', 'add-ref', ref, target, summary]
     if date:
         # File the pointer under the day the work happened, not the day the
         # buffer happens to be flushed. Without this a backdated entry lands
@@ -171,8 +176,6 @@ def report_logged(entry, ref):
 # ---------- log ----------
 
 def cmd_log(args):
-    if not args.thread:
-        return cmd_log_interactive(args)
     desc = ' '.join(args.description).strip()
     if not desc:
         sys.exit(f"{TOOL}: empty description")
@@ -184,33 +187,6 @@ def cmd_log(args):
         'hours', 'minutes', DEFAULT_MINUTES)
     if minutes <= 0:
         sys.exit(f"{TOOL}: --minutes must be positive")
-
-    entry = build_entry(desc, V.when_from_flags(TOOL, args.date, args.time),
-                        minutes, rate, currency, V.all_ids())
-    append_entry(kind, name, entry)
-    report_logged(entry, ref)
-
-
-def cmd_log_interactive(args):
-    kind, name, tpath = V.pick_thread(TOOL, include_all=args.all)
-    ref = V.thread_ref(kind, name)
-    desc = V.prompt("Description")
-    if not desc:
-        sys.exit(f"{TOOL}: empty description")
-
-    try:
-        minutes = int(V.prompt("Minutes", V.config_default(
-            'hours', 'minutes', DEFAULT_MINUTES)))
-    except ValueError:
-        sys.exit(f"{TOOL}: minutes must be a number")
-    if minutes <= 0:
-        sys.exit(f"{TOOL}: minutes must be positive")
-
-    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
-    try:
-        rate = int(V.prompt("Rate", f"{resolve_rate(tpath, None)} {currency}").split()[0])
-    except (ValueError, IndexError):
-        sys.exit(f"{TOOL}: rate must be a number")
 
     entry = build_entry(desc, V.when_from_flags(TOOL, args.date, args.time),
                         minutes, rate, currency, V.all_ids())
@@ -363,11 +339,7 @@ def cmd_edit(args):
 def cmd_rm(args):
     path, ref, entry = find_entry(args.id)
     if not args.yes:
-        r = as_row(ref, entry)
-        print(f"{r['id']}  {r['date']}  {r['thread']}  "
-              f"{V.fmt_duration(r['minutes'])}  {r['description']}")
-        if input("delete? [y/N] ").strip().lower() not in ('y', 'yes'):
-            sys.exit("aborted")
+        sys.exit(f"{TOOL}: refusing to delete {args.id} without -y")
     entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
     save(path, entries, ref, fm.get('currency', ''))
@@ -381,8 +353,8 @@ def main():
         description="Track consulting hours in the adulting vault.")
     sub = p.add_subparsers(dest='subcommand', required=True)
 
-    log = sub.add_parser('log', help="Append an entry (interactive if no thread).")
-    log.add_argument('thread', nargs='?', help="Thread name, 'Kind/Name', or wikilink.")
+    log = sub.add_parser('log', help="Append an entry.")
+    log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     log.add_argument('description', nargs='*', help="What was done.")
     log.add_argument('-m', '--minutes', type=int, help="Duration (default 60).")
     log.add_argument('-r', '--rate', type=int, help="Hourly rate; 0 = unbillable.")
@@ -391,8 +363,6 @@ def main():
                           "the entry is recorded as unbilled.")
     log.add_argument('-d', '--date', help="YYYY-MM-DD (default today).")
     log.add_argument('-t', '--time', help="HH:MM (default now).")
-    log.add_argument('--all', action='store_true',
-                     help="Interactive: list paused/closed threads too.")
     log.set_defaults(func=cmd_log)
 
     ls = sub.add_parser('list', help="List entries.")
@@ -428,7 +398,8 @@ def main():
 
     rm = sub.add_parser('rm', help="Delete an entry.")
     rm.add_argument('id')
-    rm.add_argument('-y', '--yes', action='store_true')
+    rm.add_argument('-y', '--yes', action='store_true',
+                    help="Required: confirms the permanent delete.")
     rm.set_defaults(func=cmd_rm)
 
     emit_helpjson_if_requested(p)

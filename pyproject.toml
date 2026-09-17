@@ -21,6 +21,7 @@ dev = ["pytest>=8", "coverage>=7.10"]
 # that deletes its old script from the repo root.
 [project.scripts]
 commit = "adulting.commit:main"
+hours = "adulting.hours:main"
 lint = "adulting.lint:main"
 people = "adulting.people:main"
 search = "adulting.search:main"

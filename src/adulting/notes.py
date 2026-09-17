@@ -13,7 +13,8 @@ Non-interactive: nothing prompts, nothing opens an app, and deleting needs -y.
 
 Every subcommand first ingests ACTION: lines into tasks, as the old `notes`
 did, so a note shows its task anchors. If any ACTION line cannot be
-ingested, a one-line warning goes to stderr and the command carries on.
+ingested, the command carries on, with a one-line warning when stderr is a
+terminal.
 """
 
 import argparse
@@ -86,7 +87,9 @@ def ingest_actions():
     """Turn ACTION: lines into task anchors before doing anything else.
 
     `tasks` prints nothing useful here, so its output is held back. If any
-    ACTION line fails to ingest, say so in one line and carry on.
+    ACTION line fails to ingest, say so in one line and carry on, but only
+    when stderr is a terminal. The agent harness discards stdout whenever
+    stderr is non-empty, so a warning there would cost it the note.
     """
     held = io.StringIO()
     try:
@@ -94,7 +97,7 @@ def ingest_actions():
             rc = tasks.cmd_default(argparse.Namespace(dry_run=False, quiet=True))
     except (Exception, SystemExit):  # noqa: BLE001 - a failed ingest must not stop notes
         rc = 1
-    if rc != 0:
+    if rc != 0 and sys.stderr.isatty():
         print(f"{TOOL}: warning: some ACTION lines were not ingested; run `tasks` to see why",
               file=sys.stderr)
 

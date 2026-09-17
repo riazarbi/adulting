@@ -54,9 +54,9 @@ def test_ingest_actions_is_silent_when_everything_ingests(notes_dir, capsys):
     assert capsys.readouterr() == ("", "")
 
 
-def test_ingest_actions_warns_once_on_failure(notes_dir, capsys):
+def test_ingest_actions_is_silent_on_failure_unless_stderr_is_a_terminal(notes_dir, capsys):
+    """capsys stands in for a pipe: not a terminal. The terminal case is in
+    tests/cli/test_notes_cli.py, on a real pseudo-terminal."""
     (notes_dir / "2026-09-10-14-30-00.md").write_text("---\ntopic: x\n---\n\nACTION: no threads\n")
     N.ingest_actions()
-    out, err = capsys.readouterr()
-    assert out == ""
-    assert err == "notes: warning: some ACTION lines were not ingested; run `tasks` to see why\n"
+    assert capsys.readouterr() == ("", "")

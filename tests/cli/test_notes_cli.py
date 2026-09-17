@@ -11,7 +11,10 @@ the bash one, so these run the module directly.
 """
 
 import json
+import os
+import pty
 import re
+import select
 import subprocess
 import sys
 
@@ -146,14 +149,39 @@ def test_delete_needs_yes(v):
 
 # ---------- the ingest pre-pass ----------
 
-def test_a_failed_ingest_warns_once_and_carries_on(v):
-    write(v, "notes/2026-09-13-09-00-00.md",
+def break_an_action(vault):
+    write(vault, "notes/2026-09-13-09-00-00.md",
           "---\ntopic: broken\ntimestamp: 2026-09-13-09-00-00\n---\n\nACTION: (Ghost) nobody\n")
+
+
+def test_a_failed_ingest_is_silent_when_stderr_is_not_a_terminal(v):
+    """The agent harness drops stdout whenever stderr is non-empty, so a
+    warning here would cost it the note."""
+    break_an_action(v)
     r = notes(v, "cat", "2026-09-12-07-00-00")
+    assert (r.returncode, r.stderr) == (0, "")
+    assert r.stdout == v.read("notes/2026-09-12-07-00-00.md")
+    assert "ACTION: (Ghost) nobody" in v.read("notes/2026-09-13-09-00-00.md")
+
+
+def test_a_failed_ingest_warns_once_on_a_terminal(v):
+    break_an_action(v)
+    parent, child = pty.openpty()
+    try:
+        r = subprocess.run([sys.executable, "-m", "adulting.notes", "cat", "2026-09-12-07-00-00"],
+                           stdout=subprocess.PIPE, stderr=child, stdin=subprocess.DEVNULL,
+                           text=True, env=v.env, timeout=30)
+        # Read while the child end is still open: closing it first can
+        # discard what the process wrote to the terminal.
+        ready, _, _ = select.select([parent], [], [], 5)
+        warning = os.read(parent, 4096).decode() if ready else ""
+    finally:
+        os.close(child)
+        os.close(parent)
     assert r.returncode == 0
     assert r.stdout == v.read("notes/2026-09-12-07-00-00.md")
-    assert r.stderr == "notes: warning: some ACTION lines were not ingested; run `tasks` to see why\n"
-    assert "ACTION: (Ghost) nobody" in v.read("notes/2026-09-13-09-00-00.md")
+    assert warning.replace("\r\n", "\n") == (
+        "notes: warning: some ACTION lines were not ingested; run `tasks` to see why\n")
 
 
 def test_ingest_runs_before_list_too(v):

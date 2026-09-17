@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - `notes` warns about a failed ingest only on a terminal
+
+Unit 10's ingest pre-pass printed its warning to stderr whenever an ACTION line failed to ingest. The agent harness discards a command's stdout whenever stderr is non-empty, so a single malformed ACTION anywhere in the vault would have made every `notes cat` the agent ran come back empty.
+
+- **The warning now prints only when stderr is a terminal.** Run by hand, you still see it; run by the agent or in a pipe, `notes` stays silent, as the old `2>/dev/null || true` always was.
+- **Tests.** One CLI test checks that stderr stays empty when it is a pipe. Another attaches stderr to a real pseudo-terminal (Python's `pty`) and checks for the one-line warning; with the warning disabled, that test fails. The unit test now expects silence.
+- The real vault has no failing ACTION lines today, so nothing was affected in the meantime. **597 passing.**
+
 ## 2026-09-17 - refactor unit 10: `notes list/cat/last/copy/delete` in Python, named by stem
 
 The first notes subcommands move to `src/adulting/notes.py`, without the numbered picker. A note is named by its stem (`2026-09-10-14-30-00`, with `.md` tolerated), and `notes list` shows the stems.

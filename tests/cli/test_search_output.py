@@ -198,10 +198,10 @@ def test_stream_text(v):
         "\n14 event(s); window 2026-01-01 to today\n")
 
 
-def test_stream_thread_filter_is_a_substring_match(v):
-    """Known quirk, pinned so the port keeps it: `--thread Processes/SGB`
-    also matches `Processes/SGB Extra`, because the filter tests whether
-    the resolved ref appears inside the event's thread text."""
+def test_stream_thread_filter_matches_whole_thread_names(v):
+    """`--thread Processes/SGB` must not pick up `Processes/SGB Extra`.
+    It used to: the filter tested whether the ref appeared inside the
+    event's thread text. A multi-thread event still matches each thread."""
     r = search(v, "stream", "--since", "2026-01-01", "--thread", "Processes/SGB",
                "--limit", "3")
     assert r.stdout == (
@@ -210,11 +210,15 @@ def test_stream_thread_filter_is_a_substring_match(v):
         "\n2026-08-28\n"
         "  log      Processes/SGB  Roof needs an asbestos survey.\n"
         "  log      Processes/SGB  [[notes/2026-08-22-09-00-00]] Agenda\n"
-        "\n10 event(s); window 2026-01-01 to today\n"
-        "7 more not shown — raise --limit\n")
-    rows = search(v, "stream", "--since", "2026-01-01", "--thread",
-                  "Processes/SGB", "--json").stdout
-    assert "Processes/SGB Extra" in rows
+        "\n6 event(s); window 2026-01-01 to today\n"
+        "3 more not shown — raise --limit\n")
+    import json
+    rows = json.loads(search(v, "stream", "--since", "2026-01-01", "--thread",
+                             "Processes/SGB", "--json").stdout)
+    assert {e["thread"] for e in rows} == {"Processes/SGB", "Processes/SGB, Projects/Alpha"}
+    extra = json.loads(search(v, "stream", "--since", "2026-01-01", "--thread",
+                              "SGB Extra", "--json").stdout)
+    assert {e["thread"] for e in extra} == {"Processes/SGB Extra"}
 
 
 def test_stream_text_filter_and_reverse(v):

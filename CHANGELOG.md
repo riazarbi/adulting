@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - `search stream --thread` matches whole thread names
+
+`stream --thread Processes/SGB` also returned every event of `Processes/SGB Extra`. The filter asked whether the resolved ref appeared anywhere inside the event's thread text, which is the event's threads joined with `, `. It now splits that text and compares whole names. An event on several threads still matches each of them.
+
+- **Never triggered in the current vault.** No thread's `Kind/Name` is the start of another's. The one name pair that shares a prefix, `Projects/Agent` and `Topics/Agentic Engineering`, differs in kind, so it never collided. Old vs new `stream` output is identical on the vault copy for the full year, and for `--thread` on SANA Partners, AXA DORA, Agent and Personal Finance.
+- **The unit 3 test that pinned the bug now asserts the fix.** `--thread Processes/SGB` returns only SGB events and the multi-thread note. `--thread "SGB Extra"` returns only its own.
+- No thread name in the vault contains `, `, the separator the split relies on. **349 passing.**
+
 ## 2026-09-17 - refactor unit 3: `search` moves into the package; `vault` reads the vault per call
 
 `search` moves to `src/adulting/search.py` with a console-script entry point. `adulting.vault` stops freezing `ADULTING_HOME` at import. No behaviour change.

@@ -520,7 +520,9 @@ def cmd_stream(args):
     for e in events:
         if e['kind'] not in kinds:
             continue
-        if thread and thread not in e['thread']:
+        # An event's thread text joins every thread it belongs to with ', '.
+        # Compare whole names: `Processes/SGB` must not match `Processes/SGB Extra`.
+        if thread and thread not in e['thread'].split(', '):
             continue
         if not e['date'] or e['date'] < since:
             continue

@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - `tasks list` groups by thread
+
+`tasks list` ordered purely by priority, due and entry, so one thread's tasks were scattered through the table. It now sorts alphabetically by thread first.
+
+- **Sorts on the thread the table shows** — the first of a task's threads, case-insensitive — so the order matches what you see. Tasks with no thread sort last.
+- **Priority, due and entry still order tasks within each thread.**
+- **`tasks next` is unchanged.** It answers "what should I do now", which is a question across all threads, so it stays priority-first.
+- 1 new test. **220 passing.**
+
 ## 2026-09-11 - `search stream` — one chronology of the whole vault
 
 Every store answered its own question and nothing put them side by side: `hours list` showed hours, `tasks list` tasks, `search logs` logs. When a check-in reported four time entries and wrote one, nothing surfaced the gap. `stream` merges every dated record into a single time-ordered view.

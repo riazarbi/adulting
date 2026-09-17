@@ -21,6 +21,7 @@ Subcommands:
   add-depends <uuid> <dep>       add a depends entry
   rm-depends <uuid> <dep>        remove a depends entry
   list [--priority H|M|L] [--thread T] [--assignee A] [--overdue]
+                                 grouped by thread (A-Z), then priority/due/entry
   next                           top 5 pending by (priority, due, entry)
   show <uuid>                    detail view
 """
@@ -555,6 +556,13 @@ def _sort_key(a: Anchor):
     )
 
 
+def _thread_sort_key(threads):
+    """Alphabetical by the thread shown in the table; unthreaded last."""
+    if not threads:
+        return (1, '')
+    return (0, threads[0].casefold())
+
+
 def _format_threads(threads):
     if not threads:
         return '-'
@@ -592,7 +600,8 @@ def cmd_list(args):
     cache = build_threads_cache()
     if args.thread:
         anchors = [a for a in anchors if args.thread in threads_for(a, cache)]
-    anchors.sort(key=_sort_key)
+    anchors.sort(key=lambda a: (_thread_sort_key(threads_for(a, cache)),
+                                _sort_key(a)))
     _print_table(anchors, cache)
     return 0
 

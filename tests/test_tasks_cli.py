@@ -412,6 +412,23 @@ def test_list_thread_filter(vault):
     assert "in Other" not in r.stdout
 
 
+def test_list_sorts_by_thread_alphabetically(vault):
+    """Thread order beats priority; priority still orders within a thread."""
+    _setup_vault(vault, threads=(("Projects", "Zed"), ("Projects", "Alpha")))
+    vault.write_note("2026-05-27-09-15-22",
+        "TASK: [#H] zed-high <!--abcd1234 entry:2026-05-20-->",
+        threads=["Projects/Zed"])
+    vault.write_note("2026-05-27-10-30-00",
+        "TASK: alpha-none <!--ef567890 entry:2026-05-20-->\n"
+        "TASK: [#L] alpha-low <!--ef567891 entry:2026-05-20-->",
+        threads=["Projects/Alpha"])
+    r = vault.run("list", cli="tasks")
+    pos_low = r.stdout.find("alpha-low")
+    pos_none = r.stdout.find("alpha-none")
+    pos_zed = r.stdout.find("zed-high")
+    assert 0 <= pos_low < pos_none < pos_zed
+
+
 def test_next_returns_at_most_5(vault):
     _setup_vault(vault)
     lines = [f"TASK: t{i} <!--abc1{i:04x} entry:2026-05-20-->" for i in range(8)]

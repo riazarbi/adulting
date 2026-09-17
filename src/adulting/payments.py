@@ -234,8 +234,13 @@ def cmd_edit(args):
         target['account'] = args.account
     if args.note is not None:
         target['note'] = ' '.join(args.note).strip()
-    if args.date:
-        target['received'] = V.to_iso(V.when_from_flags(TOOL, args.date, args.time))
+    if args.date or args.time:
+        # Whichever of date and time is not given keeps its current value,
+        # as `hours edit` does.
+        was = V.local(target['received'])
+        target['received'] = V.to_iso(V.when_from_flags(
+            TOOL, args.date or was.strftime('%Y-%m-%d'),
+            args.time or was.strftime('%H:%M')))
 
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
     save(path, records, ref, fm.get('currency', target['currency']))
@@ -348,6 +353,9 @@ def cmd_statement(args):
             sys.exit(f"{TOOL}: --pdf needs --thread; a statement is per client")
         return cmd_pdf(args)
     # --as-of is an upper bound on the text view too, so the two agree.
+    # Validate it first: a malformed date compared as a string bounds nothing.
+    if args.as_of:
+        _as_of(args.as_of)
     until = args.until or (args.as_of if args.as_of else None)
     bill = billed(args.thread, args.since, until)
     recv = {}

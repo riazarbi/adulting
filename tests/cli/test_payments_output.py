@@ -113,11 +113,23 @@ def test_edit_several_fields(v, paid):
     assert json.loads(pay(v, "show", paid[1], "--json").stdout)["note"] == "top up"
 
 
-def test_edit_time_without_date_changes_nothing(v, paid):
-    """Quirk, pinned: -t only takes effect alongside -d."""
-    before = v.read("payments/Processes/Trust.md")
-    assert pay(v, "edit", paid[1], "-t", "23:59").returncode == 0
-    assert v.read("payments/Processes/Trust.md") == before
+def received(v, pid):
+    """The stored `received` timestamp, rendered in the test's local zone."""
+    return json.loads(pay(v, "show", pid, "--json").stdout)["received"], \
+        next(p["received"] for p in v.payments("Projects", "SANA") if p["id"] == pid)
+
+
+def test_edit_time_alone_keeps_the_date(v, paid):
+    """-t used to be ignored unless -d came with it."""
+    r = pay(v, "edit", paid[0], "-t", "23:59")
+    assert r.stdout == f"received {paid[0]}  Projects/SANA  2026-07-10  47300.5 ZAR  FNB Business\n"
+    assert received(v, paid[0]) == ("2026-07-10", "2026-07-10T21:59:00.000Z")
+
+
+def test_edit_date_alone_keeps_the_time(v, paid):
+    """-d used to reset the time to the moment of the edit."""
+    pay(v, "edit", paid[0], "-d", "2026-07-15")
+    assert received(v, paid[0]) == ("2026-07-15", "2026-07-15T06:00:00.000Z")
 
 
 def test_edit_errors(v, paid):
@@ -155,11 +167,12 @@ def test_statement_as_of_bounds_the_text_view(v, paid):
         "TOTAL ZAR             25000 ZAR             0 ZAR         25000 ZAR\n")
 
 
-def test_statement_text_view_does_not_validate_as_of(v, paid):
-    """Quirk, pinned: a malformed --as-of is compared as a string and
-    silently bounds nothing. The --pdf path does validate it."""
+def test_statement_rejects_a_malformed_as_of(v, paid):
+    """The text view used to compare a bad --as-of as a string, bound
+    nothing, and print the whole statement. It now fails like --pdf does."""
     r = pay(v, "statement", "--as-of", "5 July")
-    assert (r.returncode, r.stdout) == (0, STATEMENT)
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "payments: bad --as-of '5 July'; expected YYYY-MM-DD\n"
 
 
 def test_statement_empty(v):

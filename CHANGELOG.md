@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - `payments` validates `statement --as-of`; `edit` keeps the date or time you don't change
+
+Two quirks pinned in unit 7, fixed.
+
+- **`payments statement --as-of` is validated in the text view.** A malformed value like `5 July` used to be compared against dates as a string, so it bounded nothing: the whole statement printed with exit 0. It now exits 1 with `payments: bad --as-of '5 July'; expected YYYY-MM-DD`, as `--pdf` already did.
+- **`payments edit` keeps whichever of date and time you don't change**, as `hours edit` does. `-t` without `-d` used to be ignored. `-d` without `-t` reset the time to the moment of the edit, which was found while writing the test for the first bug.
+- **The two unit 7 tests that pinned the quirks now assert the fixes**, plus one for `-d` alone. All three failed before the change. Valid input behaves as before: on the vault copy, old vs new are identical for `statement --as-of`, `statement --thread … --as-of … --json`, `edit -d … -t …` and `edit -a`. `edit -t` alone now changes the file where the old code changed nothing.
+- **464 passing.**
+
 ## 2026-09-17 - refactor unit 7: `payments` moves into the package and stops prompting
 
 `payments` moves to `src/adulting/payments.py` with a console-script entry point and loses its interactivity, following `hours`. `vault.prompt` and `vault.pick_thread` had no callers left and are deleted.

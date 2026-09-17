@@ -1,4 +1,4 @@
-"""Render a statement of account to PDF via pandoc + xelatex.
+r"""Render a statement of account to PDF via pandoc + xelatex.
 
 Same toolchain `notes pdf` uses, so this adds no dependency: the repo already
 requires pandoc and a LaTeX engine, and nothing here needs a pip install.
@@ -21,7 +21,7 @@ import tempfile
 from decimal import Decimal
 from pathlib import Path
 
-import _vault as V
+from adulting import vault as V
 
 CENT = Decimal('0.01')
 

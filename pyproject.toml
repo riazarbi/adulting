@@ -34,7 +34,7 @@ addopts = "-ra"
 # follow them into the child Python processes too.
 patch = ["subprocess"]
 parallel = true
-source = ["."]
+source = ["src/adulting", "."]
 omit = ["tests/*", ".venv/*", ".claude/*", "eval/*"]
 data_file = ".coverage-data/coverage"
 

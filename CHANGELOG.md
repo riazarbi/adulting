@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 0: shared modules move into the `adulting` package
+
+First step of the Python-only refactor (`stories/2026-09-17-python-package-refactor.md`, branch `refactor2`). The five shared modules every command imports now live in `src/adulting/`, so each command can be ported on its own without a `sys.path` hack pointing back at the repo root.
+
+- **Moved and renamed:** `_vault.py` → `vault.py`, `_argparse_helpjson.py` → `helpjson.py`, `_statement.py` → `statement.py`, `_statement_pdf.py` → `statement_pdf.py`, `_suggester.py` → `suggester.py`. Contents unchanged apart from imports and one docstring.
+- **Root scripts import `adulting.*`** and their `sys.path.insert` lines are gone. So are the ones in `eval/suggester/score.py` and `tests/unit/test_statement.py`. The scripts now run only under the project venv's Python. `~/bin/adulting` is unaffected.
+- **`statement_pdf.py` docstring is a raw string.** Its `\linewidth` raised a `SyntaxWarning` on every import.
+- **Verified identical on real data.** `dev/testbed compare` ran 15 commands against the vault copy, old code vs new: `hours report|list`, `payments statement|list`, `search stream|activity|overview`, `tasks list|next|--dry-run`, `threads list --all`, `people list --all`, `buffer list|tend`, `commit review`. Exit code, stdout, stderr and files touched were identical for all of them. `buffer suggest -y` differed only in its capture timestamp.
+- **New `tests/unit/test_vault.py`** (22 tests) pins the helpers that don't touch the vault, quirks included: `parse_frontmatter` ignores keys with capitals or digits, and an unclosed block reports no body. The later merge of the five frontmatter parsers can't change them unnoticed.
+- **Coverage now reports unimported package files.** `suggester.py` had silently dropped out of the report, making the total read 78%. It is 72%, with `suggester.py` at 0%.
+- **`ci.sh`** puts `.venv/bin` first on PATH and syntax-checks `src/adulting/*.py`.
+- **250 passing.**
+
 ## 2026-09-17 - refactor harness: isolated tests, a vault testbed, coverage in CI
 
 Groundwork for the Python-only refactor. Production code was reaching the test suite, and nothing could safely compare the old implementation with the new one on real data.

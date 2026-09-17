@@ -23,10 +23,7 @@ from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROJECT_ROOT = HERE.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from _suggester import (suggest, load_threads, load_people, build_thread_index,
+from adulting.suggester import (suggest, load_threads, load_people, build_thread_index,
                         build_idf, build_thread_lengths)  # noqa: E402
 
 TODAY = date(2026, 5, 19)

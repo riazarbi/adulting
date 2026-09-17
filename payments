@@ -28,10 +28,9 @@ import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
-import _vault as V  # noqa: E402
-import _statement as S  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting import vault as V  # noqa: E402
+from adulting import statement as S  # noqa: E402
 
 TOOL = 'payments'
 SUBDIR = 'payments'
@@ -343,7 +342,7 @@ def one_thread_statement(thread_arg, as_of):
 
 def cmd_pdf(args):
     """A statement document is per client, so --pdf needs exactly one thread."""
-    import _statement_pdf as P
+    from adulting import statement_pdf as P
     st = one_thread_statement(args.thread, _as_of(args.as_of))
     if not st['lines']:
         sys.exit(f"{TOOL}: nothing to state for {st['thread']!r} as at {st['as_of']}")

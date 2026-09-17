@@ -5,8 +5,7 @@ top-level directory that mirrors `threads/{Projects,Processes,Topics}/`, with
 the records as pretty-printed JSON inside a fenced code block. Only the fence
 name and the record shape differ.
 
-Follows the repo's existing shared-module pattern (`_suggester.py`,
-`_argparse_helpjson.py`) rather than duplicating ~200 lines across two
+Shared, like `suggester.py` and `helpjson.py`, rather than duplicating ~200 lines across two
 self-contained tools, where the block-splice logic would inevitably drift.
 """
 

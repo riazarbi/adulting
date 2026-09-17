@@ -13,10 +13,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+from adulting import statement as S
 
-import _statement as S  # noqa: E402
 
 HAS_PANDOC = shutil.which("pandoc") is not None
 HAS_XELATEX = shutil.which("xelatex") is not None
@@ -219,7 +217,7 @@ def test_pdf_warns_and_states_when_banking_is_missing(vault):
     assert "banking details incomplete" in r.stderr
     # The PDF is opaque to assert against; check the renderer's own markdown
     # says so, which is what lands in it.
-    import _statement_pdf as P
+    from adulting import statement_pdf as P
     md = P.markdown(
         S.build("Projects/SANA Partners", "ZAR",
                 [entry(D(2026, 6, 1), 60, 100)], [], D(2026, 6, 30)),
@@ -244,7 +242,7 @@ def test_a_failed_render_leaves_no_stale_file(vault):
 # ---- markdown escaping ----
 
 def test_description_metacharacters_cannot_break_the_table():
-    import _statement_pdf as P
+    from adulting import statement_pdf as P
     st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 60, 100,
                                     "a|b *c* _d_ [e] #f `g`")], [], D(2026, 2, 1))
     md = P.markdown(st, {"name": "S", "lines": []}, {"name": "C", "lines": []},
@@ -255,7 +253,7 @@ def test_description_metacharacters_cannot_break_the_table():
 
 
 def test_money_formats_negatives_in_parentheses():
-    import _statement_pdf as P
+    from adulting import statement_pdf as P
     assert P.money(Decimal("-150.00"), "ZAR") == "ZAR (150.00)"
     assert P.money(Decimal("1234.5"), "ZAR") == "ZAR 1,234.50"
 
@@ -274,12 +272,15 @@ def write_billing(vault, **over):
 
 
 def vault_module(vault):
-    """Import _vault with ADULTING_HOME pointed at the fixture."""
-    import importlib, os
-    os.environ["ADULTING_HOME"] = str(vault.home)
-    import _vault
-    importlib.reload(_vault)
-    return _vault
+    """Import vault with ADULTING_HOME pointed at the fixture.
+
+    vault reads ADULTING_HOME once, at import, so it is reloaded here.
+    conftest's `isolated` fixture has already set ADULTING_HOME to this
+    test's vault and restores the environment afterwards.
+    """
+    import importlib
+    from adulting import vault as V
+    return importlib.reload(V)
 
 
 def test_banking_is_complete_when_every_field_is_set(vault):

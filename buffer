@@ -50,8 +50,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
 
 HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 NOTES_DIR = HOME / 'notes'
@@ -641,7 +640,7 @@ def dispatch_proposal(proposal, raw_text):
 def cmd_suggest(args):
     """Propose a structured `buffer add-*` for raw text, then prompt to
     accept (run it) or reject (fall back to `buffer add` UNKNOWN)."""
-    from _suggester import suggest
+    from adulting.suggester import suggest
     proposal = suggest(args.text)
     if proposal['subcmd'] == 'add':
         if not args.quiet:

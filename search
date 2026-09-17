@@ -36,9 +36,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _vault as V  # noqa: E402
-from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting import vault as V  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
 
 TOOL = 'search'
 HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))

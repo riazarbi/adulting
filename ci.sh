@@ -31,6 +31,9 @@ FAILED=()
 #   uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
 PY=.venv/bin/python
 
+# The commands import the `adulting` package, which only the venv can see.
+export PATH="$PWD/.venv/bin:$PATH"
+
 # Executables that make up the operator surface, plus the developer tools.
 PY_TOOLS=(tasks search threads people hours payments buffer lint commit)
 SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
@@ -48,7 +51,7 @@ stage_lint() {
   # Python: compile every module and executable. Catches syntax errors in
   # files the test suite happens not to import.
   local py_fail=0
-  for f in *.py "${PY_TOOLS[@]}" "${DEV_TOOLS[@]}"; do
+  for f in src/adulting/*.py "${PY_TOOLS[@]}" "${DEV_TOOLS[@]}"; do
     [ -f "$f" ] || continue
     "$PY" -m py_compile "$f" 2>&1 || { echo "    $f"; py_fail=1; }
   done

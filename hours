@@ -43,9 +43,8 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _argparse_helpjson import emit_helpjson_if_requested  # noqa: E402
-import _vault as V  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting import vault as V  # noqa: E402
 
 TOOL = 'hours'
 SUBDIR = 'hours'

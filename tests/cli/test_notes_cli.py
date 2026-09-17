@@ -191,7 +191,7 @@ def test_ingest_runs_before_list_too(v):
 
 def test_help_json(vault):
     manifest = json.loads(notes(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == ["list", "cat", "last", "copy", "delete"]
+    assert [s["name"] for s in manifest["subcommands"]] == ["new", "list", "cat", "last", "copy", "delete"]
 
 
 def test_help_json_does_not_ingest(v):

@@ -3,6 +3,7 @@
 A note's stem is its filename without `.md`, e.g. `2026-09-10-14-30-00`.
 `notes list` shows every stem; the other subcommands take one.
 
+  notes new --type T --topic X --thread K/N [...]   create a note, print its path
   notes list [filter]        stem, date, type, threads and topic of each note
   notes cat <stem>           print a note
   notes last                 print the path of the newest note
@@ -11,8 +12,8 @@ A note's stem is its filename without `.md`, e.g. `2026-09-10-14-30-00`.
 
 Non-interactive: nothing prompts, nothing opens an app, and deleting needs -y.
 
-Every subcommand first ingests ACTION: lines into tasks, as the old `notes`
-did, so a note shows its task anchors. If any ACTION line cannot be
+Every subcommand except `new` first ingests ACTION: lines into tasks, as the
+old `notes` did, so a note shows its task anchors. If any ACTION line cannot be
 ingested, the command carries on, with a one-line warning when stderr is a
 terminal.
 """
@@ -22,6 +23,8 @@ import contextlib
 import io
 import json
 import re
+import shutil
+import subprocess
 import sys
 from datetime import datetime
 
@@ -31,6 +34,8 @@ from adulting.helpjson import emit_helpjson_if_requested
 
 TOOL = 'notes'
 TIMESTAMP_RE = re.compile(r'^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$')
+NOTE_TYPES = ['Meeting', 'Correspondence', 'Workshop', 'Report', 'Log', 'Research', 'Recipe']
+PEOPLE_TYPES = ('Meeting', 'Correspondence')
 
 
 def notes_dir():
@@ -102,7 +107,79 @@ def ingest_actions():
               file=sys.stderr)
 
 
+# ---------- writing a new note ----------
+
+def quote(text):
+    """A double-quoted YAML string. Only `"` is escaped, as the old bash did."""
+    return '"' + text.replace('"', '\\"') + '"'
+
+
+def people_entry(name):
+    """A wikilink when the person has a file, else the plain name."""
+    if (V.vault_home() / 'people' / f"{name}.md").exists():
+        return f'"[[people/{name}]]"'
+    return quote(name)
+
+
+def note_text(stem, note_type, topic, threads, people=(), counterparty='', location=''):
+    """The frontmatter and heading of a new note, field for field as the
+    old `notes new` wrote them. A Meeting always has a `location:` line."""
+    lines = ['---', f'topic: {topic}', f'type: {note_type}', 'threads:']
+    lines += [f'  - "[[{thread}]]"' for thread in threads]
+    lines += [f'timestamp: {stem}', f'aliases: [{quote(topic)}]']
+    if note_type == 'Meeting':
+        if counterparty:
+            lines.append(f'counterparty: {counterparty}')
+        lines.append(f'location: {location}')
+    if people:
+        lines.append('people:')
+        lines += [f'  - {people_entry(person)}' for person in people]
+    lines += ['---', '', '# Content', '', '']
+    return '\n'.join(lines)
+
+
+def buffer_ref(thread, stem, topic):
+    """Drop a REF into the buffer so the note shows up in the thread's daily
+    log. Best-effort, and its output passes straight through, as before.
+    `buffer` is found on PATH until the cleanup unit makes this a call."""
+    exe = shutil.which('buffer')
+    if exe is None:
+        return
+    sys.stdout.flush()
+    subprocess.run([exe, 'add-ref', thread, f"notes/{stem}", topic])
+
+
 # ---------- subcommands ----------
+
+def cmd_new(args):
+    topic = args.topic.strip()
+    if not topic:
+        sys.exit(f"{TOOL}: --topic is empty")
+    people = [p.strip() for p in (args.person or []) if p.strip()]
+    if args.person and args.type not in PEOPLE_TYPES:
+        sys.exit(f"{TOOL}: --person is only for Meeting and Correspondence notes")
+    if (args.counterparty is not None or args.location is not None) and args.type != 'Meeting':
+        sys.exit(f"{TOOL}: --counterparty and --location are only for Meeting notes")
+
+    threads = []
+    for arg in args.thread:
+        kind, name, _ = V.resolve_target(TOOL, arg)
+        ref = V.thread_ref(kind, name)
+        if ref not in threads:
+            threads.append(ref)
+
+    stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+    path = notes_dir() / f"{stem}.md"
+    if path.exists():
+        sys.exit(f"{TOOL}: {path} already exists; try again in a second")
+    notes_dir().mkdir(parents=True, exist_ok=True)
+    path.write_text(note_text(stem, args.type, topic, threads, people,
+                              (args.counterparty or '').strip(), (args.location or '').strip()),
+                    encoding='utf-8')
+    for thread in threads:
+        buffer_ref(thread, stem, topic)
+    print(path)
+
 
 def cmd_list(args):
     rows = all_notes()
@@ -158,8 +235,20 @@ def cmd_delete(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog=TOOL, description="List, print, copy and delete notes, named by stem.")
+        prog=TOOL, description="Create, list, print, copy and delete notes, named by stem.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
+
+    p = sub.add_parser('new', help="Create a note and print its path.")
+    p.add_argument('--type', required=True, choices=NOTE_TYPES, help="Kind of note.")
+    p.add_argument('--topic', required=True, help="What the note is about.")
+    p.add_argument('--thread', required=True, action='append',
+                   help="Thread name, 'Kind/Name' or wikilink; repeatable.")
+    p.add_argument('--person', action='append',
+                   help="Meeting and Correspondence only: an attendee; repeatable. "
+                        "Linked when people/<name>.md exists.")
+    p.add_argument('--counterparty', help="Meeting only: the other party.")
+    p.add_argument('--location', help="Meeting only: where it was held.")
+    p.set_defaults(func=cmd_new)
 
     p = sub.add_parser('list', help="List notes, oldest first: stem, date, type, threads, topic.")
     p.add_argument('filter', nargs='?', default='',
@@ -186,7 +275,8 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
-    ingest_actions()
+    if args.subcommand != 'new':
+        ingest_actions()
     args.func(args)
 
 

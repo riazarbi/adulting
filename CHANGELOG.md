@@ -2,13 +2,33 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 11: `notes new` from flags
+
+`notes new` joins `src/adulting/notes.py`. Every answer the old prompts asked for is now a flag, and it prints the new note's path instead of opening Obsidian. As in unit 10, it runs as `python -m adulting.notes` until the renderers are ported and `notes` switches to Python.
+
+- **`notes new --type T --topic X --thread T [--thread …] [--person NAME …] [--counterparty X] [--location X]`.** `--type` is one of the seven note types. `--thread` accepts a name, `Kind/Name` or a wikilink, and is repeatable; a repeat is written once. The flags follow the old prompts: `--person` only for Meeting and Correspondence, `--counterparty`/`--location` only for Meeting. Using them elsewhere exits 1 and writes nothing.
+- **The note is written exactly as before:**
+  - **fields:** topic, type, threads, timestamp, aliases; then for a Meeting, counterparty if given and a `location:` line always, even an empty one; then people.
+  - **quoting:** the topic unquoted. In `aliases` and in the names of people without a file, only `"` is escaped.
+  - **people:** a person with a file is linked as `[[people/Name]]`.
+  - **ending:** `# Content` and a blank line.
+- **One buffer REF per thread**, in the order given, with the buffer's output passed through as before. `notes new` still skips the ingest pre-pass.
+- **Changed:** an empty `--topic` exits 1 (the old prompt accepted one and wrote a note `lint` rejects). A missing `--type`, `--topic` or `--thread` is a usage error (exit 2) and never falls back to reading stdin. A note already existing at the new timestamp is refused rather than overwritten; the old script overwrote it silently.
+- **New `tests/cli/test_notes_new.py`** (23 tests) pins, against output captured by feeding the old prompts on stdin:
+  - **each note shape:** a full Meeting (quoting and escaping included), the empty location line, all six other types, and Correspondence people
+  - **the rest of `new`:** buffer REF order, thread deduplication, and the note passing `lint`
+  - **errors:** five that write nothing, three missing flags, an unknown type, and that `new` does not ingest
+- **`tests/unit/test_notes.py`** gains quoting, people linking, and note text for a Log and a Meeting.
+- **Verified on the vault copy with real threads and people.** Four notes were created through the old prompts and again through the new flags: a Meeting with quotes, colons, a linked and an unlinked person, counterparty and location; a Meeting with nothing optional; Correspondence with a person; and a two-thread Report. With timestamps masked, all four note files and their buffer REFs were identical. The old script's Obsidian `open` calls were intercepted by a scratch `open` on PATH, used only for that check.
+- `tests/cli/test_notes_cli.py`'s `--help-json` expectation now includes `new`. The unit 10 entry below had its passing count corrected to 596. **622 passing.**
+
 ## 2026-09-17 - `notes` warns about a failed ingest only on a terminal
 
 Unit 10's ingest pre-pass printed its warning to stderr whenever an ACTION line failed to ingest. The agent harness discards a command's stdout whenever stderr is non-empty, so a single malformed ACTION anywhere in the vault would have made every `notes cat` the agent ran come back empty.
 
 - **The warning now prints only when stderr is a terminal.** Run by hand, you still see it; run by the agent or in a pipe, `notes` stays silent, as the old `2>/dev/null || true` always was.
 - **Tests.** One CLI test checks that stderr stays empty when it is a pipe. Another attaches stderr to a real pseudo-terminal (Python's `pty`) and checks for the one-line warning; with the warning disabled, that test fails. The unit test now expects silence.
-- The real vault has no failing ACTION lines today, so nothing was affected in the meantime. **597 passing.**
+- The real vault has no failing ACTION lines today, so nothing was affected in the meantime. **596 passing.**
 
 ## 2026-09-17 - refactor unit 10: `notes list/cat/last/copy/delete` in Python, named by stem
 

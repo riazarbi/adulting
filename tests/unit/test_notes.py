@@ -60,3 +60,26 @@ def test_ingest_actions_is_silent_on_failure_unless_stderr_is_a_terminal(notes_d
     (notes_dir / "2026-09-10-14-30-00.md").write_text("---\ntopic: x\n---\n\nACTION: no threads\n")
     N.ingest_actions()
     assert capsys.readouterr() == ("", "")
+
+
+# ---------- new ----------
+
+def test_quote_escapes_only_double_quotes():
+    assert N.quote('Q3 "review": a\\b') == '"Q3 \\"review\\": a\\b"'
+
+
+def test_people_entry_links_known_people():
+    people = N.V.vault_home() / "people"
+    people.mkdir(parents=True, exist_ok=True)
+    (people / "Riaz Arbi.md").write_text("x")
+    assert N.people_entry("Riaz Arbi") == '"[[people/Riaz Arbi]]"'
+    assert N.people_entry('Bern "B"') == '"Bern \\"B\\""'
+
+
+def test_note_text_for_a_log_and_a_meeting():
+    assert N.note_text("2026-09-17-10-00-00", "Log", "Daily", ["Topics/Zeta"]) == (
+        '---\ntopic: Daily\ntype: Log\nthreads:\n  - "[[Topics/Zeta]]"\n'
+        'timestamp: 2026-09-17-10-00-00\naliases: ["Daily"]\n---\n\n# Content\n\n')
+    meeting = N.note_text("2026-09-17-10-00-00", "Meeting", "Kickoff",
+                          ["Projects/SGB", "Topics/Zeta"], ["Someone"], "ACME", "")
+    assert "counterparty: ACME\nlocation: \npeople:\n  - \"Someone\"\n---" in meeting

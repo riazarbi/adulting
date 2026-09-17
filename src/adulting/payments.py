@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Money received, per thread, for the adulting vault.
 
 Records live in $ADULTING_HOME/payments/<Kind>/<Thread>.md as JSON inside an
@@ -6,9 +5,10 @@ Records live in $ADULTING_HOME/payments/<Kind>/<Thread>.md as JSON inside an
 greppable, and produce clean git diffs.
 
   payments log <thread> <amount>       record a receipt
-  payments log                         interactive capture
   payments list / show / edit / rm
   payments statement                   billed vs received, per thread
+
+Non-interactive: every value comes from arguments, and deleting needs -y.
 
 Unlike `hours`, there is no Obsidian plugin to be compatible with here, so the
 fence is our own. Amounts are handled as Decimal throughout: these figures get
@@ -23,14 +23,14 @@ buffer can be written.
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
-from adulting import vault as V  # noqa: E402
-from adulting import statement as S  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
+from adulting import vault as V
+from adulting import statement as S
 
 TOOL = 'payments'
 SUBDIR = 'payments'
@@ -91,11 +91,16 @@ def buffer_ref(ref, target, summary, date=None):
 
     Best-effort, exactly as `notes new` has always done it: a record that was
     written must not be undone or reported as failed because the buffer was
-    unavailable. Resolved next to this script rather than through PATH, so it
-    works from a checkout as well as an install.
+    unavailable.
+
+    `buffer` is found on PATH. An install puts every command in the same bin
+    directory, so it is there. Once `buffer` is part of this package this
+    becomes a direct function call.
     """
-    exe = Path(__file__).resolve().parent / 'buffer'
-    cmd = [str(exe), '--quiet', 'add-ref', ref, target, summary]
+    exe = shutil.which('buffer')
+    if exe is None:
+        return
+    cmd = [exe, '--quiet', 'add-ref', ref, target, summary]
     if date:
         # File the pointer under the day the work happened, not the day the
         # buffer happens to be flushed. Without this a backdated entry lands
@@ -129,8 +134,6 @@ def report_logged(p, ref):
 # ---------- log ----------
 
 def cmd_log(args):
-    if not args.thread:
-        return cmd_log_interactive(args)
     if args.amount is None:
         sys.exit(f"{TOOL}: amount is required")
 
@@ -142,22 +145,6 @@ def cmd_log(args):
 
     p = build_payment(amount, received, currency, args.account,
                       ' '.join(args.note).strip() if args.note else '', V.all_ids())
-    append_payment(kind, name, p)
-    report_logged(p, ref)
-
-
-def cmd_log_interactive(args):
-    kind, name, tpath = V.pick_thread(TOOL, include_all=args.all)
-    ref = V.thread_ref(kind, name)
-    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
-    amount = parse_amount(V.prompt(f"Amount ({currency})"))
-    date = V.prompt("Received (YYYY-MM-DD)", V.when_from_flags(
-        TOOL, None, None).strftime('%Y-%m-%d'))
-    account = V.prompt("Account (blank for none)", '') or ''
-    note = V.prompt("Note (blank for none)", '') or ''
-
-    p = build_payment(amount, V.when_from_flags(TOOL, date, args.time),
-                      currency, account.strip(), note.strip(), V.all_ids())
     append_payment(kind, name, p)
     report_logged(p, ref)
 
@@ -258,11 +245,7 @@ def cmd_edit(args):
 def cmd_rm(args):
     path, ref, p = find_payment(args.id)
     if not args.yes:
-        r = as_row(ref, p)
-        print(f"{r['id']}  {r['received']}  {r['thread']}  "
-              f"{V.fmt_money(r['amount'], r['currency'])}")
-        if input("delete? [y/N] ").strip().lower() not in ('y', 'yes'):
-            sys.exit("aborted")
+        sys.exit(f"{TOOL}: refusing to delete {args.id} without -y")
     records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
     save(path, records, ref, fm.get('currency', ''))
@@ -415,16 +398,14 @@ def main():
         description="Record money received against threads.")
     sub = p.add_subparsers(dest='subcommand', required=True)
 
-    log = sub.add_parser('log', help="Record a receipt (interactive if no thread).")
-    log.add_argument('thread', nargs='?', help="Thread name, 'Kind/Name', or wikilink.")
+    log = sub.add_parser('log', help="Record a receipt.")
+    log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     log.add_argument('amount', nargs='?', help="Amount received.")
     log.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
     log.add_argument('-d', '--date', help="Date received, YYYY-MM-DD (default today).")
     log.add_argument('-t', '--time', help="HH:MM (default now).")
     log.add_argument('-a', '--account', help="Which account it landed in.")
     log.add_argument('-n', '--note', nargs='*', help="Free-text note.")
-    log.add_argument('--all', action='store_true',
-                     help="Interactive: list paused/closed threads too.")
     log.set_defaults(func=cmd_log)
 
     ls = sub.add_parser('list', help="List payments.")
@@ -460,7 +441,8 @@ def main():
 
     rm = sub.add_parser('rm', help="Delete a payment.")
     rm.add_argument('id')
-    rm.add_argument('-y', '--yes', action='store_true')
+    rm.add_argument('-y', '--yes', action='store_true',
+                    help="Required: confirms the permanent delete.")
     rm.set_defaults(func=cmd_rm)
 
     emit_helpjson_if_requested(p)

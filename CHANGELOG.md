@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 7: `payments` moves into the package and stops prompting
+
+`payments` moves to `src/adulting/payments.py` with a console-script entry point and loses its interactivity, following `hours`. `vault.prompt` and `vault.pick_thread` had no callers left and are deleted.
+
+- **`payments log` requires a thread.** Without one it exits 2 with argparse's usage error and writes nothing; previously it opened the thread picker and prompted for amount, date, account and note. `log --all` is gone. A thread with no amount still exits 1 with `payments: amount is required`, as before.
+- **`payments rm` refuses without `-y`.** It exits 1 with `payments: refusing to delete <id> without -y` and leaves the payment, even if stdin says `y`.
+- **The buffer REF finds `buffer` on PATH**, for the same reason as `hours`: the old lookup next to the script would have failed silently inside the package.
+- **Characterised before the port.** New `tests/cli/test_payments_output.py` has 24 tests:
+  - **20 kept behaviours, green against the old script:** the `log` line with and without an account; six `log` errors, none of which writes a file (including the full no-currency hint); the `list` table, filters, empty output and JSON row; `show` text and a missing id; `edit` of several fields; `edit` errors; `rm -y`; the `statement` table with per-currency totals and a negative outstanding; `--as-of` bounding the text view; the empty statement; and `--help-json`
+  - **4 changes, each failing against the old script first:** no picker, `--all` removed, no delete confirmation, and help without "interactive"
+- **Two quirks found and pinned, not fixed:**
+  - `statement --as-of "5 July"` is not validated in the text view. The bad value is compared as a string and bounds nothing, so the whole statement prints with exit 0. `--pdf` rejects the same value.
+  - `edit <id> -t HH:MM` without `-d` silently changes nothing.
+- **The one prompt-driven test in `tests/cli/test_payments_cli.py` was removed.** The other 24 pass unchanged, as do the PDF statement tests.
+- **New `tests/unit/test_payments.py`** (7 tests) covers amount parsing, JSON amounts dropping `.00`, blank optional fields omitted, `--as-of` parsing, and billed totals being exact Decimals that skip unbilled time. Also collect/find and a single-thread statement against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list` (text and JSON), `statement` (text, `--json`, `--as-of`), `show` (text and JSON), `edit -a` and `rm -y` on a real payment. `statement --thread "SANA Partners" --pdf` gave the same summary line and file. `log` differed only in the fresh id, and touched the same files.
+- **Side effect of unit 0, seen here:** the old `statement --pdf` printed a `SyntaxWarning` to stderr (the `\l` in `_statement_pdf.py`'s docstring) whenever Python recompiled it. The agent harness discards stdout when stderr is non-empty, so that could cost the agent the summary line. The new code prints nothing to stderr.
+- README's payments table updated. `payments.py` coverage 85% → 97%; total 81% → 82%. **463 passing.**
+
 ## 2026-09-17 - refactor unit 6: `hours` moves into the package and stops prompting
 
 `hours` moves to `src/adulting/hours.py` with a console-script entry point and loses its interactivity.

@@ -419,34 +419,3 @@ def fmt_money(amount, currency):
 
 def fmt_duration(mins):
     return f"{mins // 60}h {mins % 60}m"
-
-
-# ---------- prompts ----------
-
-def prompt(label, default=''):
-    suffix = f" [{default}]" if default != '' else ''
-    try:
-        got = input(f"{label}{suffix}: ").strip()
-    except EOFError:
-        sys.exit("\naborted")
-    return got or str(default)
-
-
-def pick_thread(tool, include_all=False):
-    """Numbered picker, matching the `threads new` interactive style."""
-    threads = []
-    for kind, name, path in discover_threads():
-        fm, _ = parse_frontmatter(path.read_text(encoding='utf-8'))
-        if not include_all and fm.get('status', 'open') != 'open':
-            continue
-        threads.append((kind, name, path))
-    if not threads:
-        sys.exit(f"{tool}: no threads found")
-    print("Thread:")
-    for i, (kind, name, _) in enumerate(threads, start=1):
-        print(f"  {i}. {thread_ref(kind, name)}")
-    choice = prompt("Pick")
-    try:
-        return threads[int(choice) - 1]
-    except (ValueError, IndexError):
-        sys.exit(f"{tool}: invalid choice")

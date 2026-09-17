@@ -60,16 +60,6 @@ def test_missing_currency_fails(vault):
     assert "currency" in (r.stdout + r.stderr)
 
 
-def test_interactive_log(vault):
-    vault.write_thread("Projects", "X", currency="ZAR")
-    r = pay(vault, "log", input="1\n1500\n2026-03-01\nFNB\nInvoice 3\n")
-    assert r.returncode == 0, r.stderr
-    p = vault.payments("Projects", "X")[0]
-    assert p["amount"] == 1500
-    assert p["account"] == "FNB"
-    assert p["note"] == "Invoice 3"
-
-
 def test_optional_fields_omitted_when_blank(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
     pay(vault, "log", "X", "100")

@@ -234,13 +234,12 @@ Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thr
 | Command | What it does |
 |---|---|
 | `payments log <thread> <amount>` | Record a receipt |
-| `payments log` | Interactive: pick thread → amount → date → account → note |
 | `payments list [thread] [--since] [--until] [--json]` | List payments |
 | `payments statement [--thread] [--since] [--until] [--as-of] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
 | `payments statement --thread T --pdf out.pdf [--as-of D]` | Render a statement of account as a PDF |
 | `payments show <id> [--json]` | One payment |
 | `payments edit <id> [--amount/-c/-d/-t/-a/-n]` | Change one field |
-| `payments rm <id> [-y]` | Delete a payment |
+| `payments rm <id> -y` | Delete a payment; refuses without `-y` |
 
 `log` flags: `-c/--currency`, `-d/--date`, `-t/--time`, `-a/--account`, `-n/--note`.
 

@@ -23,6 +23,7 @@ dev = ["pytest>=8", "coverage>=7.10"]
 commit = "adulting.commit:main"
 hours = "adulting.hours:main"
 lint = "adulting.lint:main"
+payments = "adulting.payments:main"
 people = "adulting.people:main"
 search = "adulting.search:main"
 threads = "adulting.threads:main"

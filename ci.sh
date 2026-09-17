@@ -4,7 +4,7 @@
 #
 #   ./ci.sh          lint + test          (the gate; fast, no network, no LLM)
 #   ./ci.sh lint     syntax + style only
-#   ./ci.sh test     pytest only
+#   ./ci.sh test     every test, with a coverage report
 #   ./ci.sh generate regenerate MANUAL.md and dev/tools/ (needs `claude`)
 #   ./ci.sh manual   regenerate MANUAL.md only            (needs `claude`)
 #   ./ci.sh tools    regenerate dev/tools/ only           (needs `claude`)
@@ -26,6 +26,11 @@ cd "$(dirname "$0")"
 
 FAILED=()
 
+# Tests and coverage run in the project venv, never the system python, so the
+# code under test is this checkout (see tests/harness.py). Set it up once with:
+#   uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+PY=.venv/bin/python
+
 # Executables that make up the operator surface, plus the developer tools.
 PY_TOOLS=(tasks search threads people hours payments buffer lint commit)
 SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
@@ -45,7 +50,7 @@ stage_lint() {
   local py_fail=0
   for f in *.py "${PY_TOOLS[@]}" "${DEV_TOOLS[@]}"; do
     [ -f "$f" ] || continue
-    python3 -m py_compile "$f" 2>&1 || { echo "    $f"; py_fail=1; }
+    "$PY" -m py_compile "$f" 2>&1 || { echo "    $f"; py_fail=1; }
   done
   [ $py_fail -eq 0 ] && ok "python syntax" || bad "python syntax"
 
@@ -90,11 +95,30 @@ stage_lint() {
 
 stage_test() {
   step "test"
-  if python3 -m pytest tests/ -q; then
+  if [ ! -x "$PY" ]; then
+    bad "pytest (no .venv; see the PY comment at the top of ci.sh)"
+    return
+  fi
+
+  # Coverage follows the commands into the subprocesses the CLI tests start
+  # (pyproject.toml: [tool.coverage.run] patch = subprocess), so a command is
+  # covered whether a test imports it or runs it. Parallel data files from
+  # every process are combined before reporting.
+  rm -rf .coverage-data htmlcov
+  mkdir -p .coverage-data
+  export COVERAGE_FILE="$PWD/.coverage-data/coverage"
+
+  if "$PY" -m coverage run -m pytest -v; then
     ok "pytest"
   else
     bad "pytest"
   fi
+
+  step "coverage"
+  "$PY" -m coverage combine -q
+  "$PY" -m coverage report
+  "$PY" -m coverage html -q
+  printf '  HTML report: %s\n' "$PWD/htmlcov/index.html"
 }
 
 # The corpus is a pure function of the tree, so harvesting twice would give

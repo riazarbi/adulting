@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adulting"
+version = "0.1.0"
+description = "Plain-text vault tools: notes, threads, tasks, hours, payments."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+# Runtime dependencies. Empty on purpose: the standard library covers the
+# tools today. Add a package here only when hand-rolling it would bloat the
+# code, and prefer stable, widely used ones.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "coverage>=7.10"]
+
+# One entry per ported command. A command appears here in the same change
+# that deletes its old script from the repo root.
+# [project.scripts]
+# lint = "adulting.lint:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+# Most tests run the commands as subprocesses; "subprocess" makes coverage
+# follow them into the child Python processes too.
+patch = ["subprocess"]
+parallel = true
+source = ["."]
+omit = ["tests/*", ".venv/*", ".claude/*", "eval/*"]
+data_file = ".coverage-data/coverage"
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+sort = "Cover"
+
+[tool.coverage.html]
+directory = "htmlcov"

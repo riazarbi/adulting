@@ -14,13 +14,15 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from harness import command_path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class GitVault:
     def __init__(self, home: Path):
         self.home = home
-        self.env = dict(os.environ)
+        self.env = dict(os.environ)  # already isolated by conftest
         self.env.update({
             "ADULTING_HOME": str(home),
             "GIT_AUTHOR_NAME": "agent",
@@ -42,7 +44,7 @@ class GitVault:
         return p
 
     def run(self, *argv: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, str(REPO_ROOT / "commit"), *argv],
+        return subprocess.run([command_path("commit"), *argv],
                               capture_output=True, text=True, env=self.env)
 
     def log_subjects(self) -> list[str]:

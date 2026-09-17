@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""A realistic sandbox for the refactor: your vault's content, not your vault.
+
+    dev/testbed create            copy ~/vault into the testbed (once)
+    dev/testbed reset             throw away the working vault, restore the copy
+    dev/testbed run new CMD ...   run this checkout's command against it
+    dev/testbed run old CMD ...   run the reference (pre-refactor) command
+    dev/testbed diff              what changed in the working vault since reset
+    dev/testbed compare CMD ...   reset, run old, reset, run new; report differences
+    dev/testbed env new|old       print the isolated environment (for eyeballing)
+
+Layout (default ~/projects/adulting-testbed, override with ADULTING_TESTBED):
+
+    pristine/        read-only copy of ~/vault's adulting content
+    home/            HOME for every run
+    home/vault/      the working vault (a git repo, so `commit` works)
+    home/Downloads/  where note renders land
+    baseline/        the reference implementation: this repo at BASELINE_COMMIT
+
+Secrets, agent state, Obsidian config, sync markers and the vault's own .git
+are never copied. Every run gets HOME and ADULTING_HOME inside the testbed
+and a PATH holding only one implementation's commands, so neither the
+production vault nor the production commands in ~/bin can be reached.
+"""
+
+import argparse
+import difflib
+import filecmp
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import io
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tests"))
+from harness import PRODUCTION_VAULT, is_inside, isolated_env  # noqa: E402
+
+# The last commit on main before the refactor began. `run old` executes this.
+BASELINE_COMMIT = "119f90b"
+
+TESTBED = Path(os.environ.get("ADULTING_TESTBED",
+                              Path.home() / "projects" / "adulting-testbed"))
+PRISTINE = TESTBED / "pristine"
+HOME = TESTBED / "home"
+VAULT = HOME / "vault"
+BASELINE = TESTBED / "baseline"
+
+# What to copy from the production vault. Everything else stays behind.
+COPY = ["notes", "logs", "threads", "people", "hours", "payments", "assets",
+        ".adulting", "buffer.md", ".gitignore"]
+IGNORE = shutil.ignore_patterns(".DS_Store")
+
+
+def die(msg):
+    print(f"testbed: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def check_location():
+    if is_inside(TESTBED, PRODUCTION_VAULT) or is_inside(PRODUCTION_VAULT, TESTBED):
+        die(f"testbed {TESTBED} overlaps the production vault {PRODUCTION_VAULT}")
+    if is_inside(TESTBED, REPO):
+        die(f"testbed {TESTBED} must live outside the repo (it holds private data)")
+
+
+def git(*args, cwd):
+    env = isolated_env(home=HOME, vault=VAULT)
+    subprocess.run(["git", *args], cwd=cwd, env=env, check=True,
+                   capture_output=True)
+
+
+def cmd_create(args):
+    check_location()
+    if TESTBED.exists() and not args.force:
+        die(f"{TESTBED} already exists (use --force to rebuild it)")
+    if TESTBED.exists():
+        shutil.rmtree(TESTBED)
+    PRISTINE.mkdir(parents=True)
+    for name in COPY:
+        src = PRODUCTION_VAULT / name
+        if src.is_dir():
+            shutil.copytree(src, PRISTINE / name, ignore=IGNORE)
+        elif src.is_file():
+            shutil.copy2(src, PRISTINE / name)
+    for f in PRISTINE.rglob("*"):
+        if f.is_file():
+            f.chmod(0o444)  # a stray write to pristine fails instead of passing
+
+    # Snapshot the reference implementation from git, not from ~/bin: git
+    # history cannot drift, a working checkout can.
+    archive = subprocess.run(["git", "archive", BASELINE_COMMIT], cwd=REPO,
+                             capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(BASELINE, filter="tar")
+
+    cmd_reset(args)
+    print(f"testbed created at {TESTBED}")
+
+
+def cmd_reset(args):
+    check_location()
+    if not PRISTINE.exists():
+        die("no testbed yet; run `dev/testbed create`")
+    if VAULT.exists():
+        shutil.rmtree(VAULT)
+    shutil.copytree(PRISTINE, VAULT)
+    for f in VAULT.rglob("*"):
+        f.chmod(0o755 if f.is_dir() else 0o644)
+    (HOME / "Downloads").mkdir(parents=True, exist_ok=True)
+    for f in (HOME / "Downloads").iterdir():
+        f.unlink()
+    git("init", "-q", ".", cwd=VAULT)
+    git("add", "-A", cwd=VAULT)
+    git("commit", "-qm", "testbed baseline", cwd=VAULT)
+
+
+def env_for(impl):
+    root = {"new": REPO, "old": BASELINE}[impl]
+    if not root.exists():
+        die(f"{root} missing; run `dev/testbed create`")
+    return isolated_env(home=HOME, vault=VAULT, repo_root=root)
+
+
+def run(impl, argv, capture=False):
+    env = env_for(impl)
+    exe = shutil.which(argv[0], path=env["PATH"])
+    root = {"new": REPO, "old": BASELINE}[impl]
+    if exe is None or not is_inside(Path(exe), root):
+        die(f"{argv[0]} not found in the {impl} implementation ({exe})")
+    return subprocess.run([exe, *argv[1:]], env=env, cwd=HOME, text=True,
+                          capture_output=capture, stdin=subprocess.DEVNULL)
+
+
+def cmd_run(args):
+    sys.exit(run(args.impl, args.argv).returncode)
+
+
+def changes():
+    """Files added, removed or changed in home/ relative to a fresh reset."""
+    found = []
+
+    def walk(cmp, rel):
+        for name in cmp.left_only:
+            found.append(("removed", rel / name))
+        for name in cmp.right_only:
+            if name != ".git":
+                found.append(("added", rel / name))
+        for name in cmp.diff_files:
+            found.append(("changed", rel / name))
+        for name, sub in cmp.subdirs.items():
+            if name != ".git":
+                walk(sub, rel / name)
+
+    walk(filecmp.dircmp(PRISTINE, VAULT, ignore=[".git"]), Path("vault"))
+    for f in sorted((HOME / "Downloads").iterdir()):
+        found.append(("added", Path("Downloads") / f.name))
+    return found
+
+
+def text_diff(rel):
+    old = PRISTINE / rel.relative_to("vault")
+    new = HOME / rel
+    read = lambda p: p.read_text(errors="replace").splitlines() if p.is_file() else []
+    return "\n".join(difflib.unified_diff(read(old), read(new), str(old), str(new),
+                                          lineterm=""))
+
+
+def cmd_diff(args):
+    for kind, rel in changes():
+        print(f"{kind:8} {rel}")
+        if args.patch and rel.parts[0] == "vault" and rel.suffix == ".md":
+            print(text_diff(rel))
+
+
+def cmd_compare(args):
+    results = {}
+    for impl in ("old", "new"):
+        cmd_reset(args)
+        p = run(impl, args.argv, capture=True)
+        results[impl] = (p.returncode, p.stdout, p.stderr,
+                         [(k, str(r)) for k, r in changes()])
+    cmd_reset(args)
+    same = True
+    for label, i in (("exit code", 0), ("stdout", 1), ("stderr", 2), ("files touched", 3)):
+        old, new = results["old"][i], results["new"][i]
+        if old == new:
+            print(f"same     {label}")
+            continue
+        same = False
+        print(f"DIFFERS  {label}")
+        if isinstance(old, str):
+            for line in difflib.unified_diff(old.splitlines(), new.splitlines(),
+                                             "old", "new", lineterm=""):
+                print(f"    {line}")
+        else:
+            print(f"    old: {old}\n    new: {new}")
+    print("\nNote: output with timestamps or fresh ids differs on every run.")
+    sys.exit(0 if same else 1)
+
+
+def cmd_env(args):
+    for k, v in sorted(env_for(args.impl).items()):
+        if k in ("HOME", "ADULTING_HOME", "PATH") or k.startswith("GIT_"):
+            print(f"{k}={v}")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("create", help="Copy the production vault into the testbed.")
+    c.add_argument("--force", action="store_true", help="Rebuild an existing testbed.")
+    sub.add_parser("reset", help="Restore the working vault from the pristine copy.")
+    r = sub.add_parser("run", help="Run a command against the working vault.")
+    r.add_argument("impl", choices=["new", "old"])
+    r.add_argument("argv", nargs=argparse.REMAINDER)
+    d = sub.add_parser("diff", help="List files changed since the last reset.")
+    d.add_argument("-p", "--patch", action="store_true", help="Show text diffs.")
+    cp = sub.add_parser("compare", help="Run old and new from a fresh reset; compare.")
+    cp.add_argument("argv", nargs=argparse.REMAINDER)
+    e = sub.add_parser("env", help="Show the environment a run gets.")
+    e.add_argument("impl", choices=["new", "old"])
+    args = p.parse_args()
+    if args.cmd in ("run", "compare") and not args.argv:
+        p.error("give a command to run")
+    {"create": cmd_create, "reset": cmd_reset, "run": cmd_run, "diff": cmd_diff,
+     "compare": cmd_compare, "env": cmd_env}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

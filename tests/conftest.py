@@ -1,13 +1,23 @@
 """Test harness for the adulting CLIs.
 
-The `vault` fixture builds a clean temp vault per test, pointed at by
-ADULTING_HOME, with the standard subdirs (notes/, logs/, threads/,
-people/, .adulting/) pre-created. It exposes small helpers for adding
-content and for invoking the in-repo CLIs (`tasks`, `lint`, `buffer`)
+Isolation (see tests/harness.py for the why):
+
+- At session start, os.environ is replaced with an isolated copy: HOME and
+  ADULTING_HOME point at a throwaway directory and PATH holds only this
+  repo's commands plus system tools. Nothing the suite does can reach
+  ~/vault or ~/bin/adulting, even code that reads os.environ at import time.
+- Every test then gets its own HOME and ADULTING_HOME under tmp_path.
+- At session end, the production vault's adulting-managed files are
+  compared with a snapshot taken at session start. Any difference fails
+  the run and names the files.
+
+The `vault` fixture builds a clean temp vault per test with the standard
+subdirs (notes/, logs/, threads/, people/, .adulting/) pre-created. It
+exposes small helpers for adding content and for invoking this repo's CLIs
 against the temp vault.
 
 CLIs run as subprocesses so we exercise the same argv/env path the user
-hits — no monkey-patching of internal functions.
+hits. Nothing is mocked.
 """
 
 from __future__ import annotations
@@ -20,7 +30,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from harness import (PRODUCTION_VAULT, REPO_ROOT, command_path,
+                     isolated_env)
 
 
 @dataclass
@@ -137,16 +148,69 @@ class Vault:
             input: str | None = None) -> subprocess.CompletedProcess:
         """Run a CLI from the repo against this vault. Returns the
         CompletedProcess; stdout/stderr are text-decoded."""
-        cmd = [sys.executable, str(REPO_ROOT / cli), *argv]
+        cmd = [command_path(cli, self.env), *argv]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=self.env, check=check, input=input)
 
 
+@pytest.fixture(autouse=True)
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Give every test its own HOME and ADULTING_HOME, in os.environ too."""
+    env = isolated_env(home=tmp_path / "home", vault=tmp_path / "vault")
+    (tmp_path / "home").mkdir(exist_ok=True)
+    for key in ("HOME", "ADULTING_HOME", "PATH", "GIT_AUTHOR_NAME",
+                "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(key, env[key])
+    return env
+
+
 @pytest.fixture
-def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Vault:
+def vault(tmp_path: Path, isolated: dict) -> Vault:
     home = tmp_path / "vault"
     for sub in ("notes", "logs", "threads", "people", "hours", "payments", ".adulting"):
         (home / sub).mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env["ADULTING_HOME"] = str(home)
-    return Vault(home=home, env=env)
+    return Vault(home=home, env=dict(isolated))
+
+
+# ---- session-wide isolation and the production-vault tripwire ----
+
+# The parts of a vault the adulting tools read or write.
+MANAGED = ["notes", "logs", "threads", "people", "hours", "payments",
+           ".adulting", "buffer.md"]
+
+
+def fingerprint(vault: Path) -> dict:
+    """(size, mtime) of every managed file. Cheap, and catches any write."""
+    prints = {}
+    for name in MANAGED:
+        top = vault / name
+        files = [top] if top.is_file() else (top.rglob("*") if top.is_dir() else [])
+        for f in files:
+            if f.is_file() and f.name != ".DS_Store":
+                st = f.stat()
+                prints[str(f.relative_to(vault))] = (st.st_size, st.st_mtime_ns)
+    return prints
+
+
+def pytest_configure(config):
+    import tempfile
+    config._production_before = fingerprint(PRODUCTION_VAULT)
+    base = Path(tempfile.mkdtemp(prefix="adulting-tests-"))
+    env = isolated_env(home=base / "home", vault=base / "no-vault-selected")
+    os.environ.clear()
+    os.environ.update(env)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    before = session.config._production_before
+    after = fingerprint(PRODUCTION_VAULT)
+    changed = sorted(k for k in before.keys() | after.keys()
+                     if before.get(k) != after.get(k))
+    if changed:
+        print(f"\n\nPRODUCTION VAULT CHANGED DURING THE TEST RUN "
+              f"({PRODUCTION_VAULT}):")
+        for k in changed[:20]:
+            print(f"  {k}")
+        print("If you (or Obsidian/sync) edited the vault meanwhile, rerun. "
+              "Otherwise a test leaked.")
+        session.exitstatus = 1

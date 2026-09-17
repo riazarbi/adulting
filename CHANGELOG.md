@@ -2,6 +2,21 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor harness: isolated tests, a vault testbed, coverage in CI
+
+Groundwork for the Python-only refactor. Production code was reaching the test suite, and nothing could safely compare the old implementation with the new one on real data.
+
+- **Two leaks, now closed.** Your shell resolves commands from `~/bin/adulting`, and `buffer flush`, `tasks add` and `notes` call sibling commands by name. The suite therefore ran production code whenever one command called another. Separately, the shell exports `ADULTING_HOME=~/vault`, so any child process that didn't override it wrote to the real vault.
+- **New `tests/harness.py`.** `isolated_env()` points HOME and ADULTING_HOME at chosen directories and refuses the production vault. It builds a PATH with this repo first and drops any directory holding another copy of the commands. `command_path()` fails if a command would resolve outside the repo.
+- **`tests/conftest.py` isolates the whole session.** `os.environ` is replaced before any test module is imported, so even code that reads the environment at import time can't see production. Every test then gets its own HOME and vault.
+- **Tripwire on the production vault.** Every adulting-managed file in `~/vault` is fingerprinted by size and mtime at session start and compared at the end. Any difference fails the run and names the files. Checked against a fake vault that a probe test wrote to.
+- **Tests split into `tests/unit/`, `tests/cli/` and `tests/dev/`**, plus 8 harness tests in `tests/unit/test_harness.py`.
+- **New `dev/testbed`.** It copies the vault's adulting content to `~/projects/adulting-testbed`. Secrets, `.agent`, `.obsidian`, `.git` and sync markers are never copied. The copy is kept read-only as `pristine/`, with a git-initialised working copy beside it. The reference implementation is extracted with `git archive 119f90b` rather than taken from `~/bin/adulting`, which is a commit behind. `run old|new`, `diff` and `compare` run either implementation against the copy and report what changed.
+- **Packaging skeleton:** `pyproject.toml` (setuptools, src layout, no runtime dependencies, `pytest` and `coverage` as dev extras) and an empty `src/adulting/`.
+- **`./ci.sh test` reports coverage.** It runs pytest under `coverage run` in the venv, and coverage follows the CLI subprocesses (`patch = ["subprocess"]`), so a command counts as covered whether a test imports it or runs it. A per-file table is printed and an HTML report written to `htmlcov/`. 72% overall. Lowest: `suggester` 0%, `people` 32%, `threads` 48%, `buffer` 55%.
+- **Refactor plan** in `stories/2026-09-17-python-package-refactor.md`: ranking, per-command loop, and decisions (deletes need `-y`, notes named by stem, no apps opened, `notes` keeps running `tasks` but warns on failure, command names unchanged).
+- **228 passing.**
+
 ## 2026-09-17 - `tasks list` groups by thread
 
 `tasks list` ordered purely by priority, due and entry, so one thread's tasks were scattered through the table. It now sorts alphabetically by thread first.

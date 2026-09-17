@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 4: `people` moves into the package and stops prompting
+
+`people` moves to `src/adulting/people.py` with a console-script entry point. It is the first command to lose its interactivity, per the refactor decisions: every value comes from arguments, and a delete needs `-y`.
+
+- **`people new` requires `--name` and `--category`.** Missing either exits 2 with argparse's usage error; nothing is read from stdin and no file is written. Previously each missing field opened a prompt.
+- **`people delete` refuses without `-y`.** It exits 1 with `refusing to delete <path> without -y` and leaves the file, even if stdin says `y`. Previously it asked for confirmation, and with no terminal attached it crashed with an `EOFError` traceback.
+- **Bug fixed: `--name` is now stripped.** Only the prompt path stripped whitespace, so `people new --name "  "` created a file named `  .md`, and `--name ""` fell through to the prompt. A blank name now exits 1 with `empty name`, and `" Igor Novak "` creates `Igor Novak.md`.
+- **Characterised before the port.** `people` had no tests. New `tests/cli/test_people_cli.py` has 20 tests:
+  - **15 kept behaviours, green against the old script:** the `list` table, `--all`, `--json` fields, fuzzy query ranking, the empty messages, `show` as raw text and JSON (with the `people/` prefix), a missing person, the exact file `new` writes (and that it passes `lint`), creating `people/`, refusing duplicates and unknown categories, `delete -y`, and `--help-json`
+  - **5 changes, each failing against the old script first:** no name prompt, no category prompt, no delete confirmation, the blank-name fix, and help text without prompt wording
+- **New `tests/unit/test_people.py`** (5 tests) covers the fuzzy-score ladder, wikilink-prefix stripping, frontmatter reading, and person discovery against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list`, `list --all --json`, two fuzzy queries, `show` (raw, and `people/…` with `--json`), `new --name … --category …`, and `delete … -y`. `--help-json` changed only as specified.
+- README's people table updated. `people.py` coverage 32% → 99%; total 75% → 78%. **374 passing.**
+
 ## 2026-09-17 - `search stream --thread` matches whole thread names
 
 `stream --thread Processes/SGB` also returned every event of `Processes/SGB Extra`. The filter asked whether the resolved ref appeared anywhere inside the event's thread text, which is the event's threads joined with `, `. It now splits that text and compares whole names. An event on several threads still matches each of them.

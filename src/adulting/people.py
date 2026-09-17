@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
 """Manage people files in ~/vault/people/.
+
+Non-interactive: every value comes from arguments, and deleting needs -y.
 
 People are link targets (`[[people/<name>]]`) for `note.people` and
 action `assignee:`. They are not threads — they cannot be the value of
@@ -15,11 +16,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-PEOPLE_DIR = HOME / 'people'
 CATEGORIES = ['professional', 'personal', 'voluntary']
+
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
+
+
+def people_dir():
+    return vault_home() / 'people'
 
 
 def today():
@@ -27,9 +36,9 @@ def today():
 
 
 def discover_people():
-    if not PEOPLE_DIR.is_dir():
+    if not people_dir().is_dir():
         return
-    for f in sorted(PEOPLE_DIR.iterdir()):
+    for f in sorted(people_dir().iterdir()):
         if f.suffix == '.md' and not f.name.startswith('.'):
             yield f.stem, f
 
@@ -50,33 +59,16 @@ def read_frontmatter(path):
 
 
 def cmd_new(args):
-    if args.category:
-        category = args.category
-    else:
-        print("Category:")
-        for i, c in enumerate(CATEGORIES, start=1):
-            print(f"  {i}. {c}")
-        choice = input("Pick: ").strip()
-        try:
-            category = CATEGORIES[int(choice) - 1]
-        except (ValueError, IndexError):
-            sys.exit("invalid choice")
-    if category not in CATEGORIES:
-        sys.exit(f"unknown category: {category}")
-
-    if args.name:
-        name = args.name
-    else:
-        name = input("Full name: ").strip()
+    name = args.name.strip()
     if not name:
         sys.exit("empty name")
 
-    PEOPLE_DIR.mkdir(parents=True, exist_ok=True)
-    path = PEOPLE_DIR / f"{name}.md"
+    people_dir().mkdir(parents=True, exist_ok=True)
+    path = people_dir() / f"{name}.md"
     if path.exists():
         sys.exit(f"already exists: {path}")
     path.write_text(
-        f"---\nstatus: open\ncategory: {category}\nstarted: {today()}\n---\n\n# {name}\n",
+        f"---\nstatus: open\ncategory: {args.category}\nstarted: {today()}\n---\n\n# {name}\n",
         encoding='utf-8',
     )
     print(f"created: {path}")
@@ -93,13 +85,11 @@ def _resolve_person(arg):
 
 def cmd_delete(args):
     name = _resolve_person(args.person)
-    path = PEOPLE_DIR / f"{name}.md"
+    path = people_dir() / f"{name}.md"
     if not path.exists():
         sys.exit(f"not found: {path}")
     if not args.yes:
-        ans = input(f"delete {path}? [y/N] ").strip().lower()
-        if ans not in ('y', 'yes'):
-            sys.exit("aborted")
+        sys.exit(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
 
@@ -131,7 +121,7 @@ def cmd_list(args):
         rows.append({
             'name': name,
             'person': f"people/{name}",  # resolvable wikilink-form
-            'path': str(path.relative_to(HOME)),
+            'path': str(path.relative_to(vault_home())),
             'status': fm.get('status', ''),
             'category': fm.get('category', ''),
             'started': fm.get('started', ''),
@@ -166,14 +156,14 @@ def cmd_list(args):
 
 def cmd_show(args):
     name = _resolve_person(args.person)
-    path = PEOPLE_DIR / f"{name}.md"
+    path = people_dir() / f"{name}.md"
     if not path.exists():
         sys.exit(f"not found: {path}")
     if args.json:
         fm = read_frontmatter(path)
         print(json.dumps({
             'name': path.stem,
-            'path': str(path.relative_to(HOME)),
+            'path': str(path.relative_to(vault_home())),
             **fm,
         }, indent=2))
     else:
@@ -197,14 +187,16 @@ def main():
     p_show.add_argument('--json', action='store_true', help="JSON output.")
     p_show.set_defaults(func=cmd_show)
 
-    p_new = sub.add_parser('new', help="Create a person file (interactive prompts for missing fields).")
-    p_new.add_argument('--name', help="Full name (skip prompt).")
-    p_new.add_argument('--category', choices=CATEGORIES, help="Skip prompt.")
+    p_new = sub.add_parser('new', help="Create a person file.")
+    p_new.add_argument('--name', required=True, help="Full name; becomes the filename.")
+    p_new.add_argument('--category', required=True, choices=CATEGORIES,
+                       help="Relationship category.")
     p_new.set_defaults(func=cmd_new)
 
     p_delete = sub.add_parser('delete', help="Permanently delete a person file.")
     p_delete.add_argument('person', help="Full name.")
-    p_delete.add_argument('-y', '--yes', action='store_true', help="Skip confirmation.")
+    p_delete.add_argument('-y', '--yes', action='store_true',
+                          help="Required: confirms the permanent delete.")
     p_delete.set_defaults(func=cmd_delete)
 
     emit_helpjson_if_requested(parser)

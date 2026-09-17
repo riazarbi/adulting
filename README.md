@@ -139,8 +139,8 @@ Same skeleton shape, applied to people files.
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `people new`                         | Interactive: pick category, name; creates the file            |
-| `people delete <name> [-y]`          | Delete a person (with confirm)                                |
+| `people new --name N --category C`   | Create a person file; both flags required                     |
+| `people delete <name> -y`            | Delete a person; refuses without `-y`                         |
 | `people list [--json]`               | List all people                                               |
 | `people show <name> [--json]`        | Print the file (or JSON of frontmatter)                       |
 

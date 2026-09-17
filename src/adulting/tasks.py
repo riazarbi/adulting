@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Bridge ACTION: lines from notes/logs into anchored TASK: lines, and
 expose source-line mutations as subcommands. Source notes ARE the store;
 there is no backend.
@@ -36,14 +35,13 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from adulting.helpjson import emit_helpjson_if_requested  # noqa: E402
+from adulting.helpjson import emit_helpjson_if_requested
 
-HOME = Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
-NOTES_DIR = HOME / 'notes'
-LOGS_DIR = HOME / 'logs'
-THREADS_DIR = HOME / 'threads'
-PEOPLE_DIR = HOME / 'people'
-INTERNAL_DIR = HOME / '.adulting'
+
+def vault_home():
+    """The vault directory. Read on every call, not at import, so tests
+    can point it somewhere else."""
+    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 ACTION_RE = re.compile(
@@ -140,12 +138,14 @@ def format_anchor(a: Anchor) -> str:
 def discover_source_files():
     """Yield .md files in notes/ (flat) and logs/ (recursive). Sorted
     for deterministic ordering. Skips dotfiles."""
-    if NOTES_DIR.is_dir():
-        for f in sorted(NOTES_DIR.iterdir()):
+    notes_dir = vault_home() / 'notes'
+    logs_dir = vault_home() / 'logs'
+    if notes_dir.is_dir():
+        for f in sorted(notes_dir.iterdir()):
             if f.suffix == '.md' and not f.name.startswith('.'):
                 yield f
-    if LOGS_DIR.is_dir():
-        for root, dirs, files in os.walk(LOGS_DIR):
+    if logs_dir.is_dir():
+        for root, dirs, files in os.walk(logs_dir):
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             for fname in sorted(files):
                 if fname.endswith('.md') and not fname.startswith('.'):
@@ -224,7 +224,7 @@ def validate_priority(s):
 def assignee_resolves(name):
     if not name:
         return True
-    return (PEOPLE_DIR / f"{name}.md").exists()
+    return (vault_home() / 'people' / f"{name}.md").exists()
 
 
 def thread_resolves(target):
@@ -233,7 +233,7 @@ def thread_resolves(target):
     kind, name = target.split('/', 1)
     if kind not in ('Projects', 'Processes', 'Topics'):
         return False
-    return (THREADS_DIR / kind / f"{name}.md").exists()
+    return (vault_home() / 'threads' / kind / f"{name}.md").exists()
 
 
 def gen_uuid8(existing: set) -> str:
@@ -288,13 +288,13 @@ def build_threads_cache():
             text = f.read_text(encoding='utf-8')
         except OSError:
             continue
-        rel = str(f.relative_to(HOME).with_suffix(''))
+        rel = str(f.relative_to(vault_home()).with_suffix(''))
         cache[rel] = parse_frontmatter_threads(text)
     return cache
 
 
 def threads_for(anchor: Anchor, cache: dict) -> list:
-    rel = str(anchor.path.relative_to(HOME).with_suffix(''))
+    rel = str(anchor.path.relative_to(vault_home()).with_suffix(''))
     return cache.get(rel, [])
 
 
@@ -622,7 +622,7 @@ def cmd_show(args):
     print(f"assignee:    {anchor.assignee or '-'}")
     print(f"threads:     {', '.join(threads) if threads else '-'}")
     print(f"source:      "
-          f"{anchor.path.relative_to(HOME)}:{anchor.line_no + 1}")
+          f"{anchor.path.relative_to(vault_home())}:{anchor.line_no + 1}")
     print(f"body:        {anchor.body}")
     print(f"entry:       {anchor.entry}")
     print(f"end:         {anchor.end or '-'}")

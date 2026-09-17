@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-17 - refactor unit 9: `tasks` moves into the package
+
+`tasks` moves to `src/adulting/tasks.py` with a console-script entry point. It has no interactivity, so this is a pure port. It is the highest-risk command for data because it rewrites notes and logs in place, so the verification centres on the lines it writes. With this unit every Python command is packaged. What remains at the repo root is the bash `notes` family.
+
+- **Characterised before the port.** New `tests/cli/test_tasks_output.py` has 19 tests, all green against the old script:
+  - **ingest:** exact `--dry-run` output with the file untouched; `--dry-run --quiet`; and a real ingest. That ingest rewrote two good ACTIONs in place, byte for byte around them, and left five failing ones. Those fail on a bad attr set (reported one error per attr), an unknown assignee, an empty body, a note with no threads, and a thread that doesn't resolve, and each gets its exact stderr line. Also: the 60-character summary truncation, the two-space hard break, and the nothing-to-do case.
+  - **`list`, `next`, `show`:** the exact table, with multi-thread `+1`, unthreaded `-`, padding and trailing-space stripping; the thread, priority and assignee filters and `(no tasks)`; `next` order; and `show` detail, including threads from a log's singular `thread:`.
+  - **uuid prefixes:** the ambiguous and not-found errors.
+  - **mutations:** every mutation's output and the exact line it leaves in a log file, including `already done`, `already depends on`, `did not depend on`, and a `people/` prefix on `set-assignee`. Six mutation errors leave the file untouched.
+  - **`tasks add`:** passes every flag to `buffer` and returns its exit code. `--help-json` is covered too.
+- **Two cosmetic inconsistencies pinned, not fixed:** `set-due`/`set-scheduled` say `date must be YYYY-MM-DD, got …` with a comma where other errors use a semicolon, and the ambiguous-prefix error names files by basename rather than vault path.
+- **`ADULTING_HOME` is read per call.** An unused `INTERNAL_DIR` constant is gone. `tasks add` still reaches `buffer` through PATH, and `buffer flush` still reaches `tasks` the same way. Both become direct calls in the cleanup unit, alongside `hours`, `payments` and `notes`.
+- **New `tests/unit/test_tasks.py`** (15 tests) covers: anchor parsing of every field; the format round-trip with its hard break; five lines that must not parse (attrs out of order, indented, and others); attr parsing that tolerates the buffer's timestamp and drops bad values; `threads:` lists and a singular `thread:`; priority/due/entry and thread sort keys; the thread cell; validators; and uuid generation. Against a real temp vault it also covers skipping dot-files and dot-dirs, prefix resolution, a mutation rewriting exactly one line with no `.tmp` left behind, and the threads cache.
+- **Verified on the vault copy:**
+  - **Reads and mutations:** old and new are identical for `list` (plain, `--overdue`, `--priority H`, `--thread "Projects/SANA Partners"`), `next`, `--dry-run` and `--help-json`, and for `show`, `done`, `set-priority`, `set-due` and `set-description` on a real task.
+  - **Ingest:** ACTION lines were appended to a real 238-line note and a real AXA DORA log, three good and one with an unknown assignee. Old and new then produced identical stdout, stderr and file changes once the fresh uuids were masked.
+- **`ci.sh`** no longer lists root Python scripts; there are none left. `tasks.py` coverage 92% → 99%. **572 passing.**
+
 ## 2026-09-17 - refactor unit 8: `buffer` moves into the package; `suggest` stops prompting
 
 `buffer` moves to `src/adulting/buffer.py` with a console-script entry point. It was the least-tested core command: every capture, `tend` and `flush` pass through it, and the suggester behind `buffer suggest` had no tests at all.

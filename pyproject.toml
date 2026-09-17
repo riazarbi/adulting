@@ -27,6 +27,7 @@ lint = "adulting.lint:main"
 payments = "adulting.payments:main"
 people = "adulting.people:main"
 search = "adulting.search:main"
+tasks = "adulting.tasks:main"
 threads = "adulting.threads:main"
 
 [tool.setuptools.packages.find]

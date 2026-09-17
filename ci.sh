@@ -36,9 +36,8 @@ PY=.venv/bin/python
 # the venv can see. Both go first so no other installed copy is picked up.
 export PATH="$PWD/.venv/bin:$PWD:$PATH"
 
-# Operator commands still living as scripts at the repo root, plus the
-# developer tools. Ported commands are checked as src/adulting/*.py.
-PY_TOOLS=(tasks)
+# Every Python operator command is a module in src/adulting/. The developer
+# tools are still scripts under dev/.
 SH_TOOLS=(notes notes_agenda notes_minutes notes_new notes_pdf notes_strip)
 DEV_TOOLS=(dev/manual-harvest dev/manual-build dev/manual-diff
            dev/tools-build dev/tools-check)
@@ -54,7 +53,7 @@ stage_lint() {
   # Python: compile every module and executable. Catches syntax errors in
   # files the test suite happens not to import.
   local py_fail=0
-  for f in src/adulting/*.py "${PY_TOOLS[@]}" "${DEV_TOOLS[@]}"; do
+  for f in src/adulting/*.py "${DEV_TOOLS[@]}"; do
     [ -f "$f" ] || continue
     "$PY" -m py_compile "$f" 2>&1 || { echo "    $f"; py_fail=1; }
   done

@@ -23,7 +23,7 @@ from pathlib import Path
 
 # Names the manual must never contain: the machinery that produces it.
 FORBIDDEN = ['manual-harvest', 'manual-build', 'manual-diff', 'manual-prompt',
-             'ci.sh', 'agent-build', 'help-json']
+             'dev/ci', 'agent-build', 'help-json']
 
 OPERATOR_TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
                   'payments', 'buffer', 'lint', 'commit']

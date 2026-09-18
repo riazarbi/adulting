@@ -2,11 +2,12 @@
 #
 # Adulting's runtime + the agent binary. We layer the agent into our own
 # debian-slim base because the agent image itself is distroless (no shell,
-# no apt), so adding python/taskwarrior on top of it is not possible — we
-# pull the binary out and rebuild the runtime ourselves.
+# no apt), so adding python on top of it is not possible — we pull the
+# binary out and rebuild the runtime ourselves.
 #
-# The CLIs are bind-mounted at runtime (see docker-compose.yml) so edits to
-# the repo on the host flow through immediately, without a rebuild.
+# The source is bind-mounted at runtime (see docker-compose.yml) so edits to
+# the repo on the host flow through immediately, without a rebuild. The
+# commands are wrappers around `python3 -m adulting.<name>`; see below.
 #
 # The agent base image must exist locally. Build it via the `agent-base`
 # profile in the staging vault's compose file:
@@ -22,21 +23,23 @@
 
 FROM agent:local AS agent_bin
 
-# sid (not trixie) because trixie ships taskwarrior 2.6.2, which uses the
-# legacy flat-file DB and can't read the taskchampion sqlite3 store written
-# by 3.x. The host runs 3.x (brew); the container must match or the agent's
-# `tasks` calls silently return zero rows against the wrong DB format.
+# sid was chosen when the image still needed taskwarrior 3.x; it no longer
+# does, but sid is a current, working base and changing it is a separate
+# decision from this refactor.
 FROM debian:sid-slim
 
-# python3 runs the adulting CLIs (stdlib only). taskwarrior provides the
-# `task` binary that `tasks install` copies into ADULTING_HOME/.adulting/bin/.
+# python3 runs the adulting package (standard library only). taskwarrior is
+# gone: task state lives in the notes themselves and no command shells out to
+# `task` any more.
 # ca-certificates is needed for the agent's outbound TLS to the LLM API.
 # git backs the `commit` CLI (~50MB with its deps) — the vault's only sync
 # mechanism, so the agent cannot record its work without it.
 # pandoc + a LaTeX engine for `notes pdf|minutes|agenda` are deferred —
-# add later if PDF rendering becomes necessary (adds ~1GB).
+# add later if PDF rendering becomes necessary (adds ~1GB). Without them
+# those three subcommands write the markdown and report that pandoc is
+# missing; every other command is unaffected.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 taskwarrior ca-certificates git ripgrep \
+      python3 ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent
@@ -49,11 +52,19 @@ COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent
 # land there and need to be writable by the container UID.
 RUN mkdir -p /opt/adulting /state /workspace && chmod 0777 /state /workspace
 
-# Prepend /opt/adulting to PATH so `notes`, `tasks`, `lint`, etc. resolve
-# directly. ADULTING_HOME points at the bind-mounted vault.
-ENV PATH=/opt/adulting:$PATH \
+# The commands are console scripts of the `adulting` package, which a pipx or
+# pip install would create. This image cannot install it: the source arrives
+# at runtime as a bind mount, after the build. So each command gets a wrapper
+# that runs its module, and PYTHONPATH points at the mounted source. Edits on
+# the host still take effect immediately, with no rebuild.
+RUN for cmd in tasks notes search threads people hours payments buffer lint commit; do \
+      printf '#!/bin/sh\nexec python3 -m adulting.%s "$@"\n' "$cmd" > /usr/local/bin/$cmd; \
+      chmod 0755 /usr/local/bin/$cmd; \
+    done
+
+# ADULTING_HOME points at the bind-mounted vault.
+ENV PYTHONPATH=/opt/adulting/src \
     ADULTING_HOME=/vault \
-    ADULTING_TASK_BIN=/usr/bin/task \
     AGENT_STATE_DIR=/state \
     HOME=/tmp
 

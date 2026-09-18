@@ -43,6 +43,8 @@ and individual entries are added/removed via the API.
 """
 
 import argparse
+import contextlib
+import io
 import os
 import re
 import sys
@@ -300,6 +302,27 @@ def cmd_add_action(args):
     append_line(line)
     print(f"buffered: {line}")
     return 0
+
+
+def add_ref(thread, target, summary, date=None, quiet=True):
+    """Append a REF entry on behalf of another command.
+
+    Best-effort: a record that was written must not be undone or reported as
+    failed because the buffer could not be. Returns True if the entry landed.
+    With quiet=True nothing is printed, which is what `hours` and `payments`
+    want: a warning on stderr would cost the caller its stdout.
+    """
+    args = argparse.Namespace(thread=thread, target=target, summary=summary, date=date)
+    held = io.StringIO()
+    try:
+        if quiet:
+            with contextlib.redirect_stdout(held), contextlib.redirect_stderr(held):
+                cmd_add_ref(args)
+        else:
+            cmd_add_ref(args)
+    except (Exception, SystemExit):  # noqa: BLE001 - never break the caller's write
+        return False
+    return True
 
 
 # ---------- subcommand: list ----------
@@ -571,15 +594,16 @@ def cmd_flush(args):
         # when not attached to a TTY in some cases).
         sys.stdout.flush()
 
-    # Trigger ingest + sync so any ACTION lines just written to logs/ become
-    # real taskwarrior tasks immediately. Output is passed through (not
-    # silenced) so the operator/agent can read the new uuid prefixes off
-    # the ingest summary lines.
+    # Ingest so any ACTION lines just written to logs/ become task anchors
+    # immediately. Its output is passed through, not silenced, so the
+    # operator or agent can read the new uuid prefixes off the summary lines.
+    # The buffer is already cleared, so a failure here must not fail the
+    # flush: the entries are safe in the logs and `tasks` can be re-run.
+    from adulting import tasks
     try:
-        import subprocess as _subprocess
-        _subprocess.run(['tasks'], check=False)
-    except FileNotFoundError:
-        pass
+        tasks.cmd_default(argparse.Namespace(dry_run=False, quiet=False))
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        print(f"buffer: flushed, but the task ingest failed: {e}", file=sys.stderr)
     return 0
 
 

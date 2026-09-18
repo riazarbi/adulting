@@ -37,9 +37,3 @@ def test_resolve_thread_misses_return_none(home):
 def test_resolve_thread_ambiguous_bare_name_raises(home):
     with pytest.raises(ValueError, match="matches in: Projects, Topics"):
         T.resolve_thread("SGB")
-
-
-def test_read_frontmatter(tmp_path):
-    f = tmp_path / "t.md"
-    f.write_text("---\nstatus: 'paused'\ncurrency: ZAR\n---\n# body\n")
-    assert T.read_frontmatter(f) == {"status": "paused", "currency": "ZAR"}

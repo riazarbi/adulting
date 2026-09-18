@@ -2,6 +2,11 @@
 
 Branch: `refactor2`. Merges to `main` only if the whole refactor succeeds.
 
+**Status (2026-09-18): units 0-13 are done.** Every command is a module of the
+`adulting` package, installed with pipx. No bash remains. 655 tests, 96%
+coverage, `dev/ci` green. Outstanding: regenerate MANUAL.md and dev/tools/
+(needs `claude`), and the deferred bugs at the end of this file.
+
 ## Goal
 
 1. No bash. Every command is Python, in one package: `src/adulting/`.
@@ -162,3 +167,45 @@ PATH. When both sides are ported, they become function calls (unit 13).
   `pipx install ~/bin/adulting` (or `pipx install -e`).
 - Agent tool definitions (`dev/tools/`, vault `.agent/tools`) describe
   interactive notes subcommands. Regenerate after the port.
+
+## Deferred bugs
+
+Each is pinned by a test that asserts today's behaviour, so fixing one means
+changing that test first. None is a data-loss risk.
+
+1. **A note topic containing a colon or a quote breaks its PDF.** The topic is
+   written into the pandoc metadata unquoted, so the YAML will not parse. The
+   markdown is still written. Two real notes hit this; both were renamed by
+   hand on 2026-09-18. Fix: quote the title and subtitle, which changes the
+   rendered markdown for every note.
+2. **A `TASK:` line with a priority renders wrongly in minutes and PDFs:**
+   `| Riaz Arbi | [#H] (Riaz Arbi) Circulate minutes |`. The `[#H]` stops the
+   assignee matching, so the name stays in the task text and the row is
+   credited to the vault owner.
+3. **`!!` never marks a capture high priority.** The suggester's pattern wraps
+   `!!+` in `\b` word boundaries, which never match around punctuation.
+   `URGENT` and `ASAP` work.
+4. **`notes copy` marks body lines too.** Every line starting with `topic:`
+   gets ` COPY`, not only the frontmatter one. It also keeps the original
+   `timestamp:`, so the copy sorts at the original's date.
+5. **`buffer tend` creates an empty `buffer.md`** when there is none.
+6. **`--quiet` is partial in `buffer`.** It does not silence the `add-*`
+   commands, and `buffer --quiet flush` still prints the ingest summary.
+7. **Cosmetic:** `tasks set-due`/`set-scheduled` punctuate their date error
+   differently from every other error, and the ambiguous-uuid error names
+   files by basename rather than vault path.
+8. **A thread body line like `- 2026-13 — ...` is never checked by `lint`.**
+   It does not match `thread_entry`'s `applies_when`, so a malformed date is
+   skipped rather than reported.
+
+## Duplication left in place
+
+- `parse_action_attrs` exists in `buffer` and `tasks`. They read different
+  things — a token list from a buffer comment, an attr block from an ACTION
+  line — and share only their validation rules.
+- `search` has its own task-anchor regex, matching anchors as events rather
+  than parsing them for mutation as `tasks` does.
+- `lint`'s frontmatter parser understands the schema DSL's lists of mappings,
+  which no other reader needs; `render`'s `extract_meta` reproduces awk's
+  unescaping byte for byte. Both are deliberately separate from
+  `vault.parse_frontmatter`.

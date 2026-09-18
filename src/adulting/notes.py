@@ -28,12 +28,11 @@ import contextlib
 import io
 import json
 import re
-import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from adulting import buffer
 from adulting import render
 from adulting import tasks
 from adulting import vault as V
@@ -147,13 +146,8 @@ def note_text(stem, note_type, topic, threads, people=(), counterparty='', locat
 
 def buffer_ref(thread, stem, topic):
     """Drop a REF into the buffer so the note shows up in the thread's daily
-    log. Best-effort, and its output passes straight through, as before.
-    `buffer` is found on PATH until the cleanup unit makes this a call."""
-    exe = shutil.which('buffer')
-    if exe is None:
-        return
-    sys.stdout.flush()
-    subprocess.run([exe, 'add-ref', thread, f"notes/{stem}", topic])
+    log. Best-effort; its `buffered:` line is printed, as before."""
+    buffer.add_ref(thread, f"notes/{stem}", topic, quiet=False)
 
 
 # ---------- subcommands ----------

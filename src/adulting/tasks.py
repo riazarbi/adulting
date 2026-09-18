@@ -28,13 +28,13 @@ Subcommands:
 import argparse
 import os
 import re
-import subprocess
 import sys
 import uuid as _uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
+from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
 
@@ -43,7 +43,6 @@ def vault_home():
     can point it somewhere else."""
     return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
-WIKILINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 ACTION_RE = re.compile(
     r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)(?:\s*<!--(.*?)-->)?\s*$'
 )
@@ -247,37 +246,13 @@ def gen_uuid8(existing: set) -> str:
 # ---------- frontmatter parsing (used for thread cache) ----------
 
 def parse_frontmatter_threads(text):
-    """Return the list of thread targets from a file's frontmatter.
-
-    Notes use `threads:` (list of wikilinks); log files use `thread:`
-    (singular wikilink)."""
-    lines = text.split('\n')
-    if not lines or lines[0].strip() != '---':
-        return []
-    targets = []
-    in_threads_list = False
-    for line in lines[1:]:
-        if line.strip() == '---':
-            break
-        if in_threads_list:
-            if line.startswith(' ') or line.startswith('\t'):
-                stripped = line.lstrip()
-                if stripped.startswith('- '):
-                    val = stripped[2:].strip().strip('"').strip("'")
-                    wm = WIKILINK_RE.match(val)
-                    targets.append(wm.group(1).strip() if wm else val)
-                continue
-            else:
-                in_threads_list = False
-        if re.match(r'^threads:\s*$', line):
-            in_threads_list = True
-            continue
-        m = re.match(r'^thread:\s*(.+?)\s*$', line)
-        if m:
-            val = m.group(1).strip().strip('"').strip("'")
-            wm = WIKILINK_RE.match(val)
-            targets.append(wm.group(1).strip() if wm else val)
-    return targets
+    """The thread targets in a file's frontmatter: notes carry a `threads:`
+    list, logs a singular `thread:`. Wikilinks are unwrapped."""
+    fm, _ = V.parse_frontmatter_doc(text)
+    raw = fm.get('threads') or fm.get('thread') or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [V.unwiki(t) for t in raw if t]
 
 
 def build_threads_cache():
@@ -431,16 +406,13 @@ def cmd_default(args):
 # ---------- subcommand: add (delegates to buffer add-action) ----------
 
 def cmd_add(args):
-    cmd = ['buffer', 'add-action', args.thread, args.text]
-    if args.due:
-        cmd += ['--due', args.due]
-    if args.scheduled:
-        cmd += ['--scheduled', args.scheduled]
-    if args.priority:
-        cmd += ['--priority', args.priority]
-    for d in (args.depends or []):
-        cmd += ['--depends', d]
-    return subprocess.run(cmd).returncode
+    """`tasks add` is `buffer add-action` under another name: the ACTION is
+    buffered, and becomes a task on the next flush and ingest."""
+    from adulting import buffer
+    return buffer.cmd_add_action(argparse.Namespace(
+        thread=args.thread, text=args.text, due=args.due,
+        scheduled=args.scheduled, priority=args.priority,
+        depends=args.depends or []))
 
 
 # ---------- subcommand: done ----------

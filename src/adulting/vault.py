@@ -9,6 +9,7 @@ Shared, like `suggester.py` and `helpjson.py`, rather than duplicating ~200 line
 self-contained tools, where the block-splice logic would inevitably drift.
 """
 
+import difflib
 import json
 import os
 import re
@@ -98,6 +99,12 @@ def parse_frontmatter(text):
     return fm, 0
 
 
+def read_frontmatter(path):
+    """The scalar frontmatter of a file, by path. Used by `threads` and
+    `people`, whose files carry no list fields."""
+    return parse_frontmatter(path.read_text(encoding='utf-8'))[0]
+
+
 def parse_frontmatter_doc(text):
     """Return (frontmatter, body) for a note or log.
 
@@ -137,6 +144,27 @@ def parse_frontmatter_doc(text):
 def unwiki(s):
     m = re.match(r'^\[\[([^\]]+)\]\]$', (s or '').strip())
     return m.group(1) if m else (s or '').strip()
+
+
+def fuzzy_score(query, name):
+    """Score a name against a query (lowercase compare). Higher = better.
+    Heuristic ladder: exact > startswith > initials-equal > substring >
+    initials-startswith > difflib ratio (capped below the heuristic floor).
+    Used by `threads list` and `people list`."""
+    q = query.lower()
+    n = name.lower()
+    if q == n:
+        return 1.0
+    if n.startswith(q):
+        return 0.9
+    initials = ''.join(w[0] for w in re.findall(r'\w+', name)).lower()
+    if initials == q:
+        return 0.85
+    if q in n:
+        return 0.7
+    if initials.startswith(q):
+        return 0.6
+    return difflib.SequenceMatcher(None, q, n).ratio() * 0.5
 
 
 # ---------- thread resolution ----------

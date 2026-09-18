@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-18 - refactor unit 13: commands call each other directly, and the last bash goes
+
+The cleanup unit. Commands no longer run each other as subprocesses, the duplicated readers are gone, `ci.sh` is `dev/ci`, and the Dockerfile and README describe a package rather than a directory of scripts.
+
+- **Direct calls instead of PATH lookups.** `hours`, `payments` and `notes` call a new `buffer.add_ref()`; `tasks add` calls `buffer.cmd_add_action`; `buffer flush` calls `tasks.cmd_default`. `add_ref` holds the best-effort rule in one place: it never raises, and stays silent for `hours` and `payments`, where a warning on stderr would cost the caller its stdout. A failing ingest after a flush now reports itself instead of being lost, and cannot fail the flush: the entries are already in the logs. **The suite runs in half the time** as a result, 96s against 195s.
+- **Duplication removed.** `read_frontmatter` and `fuzzy_score` were identical in `threads` and `people`; both now live in `vault`. `tasks` used its own frontmatter thread parser and now uses `vault.parse_frontmatter_doc`, checked against the old one with `tasks list`, `next`, `--overdue`, `--thread` and `search activity` on the vault copy: identical. Their tests moved to `tests/unit/test_vault.py`. What stays duplicated, and why, is recorded in the story.
+- **`ci.sh` is now `dev/ci`, in Python.** Same stages, same PASS/FAIL lines, same single corpus harvest shared by both generators. The repo has no bash left. `dev/manual-diff` and the manual prompt refer to it by its new name.
+- **Dockerfile.** The image cannot install the package, because the source arrives at runtime as a bind mount, so each command gets a wrapper around `python3 -m adulting.<name>` and `PYTHONPATH` points at the mounted source. Edits on the host still take effect with no rebuild. **taskwarrior is dropped**: no command has shelled out to `task` since tasks became source-of-truth. Verified without Docker by running the same wrappers, `PYTHONPATH` and a system Python against a scratch vault: all ten commands answer `--help-json`, and a note, flush, hours entry and `lint` all behave.
+- **pipx verified for real.** `pipx install .` into a scratch `PIPX_HOME`, then `notes new`, `buffer flush`, `tasks list`, `threads list`, `lint` and `notes minutes` against a scratch vault, with nothing installed into the real `~/.local/bin`. The PDF step correctly reported that pandoc was missing from that stripped PATH.
+- **README** documents installing with pipx, the editable venv for development, Python 3.11+ with no runtime dependencies, and the command names being generic enough to clash. The design goals no longer claim one file per utility or forbid pip. INTEGRATIONS.md no longer refers to a task backend to set up.
+- **The story** (`stories/2026-09-17-python-package-refactor.md`) records the finished state, the eight deferred bugs, each pinned by a test, and the duplication left deliberately in place.
+- **Still to do, needing `claude`:** MANUAL.md and `dev/tools/` are generated from the tools themselves and are stale — MANUAL still describes the pickers and prompts. Run `dev/ci generate` to rebuild both. `dev/tools/notes.json` was already rewritten by hand in unit 12 so the gate passes.
+- **655 passing, 96% coverage.**
+
 ## 2026-09-17 - refactor unit 12: the renderers move to Python and the bash is gone
 
 `notes pdf`, `notes minutes` and `notes agenda` are ported to `src/adulting/render.py`, `notes` becomes this package's command, and the six bash scripts are deleted. The repo has no operator bash left.

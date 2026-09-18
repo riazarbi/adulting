@@ -47,26 +47,32 @@ This division is why `hours` accepts threads with no currency: a 5k run and a cl
 
 # Installation
 
-Drop the repo onto your `PATH`. I keep a `bin` directory in my home folder and clone into it:
+The commands are console scripts of the `adulting` Python package. Install it
+with pipx, which puts each command on your `PATH` in its own environment:
 
 ```zsh
-cd ~
-mkdir -p bin
-cd bin
-git clone git@github.com:riazarbi/adulting.git
+git clone git@github.com:riazarbi/adulting.git ~/projects/adulting
+pipx install ~/projects/adulting
 ```
 
-Then add this to the bottom of `.zshrc` or `.bashrc`:
+To work on the code, install it editable in a venv instead, which is what the
+tests use:
 
 ```zsh
-export PATH=/Users/riaz/bin/adulting:$PATH
+cd ~/projects/adulting
+uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+dev/ci                 # lint + tests + coverage
 ```
+
+Installed commands: `tasks`, `notes`, `search`, `threads`, `people`, `hours`,
+`payments`, `buffer`, `lint`, `commit`. They are generic names; if one clashes
+with something else on your `PATH`, the clash is yours to resolve.
 
 ## Dependencies
 
-- `bash`, `python3`, `awk`, `sed`, `grep` — required by everything
+- Python 3.11 or newer. No third-party runtime dependencies.
+- `git` — required by `commit`
 - `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes pdf`, `notes minutes`, `notes agenda`
-- macOS `open` (or Linux `xdg-open`) — used to launch Obsidian for note editing
 
 ## One-time setup
 
@@ -374,8 +380,9 @@ What remains:
 # Design goals
 
 - Run on macOS or Linux.
-- One self-contained file per utility (with thin `notes_*` helpers).
-- Require no Python libraries beyond the standard library; no pip installs.
+- One module per command in the `adulting` package, sharing one vault module.
+- Require no third-party Python libraries at runtime; `pytest` and `coverage` for development only.
+- Be non-interactive: every command runs from its arguments, so a person and an agent drive it the same way.
 - Be operated from the command line.
 - Maintain state in simple text-based file formats.
 - Maintain all state under a single vault directory (default `~/vault/`, override with `ADULTING_HOME`).

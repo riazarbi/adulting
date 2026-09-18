@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
 CATEGORIES = ['professional', 'personal', 'voluntary']
@@ -41,21 +42,6 @@ def discover_people():
     for f in sorted(people_dir().iterdir()):
         if f.suffix == '.md' and not f.name.startswith('.'):
             yield f.stem, f
-
-
-def read_frontmatter(path):
-    fm = {}
-    text = path.read_text(encoding='utf-8')
-    lines = text.split('\n')
-    if not lines or lines[0].strip() != '---':
-        return fm
-    for line in lines[1:]:
-        if line.strip() == '---':
-            break
-        m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', line)
-        if m:
-            fm[m.group(1)] = m.group(2).strip().strip('"').strip("'")
-    return fm
 
 
 def cmd_new(args):
@@ -94,30 +80,10 @@ def cmd_delete(args):
     print(f"deleted: {path}")
 
 
-def fuzzy_score(query, name):
-    """Score a name against a query (lowercase compare). Higher = better.
-    Heuristic ladder: exact > startswith > initials-equal > substring >
-    initials-startswith > difflib ratio (capped below the heuristic floor)."""
-    q = query.lower()
-    n = name.lower()
-    if q == n:
-        return 1.0
-    if n.startswith(q):
-        return 0.9
-    initials = ''.join(w[0] for w in re.findall(r'\w+', name)).lower()
-    if initials == q:
-        return 0.85
-    if q in n:
-        return 0.7
-    if initials.startswith(q):
-        return 0.6
-    return difflib.SequenceMatcher(None, q, n).ratio() * 0.5
-
-
 def cmd_list(args):
     rows = []
     for name, path in discover_people():
-        fm = read_frontmatter(path)
+        fm = V.read_frontmatter(path)
         rows.append({
             'name': name,
             'person': f"people/{name}",  # resolvable wikilink-form
@@ -134,8 +100,8 @@ def cmd_list(args):
     if args.query:
         # Match against both bare name and people/Name; take the better score.
         scored = [
-            (max(fuzzy_score(args.query, r['name']),
-                 fuzzy_score(args.query, r['person'])), r)
+            (max(V.fuzzy_score(args.query, r['name']),
+                 V.fuzzy_score(args.query, r['person'])), r)
             for r in rows
         ]
         scored = [(s, r) for s, r in scored if s > 0.3]
@@ -160,7 +126,7 @@ def cmd_show(args):
     if not path.exists():
         sys.exit(f"not found: {path}")
     if args.json:
-        fm = read_frontmatter(path)
+        fm = V.read_frontmatter(path)
         print(json.dumps({
             'name': path.stem,
             'path': str(path.relative_to(vault_home())),

@@ -62,6 +62,26 @@ def test_unwiki():
     assert V.unwiki(None) == ""
 
 
+def test_read_frontmatter_reads_scalars_by_path(tmp_path):
+    f = tmp_path / "t.md"
+    f.write_text("---\nstatus: 'paused'\ncurrency: \"ZAR\"\nBad Key: x\n---\n# body\nstatus: not frontmatter\n")
+    assert V.read_frontmatter(f) == {"status": "paused", "currency": "ZAR"}
+    f.write_text("no frontmatter\n")
+    assert V.read_frontmatter(f) == {}
+
+
+def test_fuzzy_score_ladder():
+    """The ladder `threads list` and `people list` rank with."""
+    assert V.fuzzy_score("riaz arbi", "Riaz Arbi") == 1.0
+    assert V.fuzzy_score("riaz", "Riaz Arbi") == 0.9
+    assert V.fuzzy_score("ra", "Riaz Arbi") == 0.85
+    assert V.fuzzy_score("arbi", "Riaz Arbi") == 0.7
+    assert V.fuzzy_score("bsr", "Bern Sellmeyer Rhodes") == 0.85
+    assert V.fuzzy_score("bs", "Bern Sellmeyer Rhodes") == 0.6
+    assert V.fuzzy_score("r", "Bern Sellmeyer Rhodes") == 0.7   # substring beats initials
+    assert V.fuzzy_score("zzz", "Riaz Arbi") < 0.3
+
+
 # ---------- record blocks ----------
 
 FENCE = "```simple-time-tracker"

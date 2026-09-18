@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Continuous-integration entry point. Run with no arguments to do what CI
+does; run a single stage by name while iterating locally.
+
+    dev/ci            lint + test          (the gate; fast, no network, no LLM)
+    dev/ci lint       syntax + contracts only
+    dev/ci test       every test, with a coverage report
+    dev/ci generate   regenerate MANUAL.md and dev/tools/ (needs `claude`)
+    dev/ci manual     regenerate MANUAL.md only            (needs `claude`)
+    dev/ci tools      regenerate dev/tools/ only           (needs `claude`)
+    dev/ci all        lint + test + generate
+
+Tests and coverage run in the project venv, never the system python, so the
+code under test is this checkout (see tests/harness.py). Set it up once with:
+
+    uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+
+The corpus is harvested at most ONCE per run and shared by both generators,
+so MANUAL.md and dev/tools/ are built from byte-identical input and cannot
+describe different versions of the tools. Regenerate and commit together.
+
+Generation authenticates with your Claude subscription. On a runner with a
+funded ANTHROPIC_API_KEY, add --use-api-key to the build calls below.
+
+Every stage is independent and prints a PASS/FAIL line. The script exits
+non-zero if any stage failed, after running them all — so one run tells you
+everything that is broken, not just the first thing.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+PY = REPO / '.venv' / 'bin' / 'python'
+
+# Commands the operator uses. Every one must answer --help-json: the
+# harvester, the manual and the agent tool definitions all depend on it, so a
+# tool that loses it silently breaks the manual.
+TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours', 'payments',
+         'buffer', 'lint', 'commit']
+DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-diff', 'tools-build',
+             'tools-check', 'testbed', 'ci']
+
+BOLD, GREEN, RED, YELLOW, OFF = '\033[1m', '\033[32m', '\033[31m', '\033[33m', '\033[0m'
+failed = []
+
+
+def step(name):
+    print(f"\n{BOLD}==> {name}{OFF}")
+
+
+def ok(name):
+    print(f"  {GREEN}PASS{OFF} {name}")
+
+
+def bad(name):
+    print(f"  {RED}FAIL{OFF} {name}")
+    failed.append(name)
+
+
+def skip(name):
+    print(f"  {YELLOW}SKIP{OFF} {name}")
+
+
+def run(*argv, **kwargs):
+    """Run a command in the repo, inheriting stdout unless told otherwise."""
+    kwargs.setdefault('cwd', REPO)
+    return subprocess.run([str(a) for a in argv], **kwargs)
+
+
+def command_env():
+    """PATH with this checkout's commands first, so nothing else is tested."""
+    env = dict(os.environ)
+    env['PATH'] = f"{REPO / '.venv' / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+# ---------- stages ----------
+
+def stage_lint():
+    step("lint")
+    if not PY.exists():
+        bad("no .venv (see the docstring at the top of dev/ci)")
+        return
+
+    sources = sorted((REPO / 'src' / 'adulting').glob('*.py')) + \
+        [REPO / 'dev' / name for name in DEV_TOOLS]
+    broken = [f for f in sources if f.exists()
+              and run(PY, '-m', 'py_compile', f, capture_output=True).returncode != 0]
+    if broken:
+        for f in broken:
+            print(f"    {f.relative_to(REPO)}")
+        bad("python syntax")
+    else:
+        ok("python syntax")
+
+    env = command_env()
+    missing = [t for t in TOOLS
+               if run(t, '--help-json', capture_output=True, env=env).returncode != 0]
+    if missing:
+        for t in missing:
+            print(f"    {t} --help-json")
+        bad("--help-json contract")
+    else:
+        ok("--help-json contract")
+
+    # The committed agent tool definitions must stay loadable and in scope.
+    # Deterministic, so it belongs in the gate rather than the generation stage.
+    if run(REPO / 'dev' / 'tools-check', stdout=subprocess.DEVNULL, env=env).returncode == 0:
+        ok("dev/tools definitions")
+    else:
+        run(REPO / 'dev' / 'tools-check', env=env)
+        bad("dev/tools definitions")
+
+
+def stage_test():
+    step("test")
+    if not PY.exists():
+        bad("pytest (no .venv; see the docstring at the top of dev/ci)")
+        return
+
+    # Coverage follows the commands into the subprocesses the CLI tests start
+    # (pyproject.toml: [tool.coverage.run] patch = subprocess), so a command is
+    # covered whether a test imports it or runs it. Parallel data files from
+    # every process are combined before reporting.
+    shutil.rmtree(REPO / '.coverage-data', ignore_errors=True)
+    shutil.rmtree(REPO / 'htmlcov', ignore_errors=True)
+    (REPO / '.coverage-data').mkdir()
+    env = dict(os.environ, COVERAGE_FILE=str(REPO / '.coverage-data' / 'coverage'))
+
+    if run(PY, '-m', 'coverage', 'run', '-m', 'pytest', '-v', env=env).returncode == 0:
+        ok("pytest")
+    else:
+        bad("pytest")
+
+    step("coverage")
+    run(PY, '-m', 'coverage', 'combine', '-q', env=env)
+    run(PY, '-m', 'coverage', 'report', env=env)
+    run(PY, '-m', 'coverage', 'html', '-q', env=env)
+    print(f"  HTML report: {REPO / 'htmlcov' / 'index.html'}")
+
+
+class Corpus:
+    """The harvested view of every tool, built at most once per run.
+
+    Harvesting executes every command and each of their subcommands — the one
+    genuinely expensive step here — so both generators share one harvest, and
+    byte-identical input for both is a fact of the run rather than an
+    inference from determinism.
+    """
+
+    def __init__(self):
+        self.markdown = None
+        self.json = None
+
+    def ensure(self):
+        if self.markdown:
+            return True
+        harvest = REPO / 'dev' / 'manual-harvest'
+        env = command_env()
+        js = Path(tempfile.mkstemp(prefix='adulting-corpus-', suffix='.json')[1])
+        md = Path(tempfile.mkstemp(prefix='adulting-corpus-', suffix='.md')[1])
+        first = run(harvest, '--format', 'json', stdout=js.open('w'),
+                    stderr=subprocess.DEVNULL, env=env)
+        second = run(harvest, '--from-json', js, '--format', 'md', stdout=md.open('w'),
+                     stderr=subprocess.DEVNULL, env=env)
+        if first.returncode != 0 or second.returncode != 0:
+            js.unlink(missing_ok=True)
+            md.unlink(missing_ok=True)
+            return False
+        self.json, self.markdown = js, md
+        print(f"  harvested once: {md.stat().st_size} bytes of corpus")
+        return True
+
+    def cleanup(self):
+        for path in (self.json, self.markdown):
+            if path:
+                path.unlink(missing_ok=True)
+
+
+def stage_manual(corpus):
+    step("manual")
+    if not corpus.ensure():
+        bad("corpus harvest")
+        return
+    if run(REPO / 'dev' / 'manual-build', '--corpus', corpus.markdown,
+           '--out', REPO / 'MANUAL.md', env=command_env()).returncode == 0:
+        ok("MANUAL.md generated")
+    else:
+        bad("MANUAL.md generation")
+
+
+def stage_tools(corpus):
+    step("tools")
+    if not corpus.ensure():
+        bad("corpus harvest")
+        return
+    env = command_env()
+    built = run(REPO / 'dev' / 'tools-build', '--corpus', corpus.markdown,
+                '--out', REPO / 'dev' / 'tools', env=env).returncode == 0
+    checked = built and run(REPO / 'dev' / 'tools-check',
+                            '--corpus-json', corpus.json, env=env).returncode == 0
+    if checked:
+        ok("dev/tools generated")
+    else:
+        bad("dev/tools generation")
+
+
+def main():
+    stage = sys.argv[1] if len(sys.argv) > 1 else 'gate'
+    if stage not in ('gate', 'lint', 'test', 'manual', 'tools', 'generate', 'all'):
+        sys.exit(f"usage: {sys.argv[0]} [lint|test|manual|tools|generate|all]")
+
+    corpus = Corpus()
+    try:
+        if stage in ('gate', 'lint', 'all'):
+            stage_lint()
+        if stage in ('gate', 'test', 'all'):
+            stage_test()
+        if stage in ('manual', 'generate', 'all'):
+            stage_manual(corpus)
+        if stage in ('tools', 'generate', 'all'):
+            stage_tools(corpus)
+    finally:
+        corpus.cleanup()
+
+    print()
+    if not failed:
+        print(f"{GREEN}CI passed.{OFF}")
+        return 0
+    print(f"{RED}CI failed:{OFF} {' '.join(failed)}")
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

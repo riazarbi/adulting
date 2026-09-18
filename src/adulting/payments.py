@@ -23,12 +23,11 @@ buffer can be written.
 import argparse
 import json
 import re
-import shutil
-import subprocess
 import sys
 from decimal import Decimal, InvalidOperation
 
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting import buffer as B
 from adulting import vault as V
 from adulting import statement as S
 
@@ -87,29 +86,10 @@ def save(path, records, ref, currency):
 
 def buffer_ref(ref, target, summary, date=None):
     """Drop a REF into the buffer so this record shows up in the thread's
-    daily log on the next `buffer flush`.
-
-    Best-effort, exactly as `notes new` has always done it: a record that was
-    written must not be undone or reported as failed because the buffer was
-    unavailable.
-
-    `buffer` is found on PATH. An install puts every command in the same bin
-    directory, so it is there. Once `buffer` is part of this package this
-    becomes a direct function call.
-    """
-    exe = shutil.which('buffer')
-    if exe is None:
-        return
-    cmd = [exe, '--quiet', 'add-ref', ref, target, summary]
-    if date:
-        # File the pointer under the day the work happened, not the day the
-        # buffer happens to be flushed. Without this a backdated entry lands
-        # in today's log and the chronology lies.
-        cmd += ['--date', date]
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=15)
-    except Exception:  # noqa: BLE001 - never let the log pointer break the write
-        pass
+    daily log on the next `buffer flush`. Best-effort and silent: see
+    buffer.add_ref. The date files the pointer under the day the thing
+    happened, so a backdated entry lands in the right day's log."""
+    B.add_ref(ref, target, summary, date)
 
 
 def append_payment(kind, name, payment):

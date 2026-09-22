@@ -19,11 +19,7 @@ from pathlib import Path
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
-KIND_DIRS = {
-    'project': 'Projects',
-    'process': 'Processes',
-    'topic': 'Topics',
-}
+KIND_DIRS = V.KIND_DIRS
 CATEGORIES = ['professional', 'personal', 'voluntary']
 
 
@@ -39,45 +35,6 @@ def threads_dir():
 
 def today():
     return datetime.now().strftime('%Y-%m-%d')
-
-
-def discover_threads():
-    """Yield (kind, name, path) for every thread file."""
-    for kind, subdir in KIND_DIRS.items():
-        d = threads_dir() / subdir
-        if not d.is_dir():
-            continue
-        for f in sorted(d.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
-                yield kind, f.stem, f
-
-
-def resolve_thread(arg):
-    """Resolve a user-supplied thread reference to (kind, name, path).
-    Accepts:
-      - bare name 'SGB' (must be unique across kinds, else error)
-      - path 'Processes/SGB'
-      - wikilink form '[[Processes/SGB]]'
-    Returns None if not found, raises ValueError on ambiguity."""
-    arg = arg.strip()
-    m = re.match(r'^\[\[([^\]]+)\]\]$', arg)
-    if m:
-        arg = m.group(1)
-    if '/' in arg:
-        kind_dir, name = arg.split('/', 1)
-        for kind, subdir in KIND_DIRS.items():
-            if subdir == kind_dir:
-                p = threads_dir() / subdir / f"{name}.md"
-                if p.exists():
-                    return kind, name, p
-                return None
-        return None
-    matches = [(k, n, p) for k, n, p in discover_threads() if n == arg]
-    if len(matches) == 0:
-        return None
-    if len(matches) > 1:
-        raise ValueError(f"ambiguous thread name {arg!r}; matches in: {', '.join(KIND_DIRS[k] for k, _, _ in matches)}")
-    return matches[0]
 
 
 def cmd_new(args):
@@ -115,7 +72,7 @@ def cmd_new(args):
 
 def cmd_delete(args):
     try:
-        match = resolve_thread(args.thread)
+        match = V.resolve_thread(args.thread)
     except ValueError as e:
         sys.exit(str(e))
     if not match:
@@ -129,7 +86,7 @@ def cmd_delete(args):
 
 def cmd_list(args):
     rows = []
-    for kind, name, path in discover_threads():
+    for kind, name, path in V.discover_threads():
         fm = V.read_frontmatter(path)
         rows.append({
             'kind': kind,
@@ -170,7 +127,7 @@ def cmd_list(args):
 
 def cmd_show(args):
     try:
-        match = resolve_thread(args.thread)
+        match = V.resolve_thread(args.thread)
     except ValueError as e:
         sys.exit(str(e))
     if not match:

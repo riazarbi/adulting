@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from adulting import vault as V
 
 
@@ -178,3 +180,44 @@ def test_fmt_money():
 def test_fmt_duration():
     assert V.fmt_duration(0) == "0h 0m"
     assert V.fmt_duration(125) == "2h 5m"
+
+
+# ---------- threads ----------
+
+@pytest.fixture
+def threads_dir():
+    base = V.vault_home() / "threads"
+    for rel in ("Projects/SGB.md", "Projects/Alpha.md", "Topics/SGB.md",
+                "Processes/.hidden.md", "Processes/notes.txt", "People/Riaz.md"):
+        (base / rel).parent.mkdir(parents=True, exist_ok=True)
+        (base / rel).write_text("---\nstatus: open\n---\n")
+    return base
+
+
+def test_discover_threads_walks_kinds_in_order_and_skips_other_files(threads_dir):
+    assert [(k, n) for k, n, _ in V.discover_threads()] == [
+        ("project", "Alpha"), ("project", "SGB"), ("topic", "SGB")]
+
+
+def test_resolve_thread_by_path_wikilink_and_unique_name(threads_dir):
+    assert V.resolve_thread("Projects/Alpha") == ("project", "Alpha", threads_dir / "Projects/Alpha.md")
+    assert V.resolve_thread(" [[Topics/SGB]] ")[:2] == ("topic", "SGB")
+    assert V.resolve_thread("Alpha")[:2] == ("project", "Alpha")
+
+
+def test_resolve_thread_misses_return_none_whatever_the_filesystem(threads_dir):
+    """`Projects/sgb` exists as a path on macOS, which ignores case. It must
+    still miss, as it does on Linux."""
+    for ref in ("Nope", "Projects/Nope", "People/Riaz", "alpha", "Projects/sgb"):
+        assert V.resolve_thread(ref) is None, ref
+
+
+def test_resolve_thread_ambiguous_bare_name_raises(threads_dir):
+    with pytest.raises(ValueError, match="matches: Projects/SGB, Topics/SGB"):
+        V.resolve_thread("SGB")
+
+
+def test_is_thread_wants_the_exact_kind_and_name(threads_dir):
+    assert V.is_thread("Projects/SGB") and V.is_thread("Topics/SGB")
+    for ref in ("SGB", "projects/SGB", "Projects/sgb", "People/Riaz", "Projects/Alpha.md", ""):
+        assert not V.is_thread(ref), ref

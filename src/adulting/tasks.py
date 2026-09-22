@@ -226,15 +226,6 @@ def assignee_resolves(name):
     return (vault_home() / 'people' / f"{name}.md").exists()
 
 
-def thread_resolves(target):
-    if not target or '/' not in target:
-        return False
-    kind, name = target.split('/', 1)
-    if kind not in ('Projects', 'Processes', 'Topics'):
-        return False
-    return (vault_home() / 'threads' / kind / f"{name}.md").exists()
-
-
 def gen_uuid8(existing: set) -> str:
     """Generate an 8-char hex uuid that doesn't collide with `existing`."""
     while True:
@@ -339,7 +330,7 @@ def cmd_default(args):
                 errors.append("note has no threads:")
             else:
                 for t in threads:
-                    if not thread_resolves(t):
+                    if not V.is_thread(t):
                         errors.append(f"thread {t!r} does not resolve")
             if assignee and not assignee_resolves(assignee):
                 errors.append(

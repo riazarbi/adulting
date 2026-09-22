@@ -51,6 +51,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
 
@@ -107,13 +108,17 @@ def stamp(date=None):
     return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
 
 
-def thread_resolves(target):
-    if not target or '/' not in target:
-        return False
-    kind, name = target.split('/', 1)
-    if kind not in ('Projects', 'Processes', 'Topics'):
-        return False
-    return (vault_home() / 'threads' / kind / f"{name}.md").exists()
+def canonical_thread(arg, message):
+    """The canonical `Kind/Name` for a thread given as a name, `Kind/Name` or
+    wikilink. Dies with `message` if it does not resolve."""
+    try:
+        match = V.resolve_thread(arg.strip())
+    except ValueError as e:
+        die(str(e))
+    if not match:
+        die(message)
+    kind, name, _ = match
+    return V.thread_ref(kind, name)
 
 
 def assignee_resolves(name):
@@ -227,11 +232,10 @@ def cmd_add(args):
 # ---------- subcommand: add-text ----------
 
 def cmd_add_text(args):
-    thread = args.thread.strip()
+    thread = canonical_thread(
+        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md "
+                     f"(expected Projects/X, Processes/X, or Topics/X)")
     text = args.text.strip()
-    if not thread_resolves(thread):
-        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md "
-            f"(expected Projects/X, Processes/X, or Topics/X)")
     if not text:
         die("text is empty")
     line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
@@ -243,11 +247,10 @@ def cmd_add_text(args):
 # ---------- subcommand: add-ref ----------
 
 def cmd_add_ref(args):
-    thread = args.thread.strip()
+    thread = canonical_thread(
+        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
     target = args.target.strip()
     summary = (args.summary or '').strip()
-    if not thread_resolves(thread):
-        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md")
     if not ref_target_resolves(target):
         die(f"ref target {target!r} does not resolve to a vault file "
             f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
@@ -261,10 +264,9 @@ def cmd_add_ref(args):
 # ---------- subcommand: add-action ----------
 
 def cmd_add_action(args):
-    thread = args.thread.strip()
+    thread = canonical_thread(
+        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
     text = args.text.strip()
-    if not thread_resolves(thread):
-        die(f"thread {thread!r} does not resolve to threads/<Kind>/<Name>.md")
     if not text:
         die("description is empty")
     am = ASSIGNEE_PREFIX_RE.match(text)
@@ -413,7 +415,7 @@ def parse_buffer_entries(lines):
 
 def validate_entry(e):
     """Yield violation messages for one parseable entry."""
-    if not thread_resolves(e['thread']):
+    if not V.is_thread(e['thread']):
         yield f"thread {e['thread']!r} does not resolve"
 
     try:

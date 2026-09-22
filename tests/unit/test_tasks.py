@@ -115,6 +115,5 @@ def test_threads_cache_and_resolvers(home):
     cache = T.build_threads_cache()
     assert cache["notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
     assert T.threads_for(T.find_anchor("aaaa0002"), cache) == ["Projects/SGB"]
-    assert T.thread_resolves("Projects/SGB") and not T.thread_resolves("People/SGB")
     assert T.assignee_resolves(None) and T.assignee_resolves("Riaz Arbi")
     assert not T.assignee_resolves("Ghost")

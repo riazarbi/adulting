@@ -90,7 +90,7 @@ def test_bare_name_in_two_kinds_is_ambiguous(v):
     v.write_thread("Topics", "SGB")
     r = threads(v, "show", "SGB")
     assert r.returncode == 1
-    assert r.stderr == "ambiguous thread name 'SGB'; matches in: Projects, Topics\n"
+    assert r.stderr == "ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB\n"
     assert threads(v, "show", "Topics/SGB").returncode == 0
 
 

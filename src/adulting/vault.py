@@ -212,6 +212,13 @@ def thread_ref(kind, name):
     return f"{KIND_DIRS[kind]}/{name}"
 
 
+def is_thread(ref):
+    """True if `ref` is exactly the `Kind/Name` of a thread file. Checked
+    against the files in threads/, not by asking the filesystem, so case
+    matters on macOS as it does on Linux."""
+    return any(thread_ref(kind, name) == ref for kind, name, _ in discover_threads())
+
+
 def thread_meta(path):
     """(currency, rate) from a thread file's frontmatter; either may be None."""
     fm, _ = parse_frontmatter(path.read_text(encoding='utf-8'))

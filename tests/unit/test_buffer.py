@@ -87,9 +87,7 @@ def home():
 
 
 def test_resolvers(home):
-    assert B.thread_resolves("Projects/SGB")
-    for bad in ("", "SGB", "People/SGB", "Projects/Nope"):
-        assert not B.thread_resolves(bad), bad
+    assert B.canonical_thread("[[Projects/SGB]]", "unused") == "Projects/SGB"
     assert B.assignee_resolves("") and B.assignee_resolves("Riaz Arbi")
     assert not B.assignee_resolves("Ghost")
     assert B.ref_target_resolves("notes/n") == home / "notes/n.md"

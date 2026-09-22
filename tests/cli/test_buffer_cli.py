@@ -81,8 +81,8 @@ def test_add_ref_date_files_under_that_day_and_keeps_the_clock(v):
 
 @pytest.mark.parametrize("argv, message", [
     (["add", ""], "error: text is empty"),
-    (["add-text", "SGB", "x"], "error: thread 'SGB' does not resolve to threads/<Kind>/<Name>.md "
-                               "(expected Projects/X, Processes/X, or Topics/X)"),
+    (["add-text", "Nope", "x"], "error: thread 'Nope' does not resolve to threads/<Kind>/<Name>.md "
+                                "(expected Projects/X, Processes/X, or Topics/X)"),
     (["add-text", "Projects/SGB", " "], "error: text is empty"),
     (["add-ref", "People/SGB", "notes/x"], "error: thread 'People/SGB' does not resolve to threads/<Kind>/<Name>.md"),
     (["add-ref", "Projects/SGB", "notes/nope"],

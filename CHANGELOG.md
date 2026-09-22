@@ -2,6 +2,12 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, parts C6 and C7: comments that say what the code does
+
+- **Stale comments rewritten.** Covered: `buffer`'s module docstring and flush comments, which still mentioned a task backend, taskwarrior and a subprocess; `payments` and `statement_pdf`, which named the old `_statement` module; a `suggester` comment that promised ranking done elsewhere; and `vault`'s docstring, which said it served only `hours` and `payments`.
+- **`buffer flush` no longer claims to be atomic.** Its docstring now says what happens: nothing is written if tend finds a problem, but past that point the logs are written one at a time and the buffer is cleared last.
+- **`render.py` describes itself, not the awk it replaced.** `records` → `split_lines`, `joined` → `join_lines`, `grep_sed_uniq` → `matching_lines`, with the awk/grep/sed wording gone from comments and test names. The module docstring keeps one sentence of history, because the output must still match the old scripts byte for byte and the render fixtures pin it. No behaviour change. **680 passing.**
+
 ## 2026-09-22 - review fixes, part C5: dead code
 
 - **The `add-ref` suggestion that could never be made.** The suggester recognised REF wording ("see-also …", "link …"), then always gave up because it cannot name a REF target. `buffer` still had code to format and run the suggestion. The wording now goes straight to UNKNOWN, the outcome it always had, and the dead paths are gone: the `add-ref` branches in `buffer.format_suggestion` and `dispatch_proposal`, and the `ref_target`/`ref_summary` fields of a suggestion.

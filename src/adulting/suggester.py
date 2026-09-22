@@ -183,9 +183,8 @@ def match_person(text, people):
         # First-name match.
         if first in text_words_lower:
             idx = text.lower().index(first)
-            # Disambiguate when multiple people share first name: prefer
-            # the one whose full name shares more tokens with the surrounding
-            # text. Caller can rank candidates later.
+            # Several people may share this first name; the loop below
+            # keeps the best of them.
             matches.append((person, idx))
     # Deduplicate while keeping first-occurrence order, and resolve same-text
     # collisions (e.g. two Berns) by keeping the one with the highest

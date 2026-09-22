@@ -1,12 +1,12 @@
-"""Shared vault primitives for the `hours` and `payments` CLIs.
+"""What every command shares: the vault's location, errors, config,
+frontmatter, thread and person lookup, ACTION attributes, record files,
+time and money.
 
-Both tools store records the same way: one markdown file per thread, under a
-top-level directory that mirrors `threads/{Projects,Processes,Topics}/`, with
-the records as pretty-printed JSON inside a fenced code block. Only the fence
-name and the record shape differ.
-
-Shared, like `suggester.py` and `helpjson.py`, rather than duplicating ~200 lines across two
-self-contained tools, where the block-splice logic would inevitably drift.
+Record files: `hours` and `payments` store records the same way, one
+markdown file per thread under a top-level directory that mirrors
+`threads/{Projects,Processes,Topics}/`, with the records as pretty-printed
+JSON inside a fenced code block. Only the fence name and the record shape
+differ.
 """
 
 import difflib

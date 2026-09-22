@@ -272,7 +272,7 @@ def _as_of(raw):
 
 
 def one_thread_statement(thread_arg, as_of):
-    """Everything `_statement.build` needs for a single thread."""
+    """The statement for one thread, built by `statement.build`."""
     kind, name, tpath = V.resolve_target(thread_arg)
     ref = V.thread_ref(kind, name)
     currency = V.resolve_currency(tpath, ref, None)

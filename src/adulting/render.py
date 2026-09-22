@@ -1,11 +1,12 @@
 """Render a note as PDF-ready markdown: `notes pdf`, `notes minutes`, `notes agenda`.
 
-A port of the bash scripts notes_pdf, notes_minutes and notes_agenda. Each
-step below names the awk, grep or sed it replaces, and reproduces its output
-byte for byte, quirks included, so a note renders exactly as it used to.
+These began as the bash scripts notes_pdf, notes_minutes and notes_agenda,
+and still produce their output byte for byte, quirks included, so a note
+renders exactly as it always has. The fixtures in tests/fixtures/render pin
+that output; change it only on purpose.
 
 Text is read and written with errors='surrogateescape', so a note that is not
-valid UTF-8 passes through unchanged, as it did through awk.
+valid UTF-8 passes through unchanged.
 
 The markdown is turned into a PDF by pandoc with xelatex, run from a scratch
 directory as before.
@@ -19,15 +20,15 @@ from pathlib import Path
 
 ENCODING = dict(encoding='utf-8', errors='surrogateescape')
 
-# awk's [[:space:]]: ASCII whitespace only, unlike Python's \s.
+# Whitespace means ASCII whitespace only, unlike Python's \s.
 SPACE = ' \t\n\r\f\v'
 
-# awk /--{10,}/: a hyphen followed by ten or more, anywhere in the line.
+# A section ends at a line holding eleven or more hyphens in a row.
 DASHES_RE = re.compile(r'-{11}')
 
 HR_DASHES = '-' * 68
 
-# notes_minutes inserts this before `# Content` when a note has no `# Summary`.
+# `notes minutes` inserts this before `# Content` when a note has no `# Summary`.
 MINUTES_SUMMARY = (
     "# Summary\n\n## Minuted Agreements\n\n" + HR_DASHES + "\n\n"
     "## Resolutions\n\n" + HR_DASHES + "\n\n"
@@ -44,19 +45,18 @@ ACTION_TABLE = ['| Assignee | Task | Status |',
                 '|----------|--------------------------------------------------|--------|']
 
 
-# ---------- reading like awk ----------
+# ---------- lines ----------
 
-def records(text):
-    """The lines awk would read: split on newline, no empty record after a
-    final newline."""
+def split_lines(text):
+    """The text's lines, without an empty last line after a final newline."""
     lines = text.split('\n')
     if text.endswith('\n'):
         lines.pop()
     return lines if text else []
 
 
-def joined(lines):
-    """What awk's `print` produces for these lines: each ends in a newline."""
+def join_lines(lines):
+    """The lines as text, each ending in a newline."""
     return ''.join(line + '\n' for line in lines)
 
 
@@ -79,10 +79,10 @@ def strip_quotes(s):
     return s
 
 
-# ---------- metadata (the extract_* helpers in the bash `notes`) ----------
+# ---------- metadata ----------
 
 def extract_meta(lines, field):
-    """extract_meta: the first frontmatter line whose key is `field`, with
+    """The value of the first frontmatter line whose key is `field`, with
     surrounding quotes removed and `\\"`/`\\\\` or `''` unescaped."""
     for line in frontmatter_lines(lines):
         if ':' not in line:
@@ -100,7 +100,7 @@ def extract_meta(lines, field):
 
 
 def extract_people(lines):
-    """extract_people_list: the items of a frontmatter `people:` list.
+    """The items of a frontmatter `people:` list.
     `"[[people/Name]]"` becomes `Name`; other items keep their text."""
     out = []
     in_list = False
@@ -160,7 +160,7 @@ def header(lines, kind):
 # ---------- body passes ----------
 
 def without_frontmatter(lines):
-    """Drop the frontmatter block, as every body awk pass does first."""
+    """The lines after the frontmatter block."""
     if lines and lines[0] == '---':
         for i, line in enumerate(lines[1:], start=1):
             if line == '---':
@@ -170,9 +170,9 @@ def without_frontmatter(lines):
 
 
 def cut_sections(lines, headings, stops):
-    """The minutes/agenda body awk: after a line containing one of
-    `headings`, skip lines until one with eleven or more hyphens; stop
-    entirely at a line containing one of `stops`."""
+    """The minutes/agenda body: after a line containing one of `headings`,
+    skip lines until one with eleven or more hyphens; stop entirely at a
+    line containing one of `stops`."""
     out = []
     printing = True
     for line in without_frontmatter(lines):
@@ -191,8 +191,8 @@ def cut_sections(lines, headings, stops):
 
 
 def fill_sections(lines, inserts):
-    """The final awk: after a line containing a heading in `inserts`, print
-    that heading's lines, then skip until eleven or more hyphens."""
+    """After a line containing a heading in `inserts`, put that heading's
+    lines, then skip the note's own lines until eleven or more hyphens."""
     out = []
     printing = True
     for line in lines:
@@ -209,9 +209,10 @@ def fill_sections(lines, inserts):
     return out
 
 
-def grep_sed_uniq(lines, needle, prefix):
-    """`grep needle | sed 's/prefix//' | uniq`: matching lines, the first
-    `prefix` removed from each, adjacent duplicates dropped."""
+def matching_lines(lines, needle, prefix):
+    """The lines containing `needle`, the first `prefix` removed from each.
+    A line equal to the one kept before it is dropped, even when unmatched
+    lines came between them."""
     out = []
     for line in lines:
         if needle in line:
@@ -242,7 +243,7 @@ def action_rows(lines, owner):
 
 
 def strip_empty_headers(lines):
-    """The agenda's END awk: drop an H3 or deeper heading with no body text
+    """For the agenda: drop an H3 or deeper heading with no body text
     before the next heading of the same or higher level. H1/H2 always stay;
     sub-headings and horizontal rules do not count as body."""
     def level(s):
@@ -272,7 +273,7 @@ def is_hr(s):
 
 
 def pad_rules(lines):
-    """pad_note_rules: a blank line above and below every horizontal rule in
+    """A blank line above and below every horizontal rule in
     the body. The metadata block between the first two `---` is left alone."""
     out = []
     in_fm = False
@@ -302,54 +303,54 @@ def pad_rules(lines):
 # ---------- the three renderers ----------
 
 def pdf_markdown(note_text, owner):
-    """notes_pdf: body up to `# Timesheet`, callouts after `# Summary`, the
+    """`notes pdf`: body up to `# Timesheet`, callouts after `# Summary`, the
     action table after `# Action Items`."""
-    lines = records(note_text)
+    lines = split_lines(note_text)
     body = []
     for line in without_frontmatter(lines):
         if '# Timesheet' in line:
             break
         body.append(line)
     doc = header(lines, 'pdf') + body
-    callouts = [''] + grep_sed_uniq(doc, '!:', '!: ') + ['']
+    callouts = [''] + matching_lines(doc, '!:', '!: ') + ['']
     actions = [''] + ACTION_TABLE + action_rows(doc, owner) + ['']
-    return joined(pad_rules(fill_sections(doc, {'# Summary': callouts, '# Action Items': actions})))
+    return join_lines(pad_rules(fill_sections(doc, {'# Summary': callouts, '# Action Items': actions})))
 
 
 def agenda_markdown(note_text):
-    """notes_agenda: the note with Agreements, Resolutions and Action Items
+    """`notes agenda`: the note with Agreements, Resolutions and Action Items
     emptied, cut at `# Timesheet` or `# Acceptance`, empty H3+ dropped."""
-    lines = records(note_text)
+    lines = split_lines(note_text)
     body = cut_sections(lines, ('# Minuted Agreements', '# Resolutions', '# Action Items'),
                         ('# Timesheet', '# Acceptance'))
-    return joined(pad_rules(header(lines, 'agenda') + strip_empty_headers(body)))
+    return join_lines(pad_rules(header(lines, 'agenda') + strip_empty_headers(body)))
 
 
 def minutes_markdown(note_text, owner):
-    """notes_minutes: a Summary with Agreements, Resolutions and Action Items
+    """`notes minutes`: a Summary with Agreements, Resolutions and Action Items
     filled from AGREED:, RESOLVED: and ACTION/TASK/DONE lines."""
     if '# Summary' not in note_text:
-        # awk `print "<summary>"` adds its own newline before the line itself.
-        note_text = joined([MINUTES_SUMMARY + '\n' + line if line.strip() == '# Content' else line
-                            for line in records(note_text)])
-    lines = records(note_text)
+        # The summary goes on the lines just above `# Content`.
+        note_text = join_lines([MINUTES_SUMMARY + '\n' + line if line.strip() == '# Content' else line
+                            for line in split_lines(note_text)])
+    lines = split_lines(note_text)
     body = cut_sections(lines, ('# Minuted Agreements', '# Resolutions', '# Action Items'),
                         ('# Timesheet',))
-    doc = records(joined(header(lines, 'minutes') + body))
+    doc = split_lines(join_lines(header(lines, 'minutes') + body))
 
     rows = action_rows(doc, owner) or ['| None | None | None |']
     inserts = {
-        '# Minuted Agreements': found_block(grep_sed_uniq(doc, 'AGREED:', 'AGREED: '),
+        '# Minuted Agreements': found_block(matching_lines(doc, 'AGREED:', 'AGREED: '),
                                             "No minutes agreements were made."),
-        '# Resolutions': found_block(grep_sed_uniq(doc, 'RESOLVED:', 'RESOLVED: '),
+        '# Resolutions': found_block(matching_lines(doc, 'RESOLVED:', 'RESOLVED: '),
                                      "No Resolutions were passed."),
         '# Action Items': [''] + ACTION_TABLE + rows + [''],
     }
-    return joined(pad_rules(fill_sections(doc, inserts)))
+    return join_lines(pad_rules(fill_sections(doc, inserts)))
 
 
 def found_block(found, placeholder):
-    """The agreed/resolved lines as the bash built them: a blank line, the
+    """The agreed/resolved lines as a block: a blank line, the
     lines, a blank line. When no line has any text, the placeholder replaces
     the whole block except the final blank line."""
     if any(found):
@@ -360,7 +361,7 @@ def found_block(found, placeholder):
 # ---------- pandoc ----------
 
 def to_pdf(md_path, pdf_path):
-    """Render with pandoc and xelatex from a scratch directory, as before.
+    """Render with pandoc and xelatex from a scratch directory.
     Returns (ok, message)."""
     if shutil.which('pandoc') is None:
         return False, "pandoc is not installed"

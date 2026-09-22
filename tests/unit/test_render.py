@@ -1,4 +1,4 @@
-"""Unit tests for adulting.render: the individual awk, grep and sed rules."""
+"""Unit tests for adulting.render: each rule on its own."""
 
 from adulting import render as R
 
@@ -7,11 +7,11 @@ NOTE = ['---', 'topic: "a \\"quoted\\" \\\\ topic"', "type: Meeting", "people:",
         '---', "", "body: not frontmatter"]
 
 
-def test_records_and_joined_match_awk():
-    assert R.records("a\nb\n") == ["a", "b"]
-    assert R.records("a\nb") == ["a", "b"]
-    assert R.records("") == []
-    assert R.joined(["a", "b"]) == "a\nb\n"
+def test_split_lines_and_join_lines_round_trip():
+    assert R.split_lines("a\nb\n") == ["a", "b"]
+    assert R.split_lines("a\nb") == ["a", "b"]
+    assert R.split_lines("") == []
+    assert R.join_lines(["a", "b"]) == "a\nb\n"
 
 
 def test_extract_meta_unescapes_quoted_values():
@@ -24,7 +24,7 @@ def test_extract_meta_unescapes_quoted_values():
 
 
 def test_extract_people_unwraps_only_people_links():
-    # `  -` with nothing after it is not an item: awk wants a space after the dash.
+    # `  -` with nothing after it is not an item: an item needs a space after the dash.
     assert R.extract_people(NOTE) == ["Riaz Arbi", "Plain Name"]
     assert R.extract_people(["---", "people:", "  - A", "other: x", "  - B", "---"]) == ["A"]
 
@@ -48,13 +48,12 @@ def test_cut_and_fill_sections():
         "# Action Items"]
 
 
-def test_grep_sed_uniq_drops_adjacent_duplicates():
-    """uniq runs after grep, so a non-matching line between two duplicates
-    does not keep them apart."""
-    assert R.grep_sed_uniq(["AGREED: a", "AGREED: a", "x", "AGREED: a", "no match"],
-                           "AGREED:", "AGREED: ") == ["a"]
-    assert R.grep_sed_uniq(["AGREED: a", "AGREED: b", "AGREED: a"],
-                           "AGREED:", "AGREED: ") == ["a", "b", "a"]
+def test_matching_lines_drops_a_repeat_of_the_line_kept_before():
+    """Unmatched lines between two equal matches do not keep them apart."""
+    assert R.matching_lines(["AGREED: a", "AGREED: a", "x", "AGREED: a", "no match"],
+                            "AGREED:", "AGREED: ") == ["a"]
+    assert R.matching_lines(["AGREED: a", "AGREED: b", "AGREED: a"],
+                            "AGREED:", "AGREED: ") == ["a", "b", "a"]
 
 
 def test_action_rows_mark_each_action_open_or_done():

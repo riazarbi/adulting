@@ -3,7 +3,7 @@ r"""Render a statement of account to PDF via pandoc + xelatex.
 Same toolchain `notes pdf` uses, so this adds no dependency: the repo already
 requires pandoc and a LaTeX engine, and nothing here needs a pip install.
 
-Layout only -- every figure arrives precomputed from `_statement.build`.
+Layout only -- every figure arrives precomputed from `statement.build`.
 
 A note on the table separator rows below: pandoc only gives a pipe table
 full-width relative columns (`\linewidth * \real{...}`) when the source row is

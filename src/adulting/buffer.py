@@ -1,7 +1,7 @@
 """Operate on the buffer queue at ~/vault/buffer.md.
 
 The buffer is the staging area for captured items. Four line types:
-    ACTION:  action item that becomes a backend task after flush
+    ACTION:  action item that becomes a TASK anchor after flush
     TEXT:    free-text observation
     REF:     reference to another file in the vault
     UNKNOWN: raw quick-capture; must be converted before tend will pass
@@ -14,8 +14,8 @@ Single line format (no multi-line entries; one capture per line):
     - UNKNOWN: <body>                                                 <!--<TS>-->
 
 where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
-wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry the
-backend metadata that ingest applies on task creation:
+wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry what
+ingest puts on the TASK anchor it creates:
 
     due:YYYY-MM-DD     scheduled:YYYY-MM-DD
     priority:H|M|L     depends:<uuid8>
@@ -499,9 +499,12 @@ def tend(quiet=False):
 
 def cmd_flush(args):
     """Tend, then if clean, write each (thread, date) group to
-    logs/<thread>/<date>.md (append if exists) and remove flushed
-    entries from buffer. Atomic per-flush — if validation fails, the
-    buffer is left as `tend` left it and nothing is written."""
+    logs/<thread>/<date>.md (append if exists) and clear the buffer.
+
+    If tend finds a problem, nothing is written and the buffer is left as
+    tend left it. Past that point it is not atomic: the log files are
+    written one at a time and the buffer is cleared last, so a crash part
+    way through can leave an entry both in a log and still in the buffer."""
     rc = tend(quiet=True)
     if rc != 0:
         return rc
@@ -527,8 +530,8 @@ def cmd_flush(args):
         body_lines = []
         for e in sorted(group, key=lambda e: e['ts']):
             line = f"{e['type']}: {e['body']}"
-            # ACTION attrs ride along into the log line so ingest can apply
-            # them on tw task creation. TS is dropped — the file's `date:`
+            # ACTION attrs ride along into the log line so ingest can put
+            # them on the TASK anchor it creates. TS is dropped — the file's `date:`
             # frontmatter carries day-level resolution; sub-day order is lost.
             if e['type'] == 'ACTION' and e.get('attr_tokens'):
                 line += f" <!--{' '.join(e['attr_tokens'])}-->"
@@ -561,9 +564,8 @@ def cmd_flush(args):
             rel = path.relative_to(vault_home())
             print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
-        # Flush before invoking the subprocess so our prints appear ahead
-        # of its output rather than after (parent stdout is block-buffered
-        # when not attached to a TTY in some cases).
+        # Flush now so these lines come out ahead of anything the ingest
+        # below writes to stderr: stdout is block-buffered when piped.
         sys.stdout.flush()
 
     # Ingest so any ACTION lines just written to logs/ become task anchors

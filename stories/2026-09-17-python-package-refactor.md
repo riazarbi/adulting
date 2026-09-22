@@ -2,10 +2,12 @@
 
 Branch: `refactor2`. Merges to `main` only if the whole refactor succeeds.
 
-**Status (2026-09-18): units 0-13 are done.** Every command is a module of the
-`adulting` package, installed with pipx. No bash remains. 655 tests, 96%
-coverage, `dev/ci` green. Outstanding: regenerate MANUAL.md and dev/tools/
-(needs `claude`), and the deferred bugs at the end of this file.
+**Status (2026-09-22): units 0-13 are done; the review is being worked
+through.** Every command is a module of the `adulting` package, installed with
+pipx. No bash remains. The review (`2026-09-22-refactor-review-findings.md`)
+part A, the bugs, is done: 686 tests, 96% coverage, `dev/ci` green. Parts B-E
+remain. Also outstanding: regenerate MANUAL.md and dev/tools/ (needs
+`claude`), and the deferred bugs at the end of this file.
 
 ## Goal
 

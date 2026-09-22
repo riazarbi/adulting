@@ -2,6 +2,23 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part A: the bugs
+
+A third-party review of the refactor (`stories/2026-09-22-refactor-review-findings.md`) found bugs the tests missed. Every one in its part A was reproduced on a scratch vault first, then fixed with a test written to fail before the fix. All but A4 predate the refactor, which carried them over faithfully.
+
+- **A1: the PDF statement charged unbilled and foreign-currency time.** It listed unbilled time as a line and charged a USD entry on a ZAR thread as ZAR. It now takes only entries in the statement's currency, as the text statement did.
+- **A2: the text statement and PDF could differ by cents.** `hours report` and the text statement summed unrounded amounts; the PDF rounds each line. All three now use `statement.charge_of`, so three 20-minute entries at 2500 are 2499.99 everywhere. No figure changes on the vault copy, whose entries are all whole cents.
+- **A3: money went through `float` before display.** A hand-edited 2.675 listed as 2.67 while the statement showed 2.68. Rows keep the Decimal; only `--json` and `show` convert, with their output unchanged.
+- **A4: a relative `notes pdf --out` lost the PDF.** pandoc runs from a scratch directory; the output directory and both paths handed to pandoc are now absolute. This one was mine, from unit 12.
+- **A5: thread names were checked three ways.** `buffer` and `tasks` asked the filesystem, so `Projects/sgb` passed on macOS and flush wrote a wikilink that breaks on Linux. Every command now resolves through `vault.resolve_thread`, stored names are checked with the new `vault.is_thread`, and `threads` drops its own copy of the resolver. `buffer add-*` now accept a bare name and store the canonical `Kind/Name`. `threads`' ambiguity message is now the vault's.
+- **A6: `people new` / `threads new` could write outside their folder.** `--name ../x` wrote outside it and `a/b` crashed. Names with `/` or a leading `.` are refused.
+- **A7: `hours edit` skipped two checks `hours log` makes.** A rate on unbilled time, and an empty description, are now refused.
+- **A8: render bugs frozen in the expected-output files.** Measured against the vault copy first:
+  - **Fixed:** a second Summary before any line containing `# Content`, and `#  Details` for a note with no type. No real note triggers either; four expected files change by exactly those lines.
+  - **Deferred, with `# DEFERRED BUG` tests and story entries:** completed actions listed as Action Items (42 notes), the PDF replacing a note's own Summary (2 notes), and non-person links as attendees (none). Deferred bug 2, the `[#H]` action row, gets its own pinned test.
+- **A9: small bugs.** `tasks rm-depends` can remove a dependency on a deleted task. One non-UTF-8 file no longer aborts the ingest; it is skipped and reported as failed. `search overview --limit 0` means all. The `--depends` help no longer says "prefix". The review's A9.4, `?` date padding, was not a bug: the padding applies exactly when the date is missing.
+- **Verified:** `dev/ci` green. All 116 vault-copy notes through all three renderers are still 348 of 348 identical to the old output. Reports, statements, tasks, threads and buffer compare identical on the vault copy apart from the intended changes. **686 passing, 96% coverage.**
+
 ## 2026-09-18 - refactor unit 13: commands call each other directly, and the last bash goes
 
 The cleanup unit. Commands no longer run each other as subprocesses, the duplicated readers are gone, `ci.sh` is `dev/ci`, and the Dockerfile and README describe a package rather than a directory of scripts.

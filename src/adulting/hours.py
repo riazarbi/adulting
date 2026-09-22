@@ -43,6 +43,7 @@ from datetime import timedelta
 
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting import buffer as B
+from adulting import statement as S
 from adulting import vault as V
 
 TOOL = 'hours'
@@ -65,8 +66,9 @@ def minutes_of(e):
 
 
 def money_of(e):
-    """Decimal, not float: these figures get invoiced."""
-    return V.dec(minutes_of(e)) / V.dec(60) * V.dec(e.get('rate', 0) or 0)
+    """Decimal, not float: these figures get invoiced. Rounded to the cent
+    per entry, as the statement does, so every total is a sum of the lines."""
+    return S.charge_of(minutes_of(e), e.get('rate', 0) or 0)
 
 
 def resolve_rate(tpath, flag):

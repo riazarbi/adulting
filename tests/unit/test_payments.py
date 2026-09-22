@@ -61,10 +61,9 @@ def vault_with_records():
     return home
 
 
-def test_billed_is_exact_and_skips_unbilled_time(vault_with_records):
-    third = Decimal(20) / Decimal(60) * Decimal(2500)
-    assert P.billed() == {("Projects/SANA", "ZAR"): third + Decimal(1000)}
-    assert P.billed(until="2026-07-31") == {("Projects/SANA", "ZAR"): third}
+def test_billed_rounds_each_entry_and_skips_unbilled_time(vault_with_records):
+    assert P.billed() == {("Projects/SANA", "ZAR"): Decimal("1833.33")}
+    assert P.billed(until="2026-07-31") == {("Projects/SANA", "ZAR"): Decimal("833.33")}
 
 
 def test_collect_and_find_payment(vault_with_records):
@@ -81,3 +80,21 @@ def test_one_thread_statement(vault_with_records):
     assert st["currency"] == "ZAR"
     assert st["payments"] == Decimal("500.50")
     assert st["thread_path"].name == "SANA.md"
+
+
+def test_the_pdf_statement_charges_only_the_threads_currency(vault_with_records):
+    """Unbilled time and time billed in another currency have no place on a
+    ZAR statement of account. The PDF used to list both and charge the USD
+    entry as ZAR."""
+    path = vault_with_records / "hours" / "Projects" / "SANA.md"
+    records = P.V.read_records(path, P.HOURS_FENCE) + [
+        {"name": "Unbilled reading", "startTime": "2026-07-02T07:00:00.000Z",
+         "endTime": "2026-07-02T08:00:00.000Z", "id": "aaaa0004", "rate": 0},
+        {"name": "USD work", "startTime": "2026-07-03T07:00:00.000Z",
+         "endTime": "2026-07-03T08:00:00.000Z", "id": "aaaa0005", "rate": 100, "currency": "USD"},
+    ]
+    P.V.write_records(path, records, P.HOURS_FENCE, "Projects/SANA", "ZAR")
+    st = P.one_thread_statement("SANA", date(2026, 7, 31))
+    assert [line["description"] for line in st["lines"]] == ["Work", "Payment received — FNB"]
+    assert st["charges"] == Decimal("833.33")
+    assert st["balance"] == Decimal("332.83")

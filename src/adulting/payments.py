@@ -240,8 +240,8 @@ def cmd_rm(args):
 # ---------- statement ----------
 
 def billed(thread=None, since=None, until=None):
-    """Sum the `hours` side. Kept here rather than shelling out to `hours`,
-    but using the same Decimal arithmetic so the two agree exactly."""
+    """Sum the `hours` side, each entry rounded to the cent as the statement
+    and `hours report` do, so all three agree exactly."""
     out = {}
     want = None
     if thread:
@@ -262,7 +262,7 @@ def billed(thread=None, since=None, until=None):
         if until and day > until:
             continue
         mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
-        amt = V.dec(mins) / V.dec(60) * V.dec(e.get('rate', 0) or 0)
+        amt = S.charge_of(mins, e.get('rate', 0) or 0)
         out.setdefault((ref, e.get('currency', '')), V.dec(0))
         out[(ref, e.get('currency', ''))] += amt
     return out
@@ -288,6 +288,11 @@ def one_thread_statement(thread_arg, as_of):
     entries = []
     for _, r, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
         if r != ref or not e.get('startTime') or not e.get('endTime'):
+            continue
+        # Only time billed in the statement's currency is charged. Unbilled
+        # time has no currency, and time billed in another currency belongs
+        # on a statement in that currency, as the text statement has it.
+        if e.get('currency') != currency:
             continue
         mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
         entries.append({'on': V.local(e['startTime']).date(),

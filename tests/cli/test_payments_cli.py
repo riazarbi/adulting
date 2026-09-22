@@ -1,6 +1,8 @@
 """Tests for the `payments` CLI and the statement of account."""
 
 import json
+import subprocess
+import sys
 
 
 def pay(vault, *argv, **kw):
@@ -232,3 +234,21 @@ def test_payment_writes_a_buffer_ref(vault):
     assert "REF: [[payments/Projects/SANA]]" in buf, buf
     assert "15000 ZAR" in buf
     assert "payments/project/" not in buf     # directory form, not frontmatter
+
+
+def test_hours_report_text_statement_and_pdf_statement_agree_to_the_cent(vault):
+    """Each charge is rounded to the cent at the line, so the printed lines
+    sum to the printed total. Three 20-minute entries at 2500 are 833.33
+    each: 2499.99, not the unrounded 2500.00."""
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    for day in ("01", "02", "03"):
+        vault.run("log", "SANA", f"work {day}", "-m", "20", "-d", f"2026-07-{day}",
+                  "-t", "09:00", cli="hours")
+    report = json.loads(vault.run("report", "--json", cli="hours").stdout)
+    statement = json.loads(pay(vault, "statement", "--json").stdout)
+    assert [r["amount"] for r in report] == [2499.99]
+    assert [r["billed"] for r in statement] == [2499.99]
+    code = ("from datetime import date; from adulting import payments as P; "
+            "print(P.one_thread_statement('SANA', date(2026, 7, 31))['charges'])")
+    pdf = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=vault.env)
+    assert pdf.stdout.strip() == "2499.99"

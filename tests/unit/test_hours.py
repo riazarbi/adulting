@@ -19,10 +19,10 @@ def test_minutes_of():
     assert H.minutes_of(entry(end=None)) == 0
 
 
-def test_money_of_is_exact_decimal():
-    assert H.money_of(entry(end="2026-08-04T07:20:00.000Z", rate=2500)) == \
-        Decimal(20) / Decimal(60) * Decimal(2500)
-    assert H.money_of(entry(rate=0)) == 0
+def test_money_of_is_a_decimal_rounded_to_the_cent():
+    assert H.money_of(entry(end="2026-08-04T07:20:00.000Z", rate=2500)) == Decimal("833.33")
+    assert H.money_of(entry(end="2026-08-04T07:40:00.000Z", rate=2500)) == Decimal("1666.67")
+    assert H.money_of(entry(rate=0)) == Decimal("0.00")
 
 
 def test_build_entry_omits_currency_for_unbilled_time():

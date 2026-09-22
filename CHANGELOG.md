@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part B (B5): lint's record blocks
+
+- **One block reader for hours and payments files.** `validate_hours_block` and `validate_payments_block` each carried the same twenty lines: find the block, refuse a second one, parse the JSON, check its shape. `lint.read_block` does that once. The messages are unchanged, down to "tracker JSON" versus plain "JSON".
+- **`lint._find_block` is gone**; it duplicated `vault.find_block`.
+- **Renames.** `lint.unwiki` becomes `wikilink_target`, since it does not do what `vault.unwiki` does: it returns None for plain text. The id registry `'hours_ids'` becomes `'record_ids'` and `cross_check_hours` becomes `cross_check_record_ids`, since both check payment ids too.
+- **Tests:** a new test pins every block-shape message, for both kinds of file. It passes on the code before the change and fails when a message is altered. Four of those messages had no test before. **674 passing.**
+- **Verified on the vault copy:** `lint` output is identical before and after (381 files, 7 violations).
+
 ## 2026-09-22 - review fixes, part B (B4): one frontmatter thread reader, one config reader
 
 - **`vault.note_threads(fm)`** reads the threads a note (`threads:`) or log (`thread:`) belongs to, wikilinks unwrapped. It replaces three copies, in `notes list`, `search`'s note records, and `tasks`' thread cache; `tasks.parse_frontmatter_threads` is gone.

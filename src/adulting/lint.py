@@ -41,8 +41,9 @@ def unquote(s):
     return s
 
 
-def unwiki(s):
-    """If s is a wikilink string `[[target]]`, return the target. Else None."""
+def wikilink_target(s):
+    """If s is a wikilink string `[[target]]`, return the target. Else None.
+    (vault.unwiki returns plain text unchanged; lint needs to tell them apart.)"""
     m = WIKILINK_RE.match(s.strip())
     return m.group(1) if m else None
 
@@ -384,7 +385,7 @@ def validate_file(path, schemas, registry=None):
 
     # Wikilink resolution: thread field on logs (singular, scalar)
     if 'thread' in fm and isinstance(fm['thread'], str):
-        target = unwiki(fm['thread'])
+        target = wikilink_target(fm['thread'])
         if target and not wikilink_exists(target):
             yield (0, f"thread: wikilink {fm['thread']!r} does not resolve")
 
@@ -393,7 +394,7 @@ def validate_file(path, schemas, registry=None):
         for entry in fm['threads']:
             if not isinstance(entry, str):
                 continue
-            target = unwiki(entry)
+            target = wikilink_target(entry)
             if target is None:
                 yield (0, f"threads: entry {entry!r} is not a wikilink")
             elif not target.startswith(('Projects/', 'Processes/', 'Topics/')):
@@ -406,7 +407,7 @@ def validate_file(path, schemas, registry=None):
         for entry in fm['people']:
             if not isinstance(entry, str):
                 continue
-            target = unwiki(entry)
+            target = wikilink_target(entry)
             if target:
                 if not target.startswith('people/'):
                     yield (0, f"people: wikilink {entry!r} should target 'people/...'")
@@ -482,41 +483,43 @@ ENTRY_FIELDS = ('name', 'startTime', 'endTime', 'id', 'rate')
 ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 
 
-def _find_block(lines, fence):
-    """(fence_idx, closing_idx) of the first matching block, else None."""
-    for i, line in enumerate(lines):
-        if line.rstrip() == fence:
-            for j in range(i + 1, len(lines)):
-                if lines[j].rstrip() == '```':
-                    return i, j
-            return None
-    return None
+def read_block(text, fence, key, label, block_name, json_name):
+    """The records in a file's JSON block, checked for shape.
 
-
-def validate_hours_block(text, path, registry=None):
-    """Validate the simple-time-tracker JSON block in a time file."""
+    Returns (errors, fence_line, records). `records` is None when there is
+    nothing further to check: no block, an empty one, or JSON of the wrong
+    shape. The names only shape the messages, e.g. label 'hours_file',
+    block_name 'tracker', json_name 'tracker JSON'.
+    """
     lines = text.split('\n')
-    blk = _find_block(lines, TRACKER_FENCE)
+    blk = V.find_block(lines, fence)
     if blk is None:
-        yield (0, f"hours_file: no {TRACKER_FENCE} block")
-        return
-    if sum(1 for l in lines if l.rstrip() == TRACKER_FENCE) > 1:
-        yield (blk[0] + 1, "hours_file: more than one tracker block")
+        return [(0, f"{label}: no {fence} block")], 0, None
+    errors = []
+    if sum(1 for l in lines if l.rstrip() == fence) > 1:
+        errors.append((blk[0] + 1, f"{label}: more than one {block_name} block"))
 
     fence_line = blk[0] + 1
     raw = '\n'.join(lines[blk[0] + 1:blk[1]]).strip()
     if not raw:
-        return  # an empty block is a legitimately empty time file
+        return errors, fence_line, None  # an empty block is a legitimately empty file
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        yield (fence_line, f"hours_file: tracker JSON does not parse: {e}")
-        return
-    if not isinstance(data, dict) or not isinstance(data.get('entries'), list):
-        yield (fence_line, "hours_file: tracker JSON must be {\"entries\": [...]}")
-        return
+        errors.append((fence_line, f"{label}: {json_name} does not parse: {e}"))
+        return errors, fence_line, None
+    if not isinstance(data, dict) or not isinstance(data.get(key), list):
+        errors.append((fence_line, f"{label}: {json_name} must be {{\"{key}\": [...]}}"))
+        return errors, fence_line, None
+    return errors, fence_line, data[key]
 
-    for idx, e in enumerate(data['entries']):
+
+def validate_hours_block(text, path, registry=None):
+    """Validate the simple-time-tracker JSON block in a time file."""
+    errors, fence_line, entries = read_block(
+        text, TRACKER_FENCE, 'entries', 'hours_file', 'tracker', 'tracker JSON')
+    yield from errors
+    for idx, e in enumerate(entries or []):
         tag = f"entries[{idx}]"
         if not isinstance(e, dict):
             yield (fence_line, f"hours_file: {tag} is not an object")
@@ -541,7 +544,7 @@ def validate_hours_block(text, path, registry=None):
         if rate is not None and not isinstance(rate, int):
             yield (fence_line, f"hours_file: {tag}.rate: {rate!r} is not an integer")
         if registry is not None and eid:
-            registry.setdefault('hours_ids', {}).setdefault(str(eid), []).append(
+            registry.setdefault('record_ids', {}).setdefault(str(eid), []).append(
                 (path, fence_line))
 
 
@@ -551,28 +554,10 @@ PAYMENT_FIELDS = ('id', 'received', 'amount', 'currency')
 
 def validate_payments_block(text, path, registry=None):
     """Validate the adulting-payments JSON block in a payments file."""
-    lines = text.split('\n')
-    blk = _find_block(lines, PAYMENTS_FENCE)
-    if blk is None:
-        yield (0, f"payments_file: no {PAYMENTS_FENCE} block")
-        return
-    if sum(1 for l in lines if l.rstrip() == PAYMENTS_FENCE) > 1:
-        yield (blk[0] + 1, "payments_file: more than one payments block")
-
-    fence_line = blk[0] + 1
-    raw = '\n'.join(lines[blk[0] + 1:blk[1]]).strip()
-    if not raw:
-        return
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        yield (fence_line, f"payments_file: JSON does not parse: {e}")
-        return
-    if not isinstance(data, dict) or not isinstance(data.get('payments'), list):
-        yield (fence_line, "payments_file: JSON must be {\"payments\": [...]}")
-        return
-
-    for idx, p in enumerate(data['payments']):
+    errors, fence_line, payments = read_block(
+        text, PAYMENTS_FENCE, 'payments', 'payments_file', 'payments', 'JSON')
+    yield from errors
+    for idx, p in enumerate(payments or []):
         tag = f"payments[{idx}]"
         if not isinstance(p, dict):
             yield (fence_line, f"payments_file: {tag} is not an object")
@@ -596,13 +581,13 @@ def validate_payments_block(text, path, registry=None):
             elif amt <= 0:
                 yield (fence_line, f"payments_file: {tag}.amount: must be positive")
         if registry is not None and pid:
-            registry.setdefault('hours_ids', {}).setdefault(str(pid), []).append(
+            registry.setdefault('record_ids', {}).setdefault(str(pid), []).append(
                 (path, fence_line))
 
 
-def cross_check_hours(registry):
-    """Entry ids must be unique across the whole vault."""
-    for eid, hits in registry.get('hours_ids', {}).items():
+def cross_check_record_ids(registry):
+    """Hours and payment ids must be unique across the whole vault."""
+    for eid, hits in registry.get('record_ids', {}).items():
         if len(hits) <= 1:
             continue
         for path, ln in hits:
@@ -763,7 +748,7 @@ def main():
 
     files = [Path(p) for p in args.paths] if args.paths else list(discover_files())
 
-    registry = {'by_uuid': {}, 'depends_edges': [], 'hours_ids': {}}
+    registry = {'by_uuid': {}, 'depends_edges': [], 'record_ids': {}}
     total = 0
     for f in files:
         for line_no, msg in validate_file(f, schemas, registry=registry):
@@ -776,7 +761,7 @@ def main():
         if not args.quiet:
             print(f"{path}:{line_no}: {msg}")
 
-    for path, line_no, msg in cross_check_hours(registry):
+    for path, line_no, msg in cross_check_record_ids(registry):
         total += 1
         if not args.quiet:
             print(f"{path}:{line_no}: {msg}")

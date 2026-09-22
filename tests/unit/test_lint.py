@@ -1,6 +1,9 @@
 """Unit tests for adulting.lint: parsers, the schema DSL and graph checks."""
 
+import json
 from pathlib import Path
+
+import pytest
 
 from adulting import lint as L
 
@@ -16,8 +19,8 @@ def test_unquote():
 
 def test_unwiki_returns_none_for_non_links():
     """Unlike vault.unwiki, lint's version distinguishes 'not a link'."""
-    assert L.unwiki("[[Projects/SGB]]") == "Projects/SGB"
-    assert L.unwiki("Projects/SGB") is None
+    assert L.wikilink_target("[[Projects/SGB]]") == "Projects/SGB"
+    assert L.wikilink_target("Projects/SGB") is None
 
 
 # ---------- frontmatter ----------
@@ -152,7 +155,7 @@ def test_discover_files_walks_known_dirs_only(tmp_path, monkeypatch):
 # ---------- task graph ----------
 
 def registry_with(edges):
-    reg = {"by_uuid": {}, "depends_edges": [], "hours_ids": {}}
+    reg = {"by_uuid": {}, "depends_edges": [], "record_ids": {}}
     for i, (src, deps) in enumerate(edges):
         reg["by_uuid"].setdefault(src, []).append((Path("n.md"), i + 1))
         if deps:
@@ -189,10 +192,30 @@ def test_a_cycle_reached_twice_is_reported_once():
         "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0001"]
 
 
-def test_cross_check_hours_points_each_duplicate_at_the_others():
-    reg = {"hours_ids": {"abcd1234": [(Path("a.md"), 7), (Path("b.md"), 9)],
+def test_cross_check_record_ids_points_each_duplicate_at_the_others():
+    reg = {"record_ids": {"abcd1234": [(Path("a.md"), 7), (Path("b.md"), 9)],
                          "unique00": [(Path("a.md"), 7)]}}
-    assert list(L.cross_check_hours(reg)) == [
+    assert list(L.cross_check_record_ids(reg)) == [
         (Path("a.md"), 7, "record id 'abcd1234' duplicated at b.md:9"),
         (Path("b.md"), 9, "record id 'abcd1234' duplicated at a.md:7"),
     ]
+
+
+@pytest.mark.parametrize("validate, fence, key, label, block, json_name", [
+    (L.validate_hours_block, "```simple-time-tracker", "entries", "hours_file", "tracker", "tracker JSON"),
+    (L.validate_payments_block, "```adulting-payments", "payments", "payments_file", "payments", "JSON"),
+])
+def test_record_block_shape_errors(validate, fence, key, label, block, json_name):
+    def errors(body):
+        return list(validate(body, Path("f.md")))
+
+    try:
+        json.loads("{")
+    except json.JSONDecodeError as e:
+        bad_json = str(e)
+    assert errors("no block here\n") == [(0, f"{label}: no {fence} block")]
+    assert errors(f"x\n{fence}\n\n```\n") == []
+    assert errors(f"x\n{fence}\n{{\n```\n") == [(2, f"{label}: {json_name} does not parse: {bad_json}")]
+    assert errors(f"x\n{fence}\n[]\n```\n") == [(2, f"{label}: {json_name} must be {{\"{key}\": [...]}}")]
+    assert errors(f"x\n{fence}\n{{\"{key}\": []}}\n```\n{fence}\n```\n") == [
+        (2, f"{label}: more than one {block} block")]

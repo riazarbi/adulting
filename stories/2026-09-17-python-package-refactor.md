@@ -2,12 +2,13 @@
 
 Branch: `refactor2`. Merges to `main` only if the whole refactor succeeds.
 
-**Status (2026-09-22): units 0-13 are done; the review is being worked
-through.** Every command is a module of the `adulting` package, installed with
-pipx. No bash remains. The review (`2026-09-22-refactor-review-findings.md`)
-part A, the bugs, is done: 686 tests, 96% coverage, `dev/ci` green. Parts B-E
-remain. Also outstanding: regenerate MANUAL.md and dev/tools/ (needs
-`claude`), and the deferred bugs at the end of this file.
+**Status (2026-09-22): units 0-13 are done, and so is the review.** Every
+command is a module of the `adulting` package, installed with pipx. No bash
+remains. The review (`2026-09-22-refactor-review-findings.md`) is worked
+through, parts A-E: 705 tests, 96% coverage, `dev/ci` green. CHANGELOG.md
+records each part. Still outstanding: regenerate MANUAL.md and dev/tools/
+(needs `claude`), the deferred bugs at the end of this file, and the merge
+to `main`.
 
 ## Goal
 
@@ -172,8 +173,9 @@ PATH. When both sides are ported, they become function calls (unit 13).
 
 ## Deferred bugs
 
-Each is pinned by a test that asserts today's behaviour, so fixing one means
-changing that test first. None is a data-loss risk.
+Each is pinned by a test that asserts today's behaviour and carries a
+`# DEFERRED BUG <n>` comment, so `grep -rn 'DEFERRED BUG' tests/` finds them
+all, and fixing one means changing that test first. None is a data-loss risk.
 
 1. **A note topic containing a colon or a quote breaks its PDF.** The topic is
    written into the pandoc metadata unquoted, so the YAML will not parse. The
@@ -206,8 +208,9 @@ changing that test first. None is a data-loss risk.
 11. **A non-person link in `people:` is listed as an attendee** as written,
     e.g. `[[Projects/X]]`. No note in the vault has one.
 
-Fixed since the port (2026-09-22): minutes inserting a second Summary before
-any line containing `# Content`, and `#  Details` for a note with no type.
+Fixed since the port (2026-09-22), found by the review (A8): minutes inserting
+a second Summary before any line containing `# Content`, and `#  Details` for a
+note with no type.
 
 Decided 2026-09-22, formerly deferred bug 9: minutes and PDFs list every
 action, open and done, with a Status column saying which. Completed actions
@@ -215,12 +218,19 @@ used to appear with no way to tell them from open ones.
 
 ## Duplication left in place
 
-- `parse_action_attrs` exists in `buffer` and `tasks`. They read different
-  things — a token list from a buffer comment, an attr block from an ACTION
-  line — and share only their validation rules.
+Review part B moved the shared code into `vault.py`: the vault path, errors,
+record fences and minutes, date windows, currency codes, ACTION attributes,
+person and thread checks, frontmatter thread lists and the config reader.
+What survives is deliberate:
+
 - `search` has its own task-anchor regex, matching anchors as events rather
   than parsing them for mutation as `tasks` does.
 - `lint`'s frontmatter parser understands the schema DSL's lists of mappings,
-  which no other reader needs; `render`'s `extract_meta` reproduces awk's
-  unescaping byte for byte. Both are deliberately separate from
+  which no other reader needs; `render`'s `extract_meta` reproduces the old
+  scripts' unescaping byte for byte. Both are deliberately separate from
   `vault.parse_frontmatter`.
+- `vault.parse_frontmatter` (thread files) and `vault.parse_frontmatter_doc`
+  (notes and logs) read differently; merging them risks changing
+  `threads show --json`.
+- Each command keeps the text of its own error messages; only their shape,
+  `<command>: error: <message>`, and the code that prints them are shared.

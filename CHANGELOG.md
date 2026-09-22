@@ -2,7 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
-## 2026-09-22 - review fixes, part D (2 of 3): the rest of the test review, and two fixes it turned up
+## 2026-09-22 - review fixes, part E: the refactor story is current
+
+- `stories/2026-09-17-python-package-refactor.md`:
+  - The status line says the review is done: 705 tests, 96% coverage, `dev/ci` green.
+  - "Deferred bugs" explains the `# DEFERRED BUG <n>` markers and credits A8 for the two render bugs fixed.
+  - "Duplication left in place" now lists only what survives part B, and why.
+
+## 2026-09-22 - review fixes, part D (2 of 2): the rest of the test review, and two fixes it turned up
 
 - **Behaviour change: every command refuses a vault that is not a directory.** With `ADULTING_HOME` pointing at nothing, reads reported an empty vault, and `buffer add`, `people new` and `threads new` quietly started a new vault there, so a mistyped path went unnoticed. With it pointing at a file, those four crashed with a traceback. Every command now stops with `<command>: error: ADULTING_HOME is not a directory: <path>`, as `commit` already did, via a new `vault.require_vault()`.
 - **Behaviour change: `buffer suggest` quotes with `shlex.quote`.** It had its own `_shquote`, as the review suggested replacing. A quote in the text is now written `'it'"'"'s'` instead of `'it'\''s'`; both paste the same.
@@ -33,7 +40,7 @@ Dated entries, newest first. Each header is a unit of work; bullets capture the 
   - The empty, untracked `tests/fixtures/threads/` is gone.
 - **705 passing.**
 
-## 2026-09-22 - review fixes, part D (1 of 3): one test file per command, duplicates gone, exact assertions
+## 2026-09-22 - review fixes, part D (1 of 2): one test file per command, duplicates gone, exact assertions
 
 The review found tests split across files by refactor unit rather than by command, with about 50 duplicates and many assertions that check a substring or only the exit code.
 

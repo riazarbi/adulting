@@ -45,31 +45,6 @@ A resolution
 
 # Content
 
-# Summary
-
-## Minuted Agreements
-No minutes agreements were made.
-
---------------------------------------------------------------------
-
-## Resolutions
-
-A resolution
-
---------------------------------------------------------------------
-
-\newpage
-## Action Items
-
-| Assignee | Task |
-|----------|--------------------------------------------------|
-| None | None |
-
---------------------------------------------------------------------
-
-\newpage
-
-
 ## Content notes
 RESOLVED: A resolution
 

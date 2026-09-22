@@ -197,6 +197,19 @@ changing that test first. None is a data-loss risk.
 8. **A thread body line like `- 2026-13 — ...` is never checked by `lint`.**
    It does not match `thread_entry`'s `applies_when`, so a malformed date is
    skipped rather than reported.
+9. **Minutes and PDFs list completed actions under Action Items.** `DONE:`
+   lines and `- [x]` checkboxes appear alongside open actions. 42 notes in the
+   vault have them. Whether minutes should list them is a decision, not only a
+   bug.
+10. **The PDF replaces a note's own `# Summary` section.** Its callouts go
+    after `# Summary` and everything up to the next rule is dropped, so a
+    minutes-style Summary loses its `## Minuted Agreements` heading. 2 notes
+    in the vault have a Summary.
+11. **A non-person link in `people:` is listed as an attendee** as written,
+    e.g. `[[Projects/X]]`. No note in the vault has one.
+
+Fixed since the port (2026-09-22): minutes inserting a second Summary before
+any line containing `# Content`, and `#  Details` for a note with no type.
 
 ## Duplication left in place
 

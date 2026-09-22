@@ -85,3 +85,56 @@ def test_found_block():
     assert R.found_block(["a", ""], "none") == ["", "a", "", ""]
     assert R.found_block(["", ""], "none") == ["none", ""]
     assert R.found_block([], "none") == ["none", ""]
+
+
+def test_minutes_insert_the_summary_once_before_the_content_heading():
+    """Only a `# Content` heading gets the Summary block. A line that merely
+    contains the words, like `## Content notes`, used to get a second one."""
+    note = "---\ntopic: t\ntype: Workshop\n---\n\n# Content\n\n## Content notes\nbody\n"
+    rendered = R.minutes_markdown(note, owner="Riaz Arbi")
+    assert rendered.count("# Summary") == 1
+    assert rendered.index("# Summary") < rendered.index("\n# Content\n")
+
+
+def test_a_note_with_no_type_gets_a_plain_details_heading():
+    for render in (lambda t: R.pdf_markdown(t, ""), R.agenda_markdown,
+                   lambda t: R.minutes_markdown(t, "")):
+        rendered = render("# Content\nbody\n")
+        assert "\n# Details\n" in rendered
+        assert "#  Details" not in rendered
+
+
+# ---------- deferred bugs, pinned as they behave today ----------
+
+def test_a_task_with_a_priority_credits_the_owner():
+    # DEFERRED BUG 2: `[#H]` stops the assignee matching, so the name stays in
+    # the task text and the row is credited to the vault owner.
+    rows = R.action_rows(["TASK: [#H] (Bern) Circulate minutes <!--abcd1234 entry:2026-09-10-->"],
+                         owner="Riaz Arbi")
+    assert rows == ["| Riaz Arbi | [#H] (Bern) Circulate minutes |"]
+
+
+def test_completed_actions_are_listed_as_action_items():
+    # DEFERRED BUG 9: DONE: lines and `- [x]` checkboxes are listed under
+    # Action Items alongside open ones. 42 notes in the vault have them.
+    rows = R.action_rows(["DONE: Book the venue <!--aaaa0001 entry:2026-09-01 end:2026-09-05-->",
+                          "- [x] Old done task"], owner="Riaz Arbi")
+    assert rows == ["| Riaz Arbi | Book the venue |", "| Riaz Arbi | Old done task |"]
+
+
+def test_the_pdf_replaces_a_notes_own_summary_section():
+    # DEFERRED BUG 10: the PDF puts its callouts after `# Summary` and drops
+    # everything up to the next rule, so a minutes-style Summary loses its
+    # `## Minuted Agreements` heading. 2 notes in the vault have a Summary.
+    note = ("---\ntopic: t\ntype: Meeting\n---\n\n# Summary\n\n## Minuted Agreements\n\n"
+            + "-" * 68 + "\n\n# Content\n")
+    rendered = R.pdf_markdown(note, owner="")
+    assert "# Summary" in rendered
+    assert "## Minuted Agreements" not in rendered
+
+
+def test_a_non_person_link_is_listed_as_an_attendee():
+    # DEFERRED BUG 11: only `[[people/...]]` links are unwrapped; any other
+    # link in `people:` is listed as an attendee as written.
+    lines = ["---", "type: Meeting", "people:", '  - "[[Projects/Not A Person]]"', "---"]
+    assert "- [[Projects/Not A Person]]" in R.header(lines, "minutes")

@@ -15,7 +15,7 @@ geometry:
 
 \newpage
 
-#  Details
+# Details
 
 # Summary
 

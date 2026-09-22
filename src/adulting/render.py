@@ -151,7 +151,7 @@ def header(lines, kind):
         "",
         "\\newpage",
         "",
-        f"# {note_type} Details",
+        f"# {note_type} Details" if note_type else "# Details",
         "",
     ]
     if location:
@@ -335,7 +335,7 @@ def minutes_markdown(note_text, owner):
     filled from AGREED:, RESOLVED: and ACTION/TASK/DONE lines."""
     if '# Summary' not in note_text:
         # awk `print "<summary>"` adds its own newline before the line itself.
-        note_text = joined([MINUTES_SUMMARY + '\n' + line if '# Content' in line else line
+        note_text = joined([MINUTES_SUMMARY + '\n' + line if line.strip() == '# Content' else line
                             for line in records(note_text)])
     lines = records(note_text)
     body = cut_sections(lines, ('# Minuted Agreements', '# Resolutions', '# Action Items'),

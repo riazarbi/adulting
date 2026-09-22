@@ -16,15 +16,12 @@ import sys
 from pathlib import Path
 
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting.vault import vault_home
 
 # The schemas ship inside the package, next to this module.
 SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
 
 
-def vault_home():
-    """The vault directory. Read on every call, not at import, so tests
-    can point it somewhere else."""
-    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
 ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')

@@ -45,20 +45,15 @@ and individual entries are added/removed via the API.
 import argparse
 import contextlib
 import io
-import os
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting.vault import vault_home
 
 
-def vault_home():
-    """The vault directory. Read on every call, not at import, so tests
-    can point it somewhere else."""
-    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 
 def buffer_file():

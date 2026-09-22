@@ -8,25 +8,19 @@ be rebuilt when we know what views we actually want from notes data.
 """
 
 import argparse
-import difflib
 import json
-import os
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting.vault import vault_home
 
 KIND_DIRS = V.KIND_DIRS
 CATEGORIES = ['professional', 'personal', 'voluntary']
 
 
-def vault_home():
-    """The vault directory. Read on every call, not at import, so tests
-    can point it somewhere else."""
-    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 
 def threads_dir():

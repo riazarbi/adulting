@@ -13,7 +13,6 @@ So the separator rows are deliberately padded past 72 characters, and their
 relative lengths are the column proportions -- they are the layout, not noise.
 """
 
-import os
 import shutil
 import subprocess
 import sys

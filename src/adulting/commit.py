@@ -16,12 +16,9 @@ import sys
 from pathlib import Path
 
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting.vault import vault_home
 
 
-def vault_home():
-    """The vault directory. Read on every call, not at import, so tests
-    can point it somewhere else."""
-    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 DEFAULT_MAX_FILE_LINES = 150
 DEFAULT_MAX_LINES = 3000

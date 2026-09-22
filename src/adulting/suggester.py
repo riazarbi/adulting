@@ -14,18 +14,14 @@ guessing. Rejection is free downstream, so we prefer to bail than mislead.
 """
 
 import json
-import os
 import re
 import sys
 from datetime import date, timedelta
-from pathlib import Path
+
+from adulting.vault import vault_home
 
 
 
-def vault_home():
-    """The vault directory. Read on every call, not at import, so tests
-    can point it somewhere else."""
-    return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 # Tokens that we never want to count as content (too generic to rank threads).
 STOPWORDS = {

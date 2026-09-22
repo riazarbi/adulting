@@ -53,8 +53,9 @@ class Vault:
             extra += f"currency: {currency}\n"
         if rate is not None:
             extra += f"rate: {rate}\n"
+        kind_value = {"Projects": "project", "Processes": "process", "Topics": "topic"}[kind]
         p.write_text(
-            f"---\nstatus: {status}\nkind: {kind.rstrip('s').lower()}\n"
+            f"---\nstatus: {status}\nkind: {kind_value}\n"
             f"category: {category}\nstarted: {started}\n{extra}---\n\n"
             f"# {name}\n", encoding="utf-8")
         return p

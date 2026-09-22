@@ -320,3 +320,68 @@ def test_is_currency_code_wants_three_capitals():
     assert not V.is_currency_code("zar")
     assert not V.is_currency_code("ZA")
     assert not V.is_currency_code("ZARR")
+
+
+# ---------- billing parties ----------
+
+def client_thread(vault):
+    """A billed thread that names its client."""
+    p = vault.write_thread("Projects", "SANA Partners", currency="ZAR", rate=2500)
+    p.write_text(p.read_text().replace(
+        "---\n\n# SANA",
+        "client_name: Sana Partners (Pty) Ltd\n"
+        "client_address: Unit 301|2 Park Road|Cape Town\n"
+        "client_vat: 4220259826\n---\n\n# SANA"), encoding="utf-8")
+    return p
+
+
+def write_billing(vault, **over):
+    fields = {"supplier_name": "Riaz Arbi",
+              "bank_account_name": "Riaz J Arbi", "bank_name": "Capitec Bank",
+              "bank_account_number": "0000000000", "bank_branch_code": "470010",
+              "bank_account_type": "Savings"}
+    fields.update(over)
+    body = "owner: Riaz Arbi\nbilling:\n" + "".join(
+        f"  {k}: {v}\n" for k, v in fields.items())
+    (vault.home / ".adulting" / "config.yaml").write_text(body, encoding="utf-8")
+
+
+def test_banking_is_complete_when_every_field_is_set(vault):
+    """A document that asks for money must say where to send it."""
+    write_billing(vault)
+    assert V.banking()["complete"] is True
+
+
+def test_banking_is_incomplete_while_a_field_is_a_todo_placeholder(vault):
+    write_billing(vault, bank_account_number="TODO")
+    assert V.banking()["complete"] is False
+
+
+def test_banking_is_incomplete_when_a_field_is_missing(vault):
+    write_billing(vault)
+    cfg = vault.home / ".adulting" / "config.yaml"
+    cfg.write_text(cfg.read_text().replace("  bank_branch_code: 470010\n", ""),
+                   encoding="utf-8")
+    assert V.banking()["complete"] is False
+
+
+def test_supplier_address_is_pipe_separated(vault):
+    write_billing(vault, supplier_address="14 Kinnoull Road|Camps Bay|Cape Town")
+    assert V.supplier()["lines"] == [
+        "14 Kinnoull Road", "Camps Bay", "Cape Town"]
+
+
+def test_reference_is_the_thread_name_without_its_kind_prefix(vault):
+    """Derived, not configured: it cannot drift or carry another client's code."""
+    write_billing(vault)
+    p = client_thread(vault)
+    assert V.client(p)["reference"] == "SANA Partners"
+
+
+def test_reference_ignores_a_frontmatter_override(vault):
+    write_billing(vault)
+    p = client_thread(vault)
+    p.write_text(p.read_text().replace(
+        "client_vat:", "client_reference: SOMETHING ELSE\nclient_vat:"),
+        encoding="utf-8")
+    assert V.client(p)["reference"] == "SANA Partners"

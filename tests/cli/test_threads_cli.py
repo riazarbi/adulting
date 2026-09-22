@@ -1,12 +1,12 @@
-"""Tests for the `threads` CLI (refactor unit 5).
+"""The `threads` command: list, show, new (with billing defaults) and delete.
 
-Billing fields on `threads new` are covered in test_threads_billing.py. The
-first sections here characterise behaviour kept from the pre-port script and
+The first sections characterise behaviour kept from the pre-port script and
 were run green against it. The last section specifies the removal of
 interactivity and was written to fail against the old script.
 """
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -114,10 +114,37 @@ def test_new_with_billing_orders_currency_then_rate(vault):
         f"started: {date.today().isoformat()}\ncurrency: BWP\nrate: 0\n---\n\n# Trust\n")
 
 
+def test_new_without_a_rate_writes_none(vault):
+    """`hours` then falls back to the vault config, then 2500. The old
+    interactive path wrote `rate: 2500` when the prompt was left blank."""
+    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar")
+    assert vault.read("threads/Projects/Acme Corp.md") == (
+        f"---\nstatus: open\nkind: project\ncategory: professional\n"
+        f"started: {date.today().isoformat()}\ncurrency: ZAR\n---\n\n# Acme Corp\n")
+
+
+def test_a_new_billed_thread_can_be_logged_against_at_once(vault):
+    """No hand-edit is needed before `hours log` works."""
+    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar")
+    r = vault.run("log", "Acme Corp", "kickoff", cli="hours")
+    assert r.returncode == 0, r.stderr
+    assert re.fullmatch(r"logged [0-9a-f]{8}  Projects/Acme Corp  \d{4}-\d\d-\d\d \d\d:\d\d  "
+                        r"1h 0m @ 2500 ZAR = 2500 ZAR\n", r.stdout)
+
+
+def test_a_new_thread_passes_lint(vault):
+    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar", "--rate", "900")
+    r = vault.run(str(vault.home / "threads" / "Projects" / "Acme Corp.md"), cli="lint")
+    assert (r.returncode, r.stdout) == (0, "\n1 file(s) checked. 0 violation(s).\n")
+
+
 def test_new_refuses_an_existing_thread(v):
+    path = v.home / "threads" / "Projects" / "SGB.md"
+    before = path.read_text()
     r = threads(v, "new", *FLAGS, "--name", "SGB")
-    assert r.returncode == 1
-    assert r.stderr.startswith("threads: error: already exists: ")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"threads: error: already exists: {path}\n"
+    assert path.read_text() == before
 
 
 def test_new_error_messages(vault):
@@ -125,6 +152,7 @@ def test_new_error_messages(vault):
     assert (r.returncode, r.stderr) == (1, "threads: error: currency 'RANDS' is not a 3-letter ISO code\n")
     r = threads(vault, "new", *FLAGS, "--name", "X", "--rate", "900")
     assert (r.returncode, r.stderr) == (1, "threads: error: --rate needs a --currency\n")
+    assert not (vault.home / "threads" / "Projects" / "X.md").exists()
     r = threads(vault, "new", "--kind", "people", "--category", "personal", "--name", "X")
     assert r.returncode == 2 and "invalid choice" in r.stderr
 

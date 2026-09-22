@@ -2,6 +2,28 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part D (1 of 3): one test file per command, duplicates gone, exact assertions
+
+The review found tests split across files by refactor unit rather than by command, with about 50 duplicates and many assertions that check a substring or only the exit code.
+
+- **One file per command:**
+  - `test_hours_output.py` merges into `test_hours_cli.py`, and `test_payments_output.py` into `test_payments_cli.py`, each grouped by subcommand.
+  - `test_threads_billing.py` merges into `test_threads_cli.py`.
+  - The lint tests from `test_lint_hours_file.py`, `test_lint_task_anchor.py`, `test_schema_task_anchor.py`, `test_payments_cli.py` and `test_hours_cli.py` join `test_lint_cli.py`, one section per schema.
+  - The PDF statement tests move from `unit/test_statement.py` to `test_payments_cli.py`, and the billing-party tests to `unit/test_vault.py`.
+- **Duplicates deleted** after checking each is covered elsewhere: seven in `hours`, seven in `payments` (including one in `unit/test_statement.py`), seven in `threads`, and the lint block-shape cases that `unit/test_lint.py` pins exactly. Where a "duplicate" covered one case nothing else did, that case moved into the surviving test: `hours log -c RANDS`, and `payments log` with amount 0.
+- **Exact assertions:**
+  - Every lint test now asserts the exact list of violation lines. That is 29 tests that checked a substring, including the cycle, duplicate-id and task-anchor checks.
+  - The PDF statement errors assert the exact message, with `--as-of` pinning the one that named today's date.
+  - `payments log` pins the stored record under a fixed timezone.
+  - The hours and payments buffer REFs assert the whole line.
+  - `hours edit` asserts the stored start, end, rate and currency.
+  - The ambiguous and wrongly cased `hours log` cases assert the message and that nothing was written.
+- **`unit/test_hours.py`:** the one test that appended, collected, found and priced entries is five tests, sharing a `utc` fixture that no longer undoes the suite's isolation.
+- **Fixture names say what they hold:** `hours_vault`, `payments_vault` and `billing_threads` replace the several meanings of `v` and `threads`.
+- **Harness fix:** `Vault.write_thread` wrote `kind: processe` for a Processes thread (`"Processes".rstrip('s')`); it now maps each kind directory to its frontmatter value.
+- **663 passing** (was 680: the difference is deleted duplicates, less new tests).
+
 ## 2026-09-22 - review fixes, part C8: small tidy-ups
 
 - **Imports at the top of the file.** Moved: `json` in `search` (three copies), `math` and `argparse` in `suggester`, `datetime` in `payments._as_of`, `statement_pdf` in `payments`, and `suggester` in `buffer`. The two left inside functions, `buffer` → `tasks` and `tasks` → `buffer`, are there because each module imports the other, and a comment now says so.

@@ -63,6 +63,8 @@ PRIORITY_ORDER = {'H': 0, 'M': 1, 'L': 2}
 
 # ---------- anchor model ----------
 
+# A dataclass needs its fields written `name: type`; these are the only
+# annotations in the code base.
 @dataclass
 class Anchor:
     kind: str               # 'TASK' or 'DONE'
@@ -79,7 +81,7 @@ class Anchor:
     line_no: int | None = None  # 0-indexed within file
 
 
-def parse_anchor(line: str, path=None, line_no=None) -> Anchor | None:
+def parse_anchor(line, path=None, line_no=None):
     m = ANCHOR_RE.match(line)
     if not m:
         return None
@@ -102,7 +104,7 @@ def parse_anchor(line: str, path=None, line_no=None) -> Anchor | None:
     )
 
 
-def format_anchor(a: Anchor) -> str:
+def format_anchor(a):
     head = [f"{a.kind}:"]
     if a.priority:
         head.append(f"[#{a.priority}]")
@@ -164,7 +166,7 @@ def walk_anchors():
                 yield a
 
 
-def find_anchor(uuid_prefix: str) -> Anchor:
+def find_anchor(uuid_prefix):
     """Resolve a uuid prefix to a single anchor. Dies on not-found or
     ambiguous. Prefix matches against the 8-char uuid stored in the
     anchor — any prefix length is accepted (1..8)."""
@@ -179,7 +181,7 @@ def find_anchor(uuid_prefix: str) -> Anchor:
     return hits[0]
 
 
-def write_anchor(anchor: Anchor, new_line: str) -> None:
+def write_anchor(anchor, new_line):
     """Rewrite a single line in the anchor's source file. Atomic via
     tmp + os.replace."""
     lines = anchor.path.read_text(encoding='utf-8').split('\n')
@@ -189,7 +191,7 @@ def write_anchor(anchor: Anchor, new_line: str) -> None:
     os.replace(tmp, anchor.path)
 
 
-def mutate_anchor(anchor: Anchor, **changes) -> Anchor:
+def mutate_anchor(anchor, **changes):
     """Apply field updates to an Anchor, rewrite its source line, and
     return the updated Anchor."""
     new = replace(anchor, **changes)
@@ -199,7 +201,7 @@ def mutate_anchor(anchor: Anchor, **changes) -> Anchor:
 
 # ---------- helpers ----------
 
-def today_iso() -> str:
+def today_iso():
     return date.today().isoformat()
 
 
@@ -229,7 +231,7 @@ def build_threads_cache():
     return cache
 
 
-def threads_for(anchor: Anchor, cache: dict) -> list:
+def threads_for(anchor, cache):
     rel = str(anchor.path.relative_to(vault_home()).with_suffix(''))
     return cache.get(rel, [])
 
@@ -458,7 +460,7 @@ def cmd_rm_depends(args):
 
 # ---------- subcommand: list / next / show ----------
 
-def _sort_key(a: Anchor):
+def _sort_key(a):
     return (
         PRIORITY_ORDER.get(a.priority, 3),
         a.due or '9999-99-99',

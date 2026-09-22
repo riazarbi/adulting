@@ -2,6 +2,10 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part C4: no type hints
+
+- `tasks.py` was the only module with type hints; its functions no longer have them, to match the rest of the code. The `Anchor` dataclass keeps its field annotations, because a dataclass cannot declare fields without them; a comment says so. No behaviour change.
+
 ## 2026-09-22 - an output folder that cannot be made is an error, not a traceback
 
 Found while checking the error-message change on the vault copy, and present before this refactor: `payments statement --pdf` into a folder that cannot be created printed a Python traceback. So did `notes pdf|minutes|agenda --out`.

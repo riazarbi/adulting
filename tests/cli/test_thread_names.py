@@ -18,8 +18,7 @@ def sgb_vault(vault):
 def test_buffer_refuses_a_wrongly_cased_thread(sgb_vault):
     r = sgb_vault.run("add-text", "Projects/sgb", "wrong case", cli="buffer")
     assert r.returncode == 1
-    assert r.stderr == ("buffer: error: thread 'Projects/sgb' does not resolve to threads/<Kind>/<Name>.md "
-                        "(expected Projects/X, Processes/X, or Topics/X)\n")
+    assert r.stderr == "buffer: error: thread 'Projects/sgb' does not resolve to a thread file\n"
     assert not (sgb_vault.home / "buffer.md").exists()
 
 
@@ -49,7 +48,7 @@ def test_tasks_will_not_ingest_under_a_wrongly_cased_thread(sgb_vault):
 
 def test_threads_show_does_not_find_a_wrongly_cased_thread(sgb_vault):
     r = sgb_vault.run("show", "Projects/sgb", cli="threads")
-    assert (r.returncode, r.stderr) == (1, "threads: error: not found: Projects/sgb\n")
+    assert (r.returncode, r.stderr) == (1, "threads: error: thread 'Projects/sgb' does not resolve to a thread file\n")
 
 
 def test_threads_reports_an_ambiguous_bare_name_like_every_other_command(sgb_vault):

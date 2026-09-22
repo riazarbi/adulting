@@ -9,24 +9,13 @@ be rebuilt when we know what views we actually want from notes data.
 
 import json
 import sys
-from datetime import datetime
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting.vault import vault_home
 
-KIND_DIRS = V.KIND_DIRS
-CATEGORIES = ['professional', 'personal', 'voluntary']
-
-
-
-
 def threads_dir():
     return vault_home() / 'threads'
-
-
-def today():
-    return datetime.now().strftime('%Y-%m-%d')
 
 
 def cmd_new(args):
@@ -39,14 +28,12 @@ def cmd_new(args):
         V.die(f"name {name!r} cannot contain '/' or start with '.'")
 
     # Billing defaults for `hours`. Optional -- most threads are never billed.
-    currency = (args.currency or '').strip().upper()
-    if currency and not V.is_currency_code(currency):
-        V.die(f"currency {currency!r} is not a 3-letter ISO code")
+    currency = V.check_currency(args.currency) if args.currency else ''
     rate = args.rate
     if rate is not None and not currency:
         V.die("--rate needs a --currency")
 
-    target_dir = threads_dir() / KIND_DIRS[kind]
+    target_dir = threads_dir() / V.KIND_DIRS[kind]
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
     if path.exists():
@@ -58,7 +45,7 @@ def cmd_new(args):
         billing += f"rate: {rate}\n"
     path.write_text(
         f"---\nstatus: open\nkind: {kind}\ncategory: {category}\n"
-        f"started: {today()}\n{billing}---\n\n# {name}\n",
+        f"started: {V.today()}\n{billing}---\n\n# {name}\n",
         encoding='utf-8',
     )
     print(f"created: {path}")
@@ -66,13 +53,7 @@ def cmd_new(args):
 
 
 def cmd_delete(args):
-    try:
-        match = V.resolve_thread(args.thread)
-    except ValueError as e:
-        V.die(str(e))
-    if not match:
-        V.die(f"not found: {args.thread}")
-    kind, name, path = match
+    kind, name, path = V.resolve_target(args.thread)
     if not args.yes:
         V.die(f"refusing to delete {path} without -y")
     path.unlink()
@@ -83,31 +64,15 @@ def cmd_delete(args):
 def cmd_list(args):
     rows = []
     for kind, name, path in V.discover_threads():
-        fm = V.read_frontmatter(path)
-        rows.append({
-            'kind': kind,
-            'name': name,
-            'thread': f"{KIND_DIRS[kind]}/{name}",  # resolvable Kind/Name form
-            'path': str(path.relative_to(vault_home())),
-            'status': fm.get('status', ''),
-            'category': fm.get('category', ''),
-            'started': fm.get('started', ''),
-            'ended': fm.get('ended', ''),
-        })
+        # `thread` is the resolvable Kind/Name form.
+        rows.append({'kind': kind, 'name': name, 'thread': V.thread_ref(kind, name),
+                     **V.file_summary(path)})
 
     if not args.all:
         rows = [r for r in rows if r['status'] == 'open']
 
     if args.query:
-        # Match against both bare name and Kind/Name; take the better score.
-        scored = [
-            (max(V.fuzzy_score(args.query, r['name']),
-                 V.fuzzy_score(args.query, r['thread'])), r)
-            for r in rows
-        ]
-        scored = [(s, r) for s, r in scored if s > 0.3]
-        scored.sort(key=lambda x: -x[0])
-        rows = [r for _, r in scored]
+        rows = V.rank_by_query(rows, args.query, 'name', 'thread')
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -123,21 +88,9 @@ def cmd_list(args):
 
 
 def cmd_show(args):
-    try:
-        match = V.resolve_thread(args.thread)
-    except ValueError as e:
-        V.die(str(e))
-    if not match:
-        V.die(f"not found: {args.thread}")
-    kind, name, path = match
+    kind, name, path = V.resolve_target(args.thread)
     if args.json:
-        fm = V.read_frontmatter(path)
-        print(json.dumps({
-            'kind': kind,
-            'name': name,
-            'path': str(path.relative_to(vault_home())),
-            **fm,
-        }, indent=2))
+        print(V.file_json(path, kind=kind, name=name))
     else:
         sys.stdout.write(path.read_text(encoding='utf-8'))
     return 0
@@ -162,9 +115,9 @@ def main():
 
     p_new = sub.add_parser('new', help="Create a thread file.")
     p_new.add_argument('--name', required=True, help="Thread name; becomes the filename.")
-    p_new.add_argument('--kind', required=True, choices=list(KIND_DIRS),
+    p_new.add_argument('--kind', required=True, choices=list(V.KIND_DIRS),
                        help="Which directory the thread lives in.")
-    p_new.add_argument('--category', required=True, choices=CATEGORIES,
+    p_new.add_argument('--category', required=True, choices=V.CATEGORIES,
                        help="Thread category.")
     p_new.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
     p_new.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")

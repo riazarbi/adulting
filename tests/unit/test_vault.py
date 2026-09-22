@@ -16,26 +16,10 @@ from adulting import vault as V
 
 # ---------- frontmatter ----------
 
-def test_parse_frontmatter_reads_scalars_and_strips_quotes():
-    text = '---\nthread: "[[Projects/SGB]]"\ncurrency: ZAR\n---\n\n# SGB\n'
-    fm, body_start = V.parse_frontmatter(text)
-    assert fm == {"thread": "[[Projects/SGB]]", "currency": "ZAR"}
-    assert text.split("\n")[body_start] == ""
-
-
-def test_parse_frontmatter_without_a_block_is_empty():
-    assert V.parse_frontmatter("# just a heading\n") == ({}, 0)
-
-
-def test_parse_frontmatter_that_never_closes_is_treated_as_no_body():
-    fm, body_start = V.parse_frontmatter("---\nstatus: open\n")
-    assert fm == {"status": "open"}
-    assert body_start == 0
-
-
-def test_parse_frontmatter_ignores_keys_with_capitals_or_digits():
-    fm, _ = V.parse_frontmatter("---\nTopic: x\nclient_name: Acme\nkey2: y\n---\n")
-    assert fm == {"client_name": "Acme"}
+def test_parse_frontmatter_doc_reads_scalars_and_strips_quotes():
+    text = "---\nthread: \"[[Projects/SGB]]\"\ncurrency: 'ZAR'\nClient-2: x\n---\n\n# SGB\n"
+    assert V.parse_frontmatter_doc(text) == (
+        {"thread": "[[Projects/SGB]]", "currency": "ZAR", "Client-2": "x"}, "\n# SGB\n")
 
 
 def test_parse_frontmatter_doc_reads_block_lists():
@@ -43,19 +27,30 @@ def test_parse_frontmatter_doc_reads_block_lists():
             "  - [[Topics/Admin]]\npeople:\n  - \"[[people/Riaz Arbi]]\"\n"
             "  - Someone Untracked\n---\n\nBody line\n")
     fm, body = V.parse_frontmatter_doc(text)
-    assert fm["topic"] == "Kickoff"
-    assert fm["threads"] == ["[[Projects/SGB]]", "[[Topics/Admin]]"]
-    assert fm["people"] == ["[[people/Riaz Arbi]]", "Someone Untracked"]
+    assert fm == {"topic": "Kickoff", "threads": ["[[Projects/SGB]]", "[[Topics/Admin]]"],
+                  "people": ["[[people/Riaz Arbi]]", "Someone Untracked"]}
     assert body == "\nBody line\n"
 
 
-def test_parse_frontmatter_doc_empty_scalar_becomes_empty_list():
-    fm, _ = V.parse_frontmatter_doc("---\nthreads:\n---\n")
-    assert fm == {"threads": []}
+def test_parse_frontmatter_doc_reads_a_list_of_mappings():
+    """The shape of a person's or thread's `cadences:`."""
+    text = ("---\nstatus: open\ncadences:\n  - key: catch_up\n    frequency: 7\n"
+            "    description: Catch up weekly\n  - key: review\n    frequency: 91\n---\n")
+    assert V.parse_frontmatter_doc(text)[0] == {"status": "open", "cadences": [
+        {"key": "catch_up", "frequency": "7", "description": "Catch up weekly"},
+        {"key": "review", "frequency": "91"}]}
+
+
+def test_parse_frontmatter_doc_empty_field_is_an_empty_string():
+    assert V.parse_frontmatter_doc("---\nthreads:\nended:\n---\n")[0] == {"threads": "", "ended": ""}
 
 
 def test_parse_frontmatter_doc_without_a_block_returns_text_as_body():
     assert V.parse_frontmatter_doc("no frontmatter") == ({}, "no frontmatter")
+
+
+def test_parse_frontmatter_doc_that_never_closes_reads_every_line():
+    assert V.parse_frontmatter_doc("---\nstatus: open\n") == ({"status": "open"}, "---\nstatus: open\n")
 
 
 def test_unwiki():
@@ -63,14 +58,6 @@ def test_unwiki():
     assert V.unwiki("  [[Projects/SGB]]  ") == "Projects/SGB"
     assert V.unwiki("Projects/SGB") == "Projects/SGB"
     assert V.unwiki(None) == ""
-
-
-def test_read_frontmatter_reads_scalars_by_path(tmp_path):
-    f = tmp_path / "t.md"
-    f.write_text("---\nstatus: 'paused'\ncurrency: \"ZAR\"\nBad Key: x\n---\n# body\nstatus: not frontmatter\n")
-    assert V.read_frontmatter(f) == {"status": "paused", "currency": "ZAR"}
-    f.write_text("no frontmatter\n")
-    assert V.read_frontmatter(f) == {}
 
 
 def test_fuzzy_score_ranks_closer_matches_first():
@@ -159,12 +146,15 @@ def test_note_threads_reads_either_key_and_unwraps_wikilinks():
     assert V.note_threads({"threads": ["", "  ", "Topics/Plain"]}) == ["Topics/Plain"]
 
 
-def test_read_config_reads_the_owner_without_quotes():
+def test_read_config_reads_sections_scalars_and_comments():
+    """config.yaml is read by the same parser as frontmatter."""
     assert V.read_config() == {}
     cfg = V.vault_home() / ".adulting" / "config.yaml"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text('billing:\n  x: 1\nowner: "Riaz Arbi"\n')
-    assert V.read_config().get("owner") == "Riaz Arbi"
+    cfg.write_text('# billing defaults\nbilling:\n  bank_name: "Capitec Bank"\n  x: 1\n\n'
+                   'owner: "Riaz Arbi"\nhours:\n  rate: 2500\n')
+    assert V.read_config() == {"billing": {"bank_name": "Capitec Bank", "x": "1"},
+                               "owner": "Riaz Arbi", "hours": {"rate": "2500"}}
 
 
 # ---------- actions ----------

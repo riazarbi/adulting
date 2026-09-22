@@ -29,7 +29,6 @@ import os
 import re
 import sys
 from dataclasses import dataclass, replace
-from datetime import date
 from pathlib import Path
 
 from adulting import vault as V
@@ -209,10 +208,6 @@ def mutate_anchor(anchor, **changes):
 
 # ---------- helpers ----------
 
-def today_iso():
-    return date.today().isoformat()
-
-
 def validate_date(s):
     if not V.DATE_RE.match(s):
         raise ValueError(f"date must be YYYY-MM-DD, got {s!r}")
@@ -312,7 +307,7 @@ def ingest(dry_run=False):
             assignee=assignee or None,
             body=body,
             uuid=u,
-            entry=today_iso(),
+            entry=V.today(),
             due=attrs.get('due'),
             scheduled=attrs.get('scheduled'),
             depends=tuple(attrs.get('depends', [])),
@@ -372,7 +367,7 @@ def cmd_done(args):
     if anchor.kind == 'DONE':
         print(f"{anchor.uuid} already done")
         return 0
-    today = today_iso()
+    today = V.today()
     new = mutate_anchor(anchor, kind='DONE', end=today)
     print(f"done: {new.uuid}  {new.body[:60]}")
     return 0
@@ -526,7 +521,7 @@ def cmd_list(args):
     if args.assignee:
         anchors = [a for a in anchors if a.assignee == args.assignee]
     if args.overdue:
-        today = today_iso()
+        today = V.today()
         anchors = [a for a in anchors if a.due and a.due < today]
     cache = build_threads_cache()
     if args.thread:

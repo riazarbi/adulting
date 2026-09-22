@@ -594,7 +594,7 @@ def test_add_passes_every_flag_to_the_buffer(base):
 def test_add_passes_the_buffer_exit_code_through(base):
     r = tasks(base, "add", "Projects/Nope", "x")
     assert r.returncode == 1
-    assert r.stderr == "tasks: error: thread 'Projects/Nope' does not resolve to threads/<Kind>/<Name>.md\n"
+    assert r.stderr == "tasks: error: thread 'Projects/Nope' does not resolve to a thread file\n"
 
 
 # ---------- end to end ----------

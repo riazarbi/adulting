@@ -407,13 +407,8 @@ def validate_file(path, schemas, registry=None):
             # plain strings allowed (untracked attendees)
 
     # Time files: the body is a JSON tracker block, not line-oriented.
-    if schema['name'] == 'hours_file':
-        for err in validate_hours_block(text, path, registry):
-            yield err
-        return
-    if schema['name'] == 'payments_file':
-        for err in validate_payments_block(text, path, registry):
-            yield err
+    if schema['name'] in RECORD_KINDS:
+        yield from validate_record_block(text, path, schema['name'], registry)
         return
 
     # Body lines: line schemas (e.g. thread_entry on threads); ACTION/TASK on notes.
@@ -464,30 +459,38 @@ def validate_file(path, schemas, registry=None):
                         yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
 
 
-# ---------- hours_file: tracker block + vault-wide rules ----------
+# ---------- hours_file and payments_file: the JSON record block ----------
 
-TRACKER_FENCE = V.HOURS_FENCE
-# currency is optional on an hours entry: absent means unbilled time.
-# The ISO-code check further down still applies when one is present.
-ENTRY_FIELDS = ('name', 'startTime', 'endTime', 'id', 'rate')
 ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 
+# What each kind of record file holds, and the words its messages use.
+# currency is optional on an hours entry: absent means unbilled time.
+RECORD_KINDS = {
+    'hours_file': {'fence': V.HOURS_FENCE, 'key': 'entries', 'block': 'tracker',
+                   'json': 'tracker JSON', 'fields': ('name', 'startTime', 'endTime', 'id', 'rate'),
+                   'times': ('startTime', 'endTime')},
+    'payments_file': {'fence': V.PAYMENTS_FENCE, 'key': 'payments', 'block': 'payments',
+                      'json': 'JSON', 'fields': ('id', 'received', 'amount', 'currency'),
+                      'times': ('received',)},
+}
 
-def read_block(text, fence, key, label, block_name, json_name):
+
+def read_block(text, label):
     """The records in a file's JSON block, checked for shape.
 
     Returns (errors, fence_line, records). `records` is None when there is
     nothing further to check: no block, an empty one, or JSON of the wrong
-    shape. The names only shape the messages, e.g. label 'hours_file',
-    block_name 'tracker', json_name 'tracker JSON'.
+    shape.
     """
+    kind = RECORD_KINDS[label]
+    fence, key = kind['fence'], kind['key']
     lines = text.split('\n')
     blk = V.find_block(lines, fence)
     if blk is None:
         return [(0, f"{label}: no {fence} block")], 0, None
     errors = []
     if sum(1 for l in lines if l.rstrip() == fence) > 1:
-        errors.append((blk[0] + 1, f"{label}: more than one {block_name} block"))
+        errors.append((blk[0] + 1, f"{label}: more than one {kind['block']} block"))
 
     fence_line = blk[0] + 1
     raw = '\n'.join(lines[blk[0] + 1:blk[1]]).strip()
@@ -496,82 +499,58 @@ def read_block(text, fence, key, label, block_name, json_name):
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        errors.append((fence_line, f"{label}: {json_name} does not parse: {e}"))
+        errors.append((fence_line, f"{label}: {kind['json']} does not parse: {e}"))
         return errors, fence_line, None
     if not isinstance(data, dict) or not isinstance(data.get(key), list):
-        errors.append((fence_line, f"{label}: {json_name} must be {{\"{key}\": [...]}}"))
+        errors.append((fence_line, f"{label}: {kind['json']} must be {{\"{key}\": [...]}}"))
         return errors, fence_line, None
     return errors, fence_line, data[key]
 
 
-def validate_hours_block(text, path, registry=None):
-    """Validate the simple-time-tracker JSON block in a time file."""
-    errors, fence_line, entries = read_block(
-        text, TRACKER_FENCE, 'entries', 'hours_file', 'tracker', 'tracker JSON')
+def validate_record_block(text, path, label, registry=None):
+    """Check each record in an hours or payments file. Every problem is
+    reported against the line of the block's opening fence."""
+    kind = RECORD_KINDS[label]
+    errors, fence_line, records = read_block(text, label)
     yield from errors
-    for idx, e in enumerate(entries or []):
-        tag = f"entries[{idx}]"
-        if not isinstance(e, dict):
-            yield (fence_line, f"hours_file: {tag} is not an object")
+    for idx, r in enumerate(records or []):
+        tag = f"{kind['key']}[{idx}]"
+
+        def problem(message):
+            return (fence_line, f"{label}: {tag}{message}")
+
+        if not isinstance(r, dict):
+            yield problem(" is not an object")
             continue
-        for f in ENTRY_FIELDS:
-            if e.get(f) in (None, ''):
-                yield (fence_line, f"hours_file: {tag}.{f}: missing")
-        eid = e.get('id')
-        if eid and not re.match(r'^[0-9a-f]{8}$', str(eid)):
-            yield (fence_line, f"hours_file: {tag}.id: {eid!r} is not 8 hex chars")
-        for f in ('startTime', 'endTime'):
-            v = e.get(f)
+        for f in kind['fields']:
+            if r.get(f) in (None, ''):
+                yield problem(f".{f}: missing")
+        rid = r.get('id')
+        if rid and not re.match(r'^[0-9a-f]{8}$', str(rid)):
+            yield problem(f".id: {rid!r} is not 8 hex chars")
+        for f in kind['times']:
+            v = r.get(f)
             if v and not ISO_RE.match(str(v)):
-                yield (fence_line, f"hours_file: {tag}.{f}: {v!r} is not ISO 8601 UTC")
-        st, en = e.get('startTime'), e.get('endTime')
+                yield problem(f".{f}: {v!r} is not ISO 8601 UTC")
+        st, en = r.get('startTime'), r.get('endTime')
         if st and en and ISO_RE.match(str(st)) and ISO_RE.match(str(en)) and en < st:
-            yield (fence_line, f"hours_file: {tag}: endTime precedes startTime")
-        ccy = e.get('currency')
+            yield problem(": endTime precedes startTime")
+        ccy = r.get('currency')
         if ccy and not V.is_currency_code(str(ccy)):
-            yield (fence_line, f"hours_file: {tag}.currency: {ccy!r} is not a 3-letter ISO code")
-        rate = e.get('rate')
-        if rate is not None and not isinstance(rate, int):
-            yield (fence_line, f"hours_file: {tag}.rate: {rate!r} is not an integer")
-        if registry is not None and eid:
-            registry.setdefault('record_ids', {}).setdefault(str(eid), []).append(
-                (path, fence_line))
-
-
-PAYMENTS_FENCE = V.PAYMENTS_FENCE
-PAYMENT_FIELDS = ('id', 'received', 'amount', 'currency')
-
-
-def validate_payments_block(text, path, registry=None):
-    """Validate the adulting-payments JSON block in a payments file."""
-    errors, fence_line, payments = read_block(
-        text, PAYMENTS_FENCE, 'payments', 'payments_file', 'payments', 'JSON')
-    yield from errors
-    for idx, p in enumerate(payments or []):
-        tag = f"payments[{idx}]"
-        if not isinstance(p, dict):
-            yield (fence_line, f"payments_file: {tag} is not an object")
-            continue
-        for f in PAYMENT_FIELDS:
-            if p.get(f) in (None, ''):
-                yield (fence_line, f"payments_file: {tag}.{f}: missing")
-        pid = p.get('id')
-        if pid and not re.match(r'^[0-9a-f]{8}$', str(pid)):
-            yield (fence_line, f"payments_file: {tag}.id: {pid!r} is not 8 hex chars")
-        recv = p.get('received')
-        if recv and not ISO_RE.match(str(recv)):
-            yield (fence_line, f"payments_file: {tag}.received: {recv!r} is not ISO 8601 UTC")
-        ccy = p.get('currency')
-        if ccy and not V.is_currency_code(str(ccy)):
-            yield (fence_line, f"payments_file: {tag}.currency: {ccy!r} is not a 3-letter ISO code")
-        amt = p.get('amount')
-        if amt is not None:
-            if not isinstance(amt, (int, float)) or isinstance(amt, bool):
-                yield (fence_line, f"payments_file: {tag}.amount: {amt!r} is not a number")
-            elif amt <= 0:
-                yield (fence_line, f"payments_file: {tag}.amount: must be positive")
-        if registry is not None and pid:
-            registry.setdefault('record_ids', {}).setdefault(str(pid), []).append(
+            yield problem(f".currency: {ccy!r} is not a 3-letter ISO code")
+        if label == 'hours_file':
+            rate = r.get('rate')
+            if rate is not None and not isinstance(rate, int):
+                yield problem(f".rate: {rate!r} is not an integer")
+        else:
+            amt = r.get('amount')
+            if amt is not None:
+                if not isinstance(amt, (int, float)) or isinstance(amt, bool):
+                    yield problem(f".amount: {amt!r} is not a number")
+                elif amt <= 0:
+                    yield problem(".amount: must be positive")
+        if registry is not None and rid:
+            registry.setdefault('record_ids', {}).setdefault(str(rid), []).append(
                 (path, fence_line))
 
 

@@ -72,7 +72,7 @@ def buffer_home():
 
 
 def test_resolvers(buffer_home):
-    assert B.canonical_thread("[[Projects/SGB]]", "unused") == "Projects/SGB"
+    assert B.canonical_thread("[[Projects/SGB]]") == "Projects/SGB"
     assert B.ref_target_resolves("notes/n") == buffer_home / "notes/n.md"
     assert B.ref_target_resolves("Projects/SGB") == buffer_home / "threads/Projects/SGB.md"
     assert B.ref_target_resolves("hours/Projects/SGB") == buffer_home / "hours/Projects/SGB.md"

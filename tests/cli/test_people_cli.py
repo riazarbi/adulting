@@ -204,3 +204,17 @@ def test_delete_and_show_need_the_exact_name(people_vault, command):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'riaz arbi.md'}\n"
     assert people_vault.snapshot() == before
+
+
+def test_show_json_lists_a_persons_cadences(vault):
+    """They used to come out as "cadences": "", the old scalar-only reader
+    dropping the list."""
+    vault.write("people/Bern Sellmeyer.md",
+                "---\nstatus: open\ncategory: professional\nstarted: 2026-01-01\ncadences:\n"
+                "  - key: catch_up\n    frequency: 7\n    description: Catch up at least every week\n"
+                "---\n\n# Bern Sellmeyer\n")
+    r = vault.run("show", "Bern Sellmeyer", "--json", cli="people")
+    assert json.loads(r.stdout) == {
+        "name": "Bern Sellmeyer", "path": "people/Bern Sellmeyer.md", "status": "open",
+        "category": "professional", "started": "2026-01-01",
+        "cadences": [{"key": "catch_up", "frequency": "7", "description": "Catch up at least every week"}]}

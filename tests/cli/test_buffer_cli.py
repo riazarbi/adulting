@@ -69,10 +69,9 @@ def test_add_ref_date_files_under_that_day_and_keeps_the_clock(buffer_vault):
 
 @pytest.mark.parametrize("argv, message", [
     (["add", ""], "buffer: error: text is empty"),
-    (["add-text", "Nope", "x"], "buffer: error: thread 'Nope' does not resolve to threads/<Kind>/<Name>.md "
-                                "(expected Projects/X, Processes/X, or Topics/X)"),
+    (["add-text", "Nope", "x"], "buffer: error: thread 'Nope' does not resolve to a thread file"),
     (["add-text", "Projects/SGB", " "], "buffer: error: text is empty"),
-    (["add-ref", "People/SGB", "notes/x"], "buffer: error: thread 'People/SGB' does not resolve to threads/<Kind>/<Name>.md"),
+    (["add-ref", "People/SGB", "notes/x"], "buffer: error: thread 'People/SGB' does not resolve to a thread file"),
     (["add-ref", "Projects/SGB", "notes/nope"],
      "buffer: error: ref target 'notes/nope' does not resolve to a vault file "
      "(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)"),

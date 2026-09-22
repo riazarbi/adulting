@@ -27,6 +27,7 @@ from decimal import Decimal, InvalidOperation
 
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting import buffer as B
+from adulting import hours as H
 from adulting import vault as V
 from adulting import statement as S
 from adulting import statement_pdf as P
@@ -208,10 +209,7 @@ def cmd_edit(args):
     if args.amount is not None:
         target['amount'] = amount_json(parse_amount(args.amount))
     if args.currency is not None:
-        ccy = args.currency.upper()
-        if not V.is_currency_code(ccy):
-            V.die(f"currency {ccy!r} is not a 3-letter ISO code")
-        target['currency'] = ccy
+        target['currency'] = V.check_currency(args.currency)
     if args.account is not None:
         target['account'] = args.account
     if args.note is not None:
@@ -245,26 +243,13 @@ def billed(thread=None, since=None, until=None):
     """Sum the `hours` side, each entry rounded to the cent as the statement
     and `hours report` do, so all three agree exactly."""
     out = {}
-    want = None
-    if thread:
-        kind, name, _ = V.resolve_target(thread)
-        want = V.thread_ref(kind, name)
-    for _, ref, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
-        if want and ref != want:
-            continue
-        if not e.get('startTime') or not e.get('endTime'):
-            continue
+    for _, ref, e in H.collect(thread, since, until):
         # Unbilled time carries no currency and can never be charged for, so
         # it has no place on a statement of account.
-        if not e.get('currency'):
+        if not e.get('endTime') or not e.get('currency'):
             continue
-        day = V.local(e['startTime']).strftime('%Y-%m-%d')
-        if not V.in_window(day, since, until):
-            continue
-        mins = V.minutes_of(e)
-        amt = S.charge_of(mins, e.get('rate', 0) or 0)
-        out.setdefault((ref, e.get('currency', '')), V.dec(0))
-        out[(ref, e.get('currency', ''))] += amt
+        key = (ref, e['currency'])
+        out[key] = out.get(key, V.dec(0)) + H.money_of(e)
     return out
 
 

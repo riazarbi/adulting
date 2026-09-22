@@ -94,7 +94,7 @@ def test_ingest_returns_what_it_did_and_prints_nothing(tasks_home, capsys):
     ingested, failed = T.ingest()
     [(uuid, where, body, line)] = ingested
     assert (where, body) == (f"{note}:6", "Draft it")
-    assert line == f"TASK: (Riaz Arbi) Draft it <!--{uuid} entry:{T.today_iso()}-->  "
+    assert line == f"TASK: (Riaz Arbi) Draft it <!--{uuid} entry:{T.V.today()}-->  "
     assert failed == [(f"{note}:7", ["missing description"])]
     assert note.read_text().split("\n")[5] == line
     assert capsys.readouterr() == ("", "")

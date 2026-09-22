@@ -102,36 +102,15 @@ def add_window_flags(parser):
 # ---------- config ----------
 
 def read_config():
-    """Minimal one-level-nested YAML reader for .adulting/config.yaml.
-
-    Understands sections with two-space-indented scalar children:
+    """.adulting/config.yaml, read with the frontmatter parser: top-level
+    scalars, and sections of two-space-indented scalars such as
         hours:
           rate: 2500
-          minutes: 60
     """
-    cfg = {}
     config = vault_home() / '.adulting' / 'config.yaml'
     if not config.exists():
-        return cfg
-    section = None
-    for line in config.read_text(encoding='utf-8').split('\n'):
-        if not line.strip() or line.lstrip().startswith('#'):
-            continue
-        m = re.match(r'^(\s*)([A-Za-z_][\w-]*):\s*(.*?)\s*$', line)
-        if not m:
-            continue
-        indent, key, val = len(m.group(1)), m.group(2), m.group(3)
-        val = val.strip().strip('"').strip("'")
-        if indent == 0:
-            if val == '':
-                section = key
-                cfg.setdefault(key, {})
-            else:
-                section = None
-                cfg[key] = val
-        elif section:
-            cfg[section][key] = val
-    return cfg
+        return {}
+    return parse_block(config.read_text(encoding='utf-8').split('\n'))
 
 
 def config_default(section, key, fallback):
@@ -146,61 +125,73 @@ def config_default(section, key, fallback):
 
 # ---------- frontmatter ----------
 
-def parse_frontmatter(text):
-    """Return (dict, index of first body line)."""
-    fm = {}
-    lines = text.split('\n')
-    if not lines or lines[0].strip() != '---':
-        return fm, 0
-    for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == '---':
-            return fm, i + 1
-        m = re.match(r'^([a-z_]+):\s*(.*?)\s*$', line)
-        if m:
-            fm[m.group(1)] = m.group(2).strip().strip('"').strip("'")
-    return fm, 0
+KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*?)\s*$')
 
 
-def read_frontmatter(path):
-    """The scalar frontmatter of a file, by path. Used by `threads` and
-    `people`, whose files carry no list fields."""
-    return parse_frontmatter(path.read_text(encoding='utf-8'))[0]
+def unquote(value):
+    return value.strip().strip('"').strip("'")
+
+
+def parse_block(lines):
+    """The small YAML subset the vault uses, from frontmatter or config.yaml.
+
+    Values are strings with their quotes removed. A bare `key:` is an empty
+    string, unless indented lines follow it: `  - item` lines make it a list,
+    and a list item that is itself `k: v` starts a mapping that deeper
+    `k: v` lines continue (a `cadences:` entry); plain `  k: v` lines make it
+    a mapping (a config section). Blank lines and `#` comments are skipped.
+    """
+    out = {}
+    key = None      # the top-level key indented lines belong to
+    item = None     # the mapping list item being filled in
+    for line in lines:
+        text = line.strip()
+        if not text or text.startswith('#'):
+            continue
+        if not line[0].isspace():
+            m = KEY_RE.match(text)
+            key, item = (m.group(1), None) if m else (None, None)
+            if m:
+                out[key] = unquote(m.group(2))
+            continue
+        if key is None:
+            continue
+        if text.startswith('- '):
+            value = text[2:].strip()
+            if out[key] == '':
+                out[key] = []
+            if not isinstance(out[key], list):
+                continue
+            m = KEY_RE.match(value) if value[:1] not in ('"', "'") else None
+            item = {m.group(1): unquote(m.group(2))} if m else None
+            out[key].append(item if m else unquote(value))
+            continue
+        m = KEY_RE.match(text)
+        if not m:
+            continue
+        if item is not None:
+            item[m.group(1)] = unquote(m.group(2))
+        else:
+            if out[key] == '':
+                out[key] = {}
+            if isinstance(out[key], dict):
+                out[key][m.group(1)] = unquote(m.group(2))
+    return out
 
 
 def parse_frontmatter_doc(text):
-    """Return (frontmatter, body) for a note or log.
-
-    Unlike parse_frontmatter, which returns scalars and a line index, this
-    understands the block-list form notes use for `threads:` and `people:`,
-    and hands back the body as text. List values come back as lists; scalars
-    as strings. Wikilinks are left as written — call unwiki() on them.
-    """
+    """Return (frontmatter, body) for any vault file. The frontmatter is the
+    block between a first-line `---` and the next `---`, read by
+    parse_block; the body is the text after it. With no closing `---`, every
+    line is read and the whole text is the body. Wikilinks are left as
+    written — call unwiki() on them."""
     lines = text.split('\n')
     if not lines or lines[0].strip() != '---':
         return {}, text
-    fm = {}
-    key = None
-    end = 0
-    for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == '---':
-            end = i + 1
-            break
-        if (line.startswith(' ') or line.startswith('\t')) and key:
-            stripped = line.lstrip()
-            if stripped.startswith('- '):
-                val = stripped[2:].strip().strip('"').strip("'")
-                fm.setdefault(key, [])
-                if isinstance(fm[key], list):
-                    fm[key].append(val)
-            continue
-        m = re.match(r'^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*?)\s*$', line)
-        if m:
-            key = m.group(1)
-            val = m.group(2).strip().strip('"').strip("'")
-            fm[key] = val if val else []
-        else:
-            key = None
-    return fm, '\n'.join(lines[end:])
+    end = next((i for i, line in enumerate(lines[1:], start=1) if line.strip() == '---'), None)
+    if end is None:
+        return parse_block(lines[1:]), text
+    return parse_block(lines[1:end]), '\n'.join(lines[end + 1:])
 
 
 def unwiki(s):
@@ -236,6 +227,39 @@ def fuzzy_score(query, name):
     if initials.startswith(q):
         return 0.6
     return difflib.SequenceMatcher(None, q, n).ratio() * 0.5
+
+
+# ---------- thread and person files ----------
+
+CATEGORIES = ['professional', 'personal', 'voluntary']
+
+
+def today():
+    return datetime.now().strftime('%Y-%m-%d')
+
+
+def file_summary(path):
+    """What `threads list` and `people list` show of a file."""
+    fm = parse_frontmatter_doc(path.read_text(encoding='utf-8'))[0]
+    return {'path': str(path.relative_to(vault_home())),
+            'status': fm.get('status', ''), 'category': fm.get('category', ''),
+            'started': fm.get('started', ''), 'ended': fm.get('ended', '')}
+
+
+def file_json(path, **identity):
+    """What `threads show --json` and `people show --json` print: who it is,
+    where it is, and all of its frontmatter."""
+    fm = parse_frontmatter_doc(path.read_text(encoding='utf-8'))[0]
+    return json.dumps({**identity, 'path': str(path.relative_to(vault_home())), **fm}, indent=2)
+
+
+def rank_by_query(rows, query, *keys):
+    """The rows that look like `query`, best first. Each row scores its best
+    match over the given keys; a score of 0.3 or less is no match."""
+    scored = [(max(fuzzy_score(query, r[k]) for k in keys), r) for r in rows]
+    scored = [(s, r) for s, r in scored if s > 0.3]
+    scored.sort(key=lambda x: -x[0])
+    return [r for _, r in scored]
 
 
 # ---------- thread resolution ----------
@@ -298,23 +322,31 @@ def is_thread(ref):
 
 def thread_meta(path):
     """(currency, rate) from a thread file's frontmatter; either may be None."""
-    fm, _ = parse_frontmatter(path.read_text(encoding='utf-8'))
+    fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
     rate = fm.get('rate')
     try:
         rate = int(rate) if rate not in (None, '') else None
-    except ValueError:
+    except (TypeError, ValueError):
         rate = None
     return fm.get('currency') or None, rate
 
 
-def resolve_target(thread_arg, fold_case=False):
-    try:
-        match = resolve_thread(thread_arg, fold_case=fold_case)
-    except ValueError as e:
-        die(f"{e}")
+def find_thread(thread_arg, fold_case=False):
+    """(kind, name, path) for a thread given as a name, `Kind/Name` or
+    wikilink. Raises ValueError if it names no thread, or threads of two
+    kinds."""
+    match = resolve_thread(thread_arg, fold_case=fold_case)
     if not match:
-        die(f"thread {thread_arg!r} does not resolve to a thread file")
+        raise ValueError(f"thread {thread_arg!r} does not resolve to a thread file")
     return match
+
+
+def resolve_target(thread_arg, fold_case=False):
+    """find_thread for a command: stop with the error if there is one."""
+    try:
+        return find_thread(thread_arg, fold_case)
+    except ValueError as e:
+        die(str(e))
 
 
 def resolve_currency(tpath, ref, flag):
@@ -324,10 +356,7 @@ def resolve_currency(tpath, ref, flag):
         die(f"thread {ref!r} has no currency\n"
             f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
             f"or pass --currency")
-    currency = currency.upper()
-    if not is_currency_code(currency):
-        die(f"currency {currency!r} is not a 3-letter ISO code")
-    return currency
+    return check_currency(currency)
 
 
 # ---------- billing parties ----------
@@ -372,7 +401,7 @@ def banking():
 
 def client(tpath):
     """Who is being billed, from the thread's frontmatter."""
-    fm, _ = parse_frontmatter(tpath.read_text(encoding='utf-8'))
+    fm, _ = parse_frontmatter_doc(tpath.read_text(encoding='utf-8'))
     return {
         'name': fm.get('client_name') or '',
         'lines': lines_of(fm.get('client_address')),
@@ -460,7 +489,7 @@ def record_files(subdir):
 def load_all(subdir, fence, key='entries'):
     """Yield (path, thread_ref, record) for every record in a subdir."""
     for path in record_files(subdir):
-        fm, _ = parse_frontmatter(path.read_text(encoding='utf-8'))
+        fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
         ref = unwiki(fm.get('thread', '')) or path.stem
         for r in read_records(path, fence, key):
             yield path, ref, r
@@ -578,6 +607,15 @@ def in_window(day, since, until):
 
 def is_currency_code(code):
     return bool(re.match(r'^[A-Z]{3}$', code))
+
+
+def check_currency(raw):
+    """A currency as typed, upper-cased, or stop: it must be a 3-letter ISO
+    code such as ZAR."""
+    code = raw.strip().upper()
+    if not is_currency_code(code):
+        die(f"currency {code!r} is not a 3-letter ISO code")
+    return code
 
 
 def when_from_flags(date_s, time_s):

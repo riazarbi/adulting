@@ -282,9 +282,8 @@ def apply_filters(records, thread=None, type_=None, since=None, until=None,
             continue
         if want_type and r['type'].lower() != want_type:
             continue
-        if since and (not r['date'] or r['date'] < since):
-            continue
-        if until and (not r['date'] or r['date'] > until):
+        # With a window, an undated record is outside it.
+        if (since or until) and not (r['date'] and V.in_window(r['date'], since, until)):
             continue
         if needle:
             hay = f"{r['topic']}\n{r['body']}".lower()
@@ -511,9 +510,7 @@ def cmd_stream(args):
         # Compare whole names: `Processes/SGB` must not match `Processes/SGB Extra`.
         if thread and thread not in e['thread'].split(', '):
             continue
-        if not e['date'] or e['date'] < since:
-            continue
-        if until and e['date'] > until:
+        if not e['date'] or not V.in_window(e['date'], since, until):
             continue
         if needle and needle not in f"{e['thread']} {e['summary']}".lower():
             continue

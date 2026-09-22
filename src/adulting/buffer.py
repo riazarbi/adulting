@@ -94,14 +94,10 @@ def stamp(date=None):
     return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
 
 
-def canonical_thread(arg, message):
+def canonical_thread(arg):
     """The canonical `Kind/Name` for a thread given as a name, `Kind/Name` or
-    wikilink. Raises ValueError with `message` if it does not resolve, or
-    with the ambiguity if it names threads of two kinds."""
-    match = V.resolve_thread(arg.strip())
-    if not match:
-        raise ValueError(message)
-    kind, name, _ = match
+    wikilink. Raises ValueError if it does not resolve."""
+    kind, name, _ = V.find_thread(arg.strip())
     return V.thread_ref(kind, name)
 
 
@@ -200,9 +196,7 @@ def buffer_unknown(text):
 
 
 def buffer_text(thread, text):
-    thread = canonical_thread(
-        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md "
-                f"(expected Projects/X, Processes/X, or Topics/X)")
+    thread = canonical_thread(thread)
     text = text.strip()
     if not text:
         raise ValueError("text is empty")
@@ -212,8 +206,7 @@ def buffer_text(thread, text):
 
 
 def buffer_ref(thread, target, summary, date=None):
-    thread = canonical_thread(
-        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
+    thread = canonical_thread(thread)
     target = target.strip()
     summary = (summary or '').strip()
     if not ref_target_resolves(target):
@@ -226,8 +219,7 @@ def buffer_ref(thread, target, summary, date=None):
 
 
 def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends=None):
-    thread = canonical_thread(
-        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
+    thread = canonical_thread(thread)
     text = text.strip()
     if not text:
         raise ValueError("description is empty")

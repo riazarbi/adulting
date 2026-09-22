@@ -9,23 +9,13 @@ action `assignee:`. They are not threads — they cannot be the value of
 
 import json
 import sys
-from datetime import datetime
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting.vault import vault_home
 
-CATEGORIES = ['professional', 'personal', 'voluntary']
-
-
-
-
 def people_dir():
     return vault_home() / 'people'
-
-
-def today():
-    return datetime.now().strftime('%Y-%m-%d')
 
 
 def discover_people():
@@ -48,7 +38,7 @@ def cmd_new(args):
     if path.exists():
         V.die(f"already exists: {path}")
     path.write_text(
-        f"---\nstatus: open\ncategory: {args.category}\nstarted: {today()}\n---\n\n# {name}\n",
+        f"---\nstatus: open\ncategory: {args.category}\nstarted: {V.today()}\n---\n\n# {name}\n",
         encoding='utf-8',
     )
     print(f"created: {path}")
@@ -82,30 +72,14 @@ def cmd_delete(args):
 def cmd_list(args):
     rows = []
     for name, path in discover_people():
-        fm = V.read_frontmatter(path)
-        rows.append({
-            'name': name,
-            'person': f"people/{name}",  # resolvable wikilink-form
-            'path': str(path.relative_to(vault_home())),
-            'status': fm.get('status', ''),
-            'category': fm.get('category', ''),
-            'started': fm.get('started', ''),
-            'ended': fm.get('ended', ''),
-        })
+        # `person` is the resolvable wikilink form.
+        rows.append({'name': name, 'person': f"people/{name}", **V.file_summary(path)})
 
     if not args.all:
         rows = [r for r in rows if r['status'] == 'open']
 
     if args.query:
-        # Match against both bare name and people/Name; take the better score.
-        scored = [
-            (max(V.fuzzy_score(args.query, r['name']),
-                 V.fuzzy_score(args.query, r['person'])), r)
-            for r in rows
-        ]
-        scored = [(s, r) for s, r in scored if s > 0.3]
-        scored.sort(key=lambda x: -x[0])
-        rows = [r for _, r in scored]
+        rows = V.rank_by_query(rows, args.query, 'name', 'person')
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -126,12 +100,7 @@ def cmd_show(args):
     if not V.person_exists(name):
         V.die(f"not found: {path}")
     if args.json:
-        fm = V.read_frontmatter(path)
-        print(json.dumps({
-            'name': path.stem,
-            'path': str(path.relative_to(vault_home())),
-            **fm,
-        }, indent=2))
+        print(V.file_json(path, name=path.stem))
     else:
         sys.stdout.write(path.read_text(encoding='utf-8'))
     return 0
@@ -156,7 +125,7 @@ def main():
 
     p_new = sub.add_parser('new', help="Create a person file.")
     p_new.add_argument('--name', required=True, help="Full name; becomes the filename.")
-    p_new.add_argument('--category', required=True, choices=CATEGORIES,
+    p_new.add_argument('--category', required=True, choices=V.CATEGORIES,
                        help="Relationship category.")
     p_new.set_defaults(func=cmd_new)
 

@@ -89,10 +89,7 @@ def resolve_billing(tpath, currency_flag, rate_flag):
                   f"  pass --currency, or set `currency:` on the thread; "
                   f"omit --rate to log the time as unbilled")
         return None, 0
-    currency = currency.upper()
-    if not V.is_currency_code(currency):
-        V.die(f"currency {currency!r} is not a 3-letter ISO code")
-    return currency, resolve_rate(tpath, rate_flag)
+    return V.check_currency(currency), resolve_rate(tpath, rate_flag)
 
 
 def build_entry(desc, when, minutes, rate, currency, ids):
@@ -292,10 +289,7 @@ def cmd_edit(args):
     if args.rate is not None:
         target['rate'] = int(args.rate)
     if args.currency is not None:
-        ccy = args.currency.upper()
-        if not V.is_currency_code(ccy):
-            V.die(f"currency {ccy!r} is not a 3-letter ISO code")
-        target['currency'] = ccy
+        target['currency'] = V.check_currency(args.currency)
     # As in `log`: a rate is money, and money needs a currency. The entry
     # may have been broken before this edit, so say which field is at fault.
     if target.get('rate') and not target.get('currency'):

@@ -83,7 +83,7 @@ def test_show_json_resolves_every_reference_form(threads_vault, ref):
 def test_show_not_found(threads_vault, ref):
     r = threads(threads_vault, "show", ref)
     assert r.returncode == 1
-    assert r.stderr == f"threads: error: not found: {ref}\n"
+    assert r.stderr == f"threads: error: thread {ref!r} does not resolve to a thread file\n"
 
 
 def test_bare_name_in_two_kinds_is_ambiguous(threads_vault):
@@ -167,7 +167,7 @@ def test_delete_with_yes(threads_vault):
 
 
 def test_delete_not_found_and_ambiguous(threads_vault):
-    assert threads(threads_vault, "delete", "Nope", "-y").stderr == "threads: error: not found: Nope\n"
+    assert threads(threads_vault, "delete", "Nope", "-y").stderr == "threads: error: thread 'Nope' does not resolve to a thread file\n"
     threads_vault.write_thread("Topics", "SGB")
     r = threads(threads_vault, "delete", "SGB", "-y")
     assert r.returncode == 1

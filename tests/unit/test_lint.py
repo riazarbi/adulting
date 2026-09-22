@@ -202,12 +202,12 @@ def test_cross_check_record_ids_points_each_duplicate_at_the_others():
 
 
 @pytest.mark.parametrize("validate, fence, key, label, block, json_name", [
-    (L.validate_hours_block, "```simple-time-tracker", "entries", "hours_file", "tracker", "tracker JSON"),
-    (L.validate_payments_block, "```adulting-payments", "payments", "payments_file", "payments", "JSON"),
+    ("hours_file", "```simple-time-tracker", "entries", "hours_file", "tracker", "tracker JSON"),
+    ("payments_file", "```adulting-payments", "payments", "payments_file", "payments", "JSON"),
 ])
 def test_record_block_shape_errors(validate, fence, key, label, block, json_name):
     def errors(body):
-        return list(validate(body, Path("f.md")))
+        return list(L.validate_record_block(body, Path("f.md"), validate))
 
     try:
         json.loads("{")

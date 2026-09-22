@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review round 2, part R-B: the rest of the deduplication
+
+R-B1 and R-B3 went in with R-A.
+
+- **R-B2: one frontmatter parser.**
+  - `vault.parse_block` reads the small YAML subset the vault uses: scalars, block lists, lists of mappings, and one level of nested mapping. `parse_frontmatter_doc` and `read_config` both use it.
+  - `parse_frontmatter` and `read_frontmatter` are gone. (`lint`'s own schema parser is separate, as the story records.)
+  - **Visible change:** `people show --json` and `threads show --json` now list a file's `cadences` as `{key, frequency, description}` entries; they used to print `"cadences": ""`. That affects 13 people in the vault copy.
+  - An empty field is `""` everywhere.
+- **R-B4: `vault.check_currency`** replaces five copies of "upper-case it, or stop if it is not a 3-letter ISO code".
+- **R-B5:**
+  - `payments.billed` walks the hours records through `hours.collect` and `hours.money_of`. `search`'s two remaining hand-written date windows use `vault.in_window`.
+  - `lint`'s two ~35-line record-block validators are one `validate_record_block(text, path, label)`, driven by a table of the two kinds. `read_block` takes the label alone.
+  - "Resolve a thread or stop" is one `vault.find_thread`, which raises, and `resolve_target`, which dies.
+  - **Visible change:** `buffer` and `threads` now say `thread 'X' does not resolve to a thread file` like every other command. They used to say `does not resolve to threads/<Kind>/<Name>.md (expected …)` and `not found: X`.
+  - `people` and `threads` share `vault.CATEGORIES`, `today()`, `file_summary`, `file_json` and `rank_by_query`. `tasks.today_iso` became `V.today`.
+- **Verified on the vault copy:** thread and person lists and every `show --json`, hours, payments, search, tasks and lint are identical before and after, apart from the two visible changes above. **752 passing.**
+
 ## 2026-09-22 - review round 2, part R-A: the bugs (with R-B1 and R-B3)
 
 Each fix has a test written to fail first.

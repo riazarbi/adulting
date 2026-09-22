@@ -8,7 +8,7 @@ Minutes and PDF action tables listed completed actions (`DONE:`, `- [x]`) alongs
 
 - **A Status column**, `Open` for `ACTION:`, `TASK:` and `- [ ]`, `Done` for `DONE:` and `- [x]`. The heading row is `| Assignee | Task | Status |`, and the empty minutes row becomes `| None | None | None |`. The same task open and done in one note is listed both ways, so nothing is hidden.
 - **Tests:** a unit test covers every action form and the both-ways case, another covers the table in `pdf` and `minutes`, and deferred bug 2's pin gains the column. All three failed before the change. Seven fixture expected files changed, and a script confirmed that every changed line is an action-table line.
-- **Verified on the vault copy:** all 348 renders still match the old output except that 109 differ, and in each of those only action-table lines changed. PDF outcomes are unchanged. **689 passing.**
+- **Verified on the vault copy:** all 348 renders still match the old output except that 109 differ, and in each of those only action-table lines changed. PDF outcomes are unchanged. **686 passing.**
 
 ## 2026-09-22 - review fixes, part A: the bugs
 

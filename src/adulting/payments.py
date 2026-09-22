@@ -23,12 +23,14 @@ buffer can be written.
 import argparse
 import json
 import sys
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting import buffer as B
 from adulting import vault as V
 from adulting import statement as S
+from adulting import statement_pdf as P
 
 SUBDIR = 'payments'
 FENCE = V.PAYMENTS_FENCE
@@ -39,7 +41,9 @@ KEY = 'payments'
 HOURS_SUBDIR = 'hours'
 HOURS_FENCE = V.HOURS_FENCE
 
-BY_RECEIVED = lambda p: p.get('received') or ''  # noqa: E731
+
+def by_received(p):
+    return p.get('received') or ''
 
 
 # ---------- amounts ----------
@@ -79,7 +83,7 @@ def build_payment(amount, received, currency, account, note, ids):
 
 def save(path, records, ref, currency):
     V.write_records(path, records, FENCE, ref, currency, key=KEY,
-                    sort_key=BY_RECEIVED, heading=HEADING)
+                    sort_key=by_received, heading=HEADING)
 
 
 def append_payment(kind, name, payment):
@@ -266,9 +270,7 @@ def billed(thread=None, since=None, until=None):
 
 
 def _as_of(raw):
-    from datetime import datetime
     if not raw:
-        from datetime import date
         return date.today()
     try:
         return datetime.strptime(raw, '%Y-%m-%d').date()
@@ -312,7 +314,6 @@ def one_thread_statement(thread_arg, as_of):
 
 def cmd_pdf(args):
     """A statement document is per client, so --pdf needs exactly one thread."""
-    from adulting import statement_pdf as P
     st = one_thread_statement(args.thread, _as_of(args.as_of))
     if not st['lines']:
         V.die(f"nothing to state for {st['thread']!r} as at {st['as_of']}")

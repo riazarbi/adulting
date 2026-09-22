@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part C8: small tidy-ups
+
+- **Imports at the top of the file.** Moved: `json` in `search` (three copies), `math` and `argparse` in `suggester`, `datetime` in `payments._as_of`, `statement_pdf` in `payments`, and `suggester` in `buffer`. The two left inside functions, `buffer` → `tasks` and `tasks` → `buffer`, are there because each module imports the other, and a comment now says so.
+- **`hours.BY_START` and `payments.BY_RECEIVED`** were lambdas with a lint exemption; they are now plain functions, `by_start` and `by_received`.
+- **`search`:** the statements joined by semicolons in `activity` are one per line, a trailing-whitespace line is gone, and `r['date'] or '?'.ljust(10)` is now `(r['date'] or '?').ljust(10)`. That is the same output, since a date is always ten characters, but it now reads the way it runs. `suggester`'s own `main` names its parser `parser`.
+- **Verified on the vault copy:** `search` overview/activity/notes/logs/stream, `payments` statement (with and without `--thread` and `--as-of`) and list, `hours` list and edit, and `buffer suggest -y` give identical output before and after. **680 passing.**
+
 ## 2026-09-22 - review fixes, parts C2 and C3: one main() shape, help for every argument
 
 - **Every command has the same `main()`:** it builds a parser named `parser`, with subcommands under `dest='subcommand'`, and ends `return args.func(args)` under `sys.exit(main())`. `notes`, `commit`, `hours`, `payments`, `people`, `search` and `threads` used to drop the result, and `lint` exited from inside `main`. Every `cmd_*` now returns an int: 56 bare or missing returns became `return 0`. Exit codes are unchanged, because None already exited 0.

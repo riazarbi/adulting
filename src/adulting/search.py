@@ -28,6 +28,7 @@ the frontmatter date is missing or malformed.
 """
 
 import argparse
+import json
 import re
 import sys
 from collections import defaultdict
@@ -345,7 +346,6 @@ def window_default(since, until):
 
 def emit(rows, as_json, render):
     if as_json:
-        import json
         print(json.dumps(rows, indent=2))
         return
     if not rows:
@@ -357,7 +357,7 @@ def emit(rows, as_json, render):
 def render_docs(rows):
     width = max(len(r['path']) for r in rows)
     for r in rows:
-        parts = [r['path'].ljust(width), r['date'] or '?'.ljust(10)]
+        parts = [r['path'].ljust(width), (r['date'] or '?').ljust(10)]
         if r['kind'] == 'note':
             parts += [r['type'] or '-', ', '.join(r['threads']) or '-', r['topic']]
         else:
@@ -399,17 +399,20 @@ def cmd_activity(args):
                                'minutes': 0, 'last': ''})
     for r in notes:
         for t in r['threads']:
-            a = agg[t]; a['notes'] += 1; a['last'] = max(a['last'], r['date'])
+            a = agg[t]
+            a['notes'] += 1
+            a['last'] = max(a['last'], r['date'])
     for r in logs:
         for t in r['threads']:
             a = agg[t]
-            a['logs'] += 1; a['entries'] += r['entries']
+            a['logs'] += 1
+            a['entries'] += r['entries']
             a['last'] = max(a['last'], r['date'])
     for ref, m in mins.items():
         if thread and ref != thread:
             continue
         agg[ref]['minutes'] += m
-        
+
     rows = [{'thread': t, **v} for t, v in agg.items()]
     rows.sort(key=lambda r: (r['notes'] + r['logs'], r['minutes'], r['last']),
               reverse=True)
@@ -477,7 +480,6 @@ def cmd_overview(args):
                       f"{r['type'] or '-'}  {label}")
 
     if args.json:
-        import json
         print(json.dumps(data, indent=2))
     else:
         render(None)
@@ -528,7 +530,6 @@ def cmd_stream(args):
         rows = rows[:args.limit]
 
     if args.json:
-        import json
         print(json.dumps(rows, indent=2))
         return 0
     if not rows:

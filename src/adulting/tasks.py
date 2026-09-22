@@ -342,7 +342,7 @@ def ingest(dry_run=False, quiet=False):
 def cmd_add(args):
     """`tasks add` is `buffer add-action` under another name: the ACTION is
     buffered, and becomes a task on the next flush and ingest."""
-    from adulting import buffer
+    from adulting import buffer  # here, not at the top: buffer imports tasks
     return buffer.buffer_action(args.thread, args.text, args.due,
                                 args.scheduled, args.priority, args.depends)
 

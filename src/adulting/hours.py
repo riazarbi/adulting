@@ -52,7 +52,9 @@ HEADING = ' — hours'
 DEFAULT_MINUTES = 60
 DEFAULT_RATE = 2500
 
-BY_START = lambda e: e.get('startTime') or ''  # noqa: E731
+
+def by_start(e):
+    return e.get('startTime') or ''
 
 
 # ---------- entries ----------
@@ -111,7 +113,7 @@ def build_entry(desc, when, minutes, rate, currency, ids):
 
 def save(path, entries, ref, currency):
     V.write_records(path, entries, FENCE, ref, currency,
-                    sort_key=BY_START, heading=HEADING)
+                    sort_key=by_start, heading=HEADING)
 
 
 def append_entry(kind, name, entry):

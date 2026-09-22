@@ -51,6 +51,7 @@ from datetime import datetime
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
+from adulting.suggester import suggest
 from adulting.vault import vault_home
 
 
@@ -573,7 +574,7 @@ def cmd_flush(args):
     # operator or agent can read the new uuid prefixes off the summary lines.
     # The buffer is already cleared, so a failure here must not fail the
     # flush: the entries are safe in the logs and `tasks` can be re-run.
-    from adulting import tasks
+    from adulting import tasks  # here, not at the top: tasks imports buffer
     try:
         tasks.ingest()
     except (Exception, SystemExit) as e:  # noqa: BLE001
@@ -626,7 +627,6 @@ def dispatch_proposal(proposal, raw_text):
 def cmd_suggest(args):
     """Propose a structured `buffer add-*` for raw text. With -y, run it;
     without, store the raw text as UNKNOWN. Never prompts."""
-    from adulting.suggester import suggest
     proposal = suggest(args.text)
     if proposal['subcmd'] == 'add':
         if not args.quiet:

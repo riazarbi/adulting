@@ -13,7 +13,9 @@ answer, the whole suggestion collapses to UNKNOWN (`add`) rather than
 guessing. Rejection is free downstream, so we prefer to bail than mislead.
 """
 
+import argparse
 import json
+import math
 import re
 import sys
 from datetime import date, timedelta
@@ -363,7 +365,6 @@ def rank_threads(text, thread_index, df, person_matches=(), lengths=None):
     (treated as an extra "free" hit) — pins the thread when an unambiguous
     person name appears in the input.
     """
-    import math
     tokens = _tokenize(text)
     if not tokens:
         return []
@@ -592,11 +593,10 @@ def suggest(raw_text, today=None, threads=None, people=None, thread_index=None, 
 # ---------- CLI ----------
 
 def main():
-    import argparse
-    p = argparse.ArgumentParser(description="Rules-only capture suggester.")
-    p.add_argument('text', help="Raw capture string.")
-    p.add_argument('--today', help="Override today's date (YYYY-MM-DD).")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="Rules-only capture suggester.")
+    parser.add_argument('text', help="Raw capture string.")
+    parser.add_argument('--today', help="Override today's date (YYYY-MM-DD).")
+    args = parser.parse_args()
     today = date.fromisoformat(args.today) if args.today else date.today()
     out = suggest(args.text, today=today)
     json.dump(out, sys.stdout, indent=2)

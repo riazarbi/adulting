@@ -192,3 +192,32 @@ def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, logged):
 def test_help_no_longer_mentions_interactive_mode(vault):
     for argv in (["--help"], ["log", "--help"]):
         assert "interactive" not in hours(vault, *argv).stdout.lower()
+
+
+def stored(vault, entry_id):
+    """The entry as it sits in the hours file."""
+    for kind in ("Projects", "Processes", "Topics"):
+        for f in (vault.home / "hours" / kind).glob("*.md"):
+            for e in vault.entries(kind, f.stem):
+                if e["id"] == entry_id:
+                    return e
+
+
+def test_edit_refuses_a_rate_on_unbilled_time_as_log_does(v, logged):
+    unbilled = logged[2]
+    before = stored(v, unbilled)
+    r = hours(v, "edit", unbilled, "--rate", "900")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "hours: --rate needs a currency; pass --currency as well\n"
+    assert stored(v, unbilled) == before
+    r = hours(v, "edit", unbilled, "--rate", "900", "-c", "usd")
+    assert r.returncode == 0, r.stderr
+    assert (stored(v, unbilled)["rate"], stored(v, unbilled)["currency"]) == (900, "USD")
+
+
+@pytest.mark.parametrize("words", [[], ["  "]])
+def test_edit_refuses_an_empty_description_as_log_does(v, logged, words):
+    before = stored(v, logged[0])
+    r = hours(v, "edit", logged[0], "--description", *words)
+    assert (r.returncode, r.stdout, r.stderr) == (1, "", "hours: empty description\n")
+    assert stored(v, logged[0]) == before

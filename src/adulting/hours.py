@@ -298,6 +298,8 @@ def cmd_edit(args):
 
     if args.description is not None:
         target['name'] = ' '.join(args.description).strip()
+        if not target['name']:
+            sys.exit(f"{TOOL}: empty description")
     if args.rate is not None:
         target['rate'] = int(args.rate)
     if args.currency is not None:
@@ -305,6 +307,9 @@ def cmd_edit(args):
         if not re.match(r'^[A-Z]{3}$', ccy):
             sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
+    # As in `log`: a rate is money, and money needs a currency.
+    if target.get('rate') and not target.get('currency'):
+        sys.exit(f"{TOOL}: --rate needs a currency; pass --currency as well")
 
     if args.date or args.time:
         start = V.local(target['startTime'])

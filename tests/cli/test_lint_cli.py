@@ -71,7 +71,7 @@ def test_an_empty_schemas_dir_is_a_tool_failure(vault, tmp_path):
     empty.mkdir()
     r = lint(vault, "--schemas", str(empty))
     assert r.returncode == 2
-    assert r.stderr == f"no schemas loaded from {empty}\n"
+    assert r.stderr == f"lint: error: no schemas loaded from {empty}\n"
 
 
 def test_schemas_flag_uses_another_directory(vault, tmp_path):

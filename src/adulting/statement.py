@@ -7,11 +7,12 @@ printed total.
 
 Ported from a standalone renderer that read the retired task_logging CSVs. The
 arithmetic and its self-checks are that code's; the shape follows this repo —
-plain functions over dicts, no annotations, `sys.exit` on bad data.
+plain functions over dicts, no annotations, `vault.die` on bad data.
 """
 
-import sys
 from decimal import Decimal
+
+from adulting import vault as V
 
 CENT = Decimal('0.01')
 AGING_BUCKETS = ('current', '30', '60', '90+')
@@ -146,11 +147,11 @@ def check(statement):
     """
     lines = statement['lines']
     if lines and lines[-1]['balance'] != statement['balance']:
-        sys.exit(f"statement: closing line {lines[-1]['balance']} "
-                 f"!= balance {statement['balance']}")
+        V.die(f"statement check failed: closing line {lines[-1]['balance']} "
+              f"!= balance {statement['balance']}")
     aged = sum(statement['aging'].values(), Decimal('0.00'))
     if aged != statement['balance']:
-        sys.exit(f"statement: aging {aged} != balance {statement['balance']}")
+        V.die(f"statement check failed: aging {aged} != balance {statement['balance']}")
     charged = sum((ln['charge'] or Decimal('0.00') for ln in lines), Decimal('0.00'))
     if charged != statement['charges']:
-        sys.exit(f"statement: lines charge {charged} != charges {statement['charges']}")
+        V.die(f"statement check failed: lines charge {charged} != charges {statement['charges']}")

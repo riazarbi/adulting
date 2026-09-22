@@ -212,7 +212,26 @@ def test_to_iso_and_from_iso_round_trip():
 
 
 def test_when_from_flags_combines_date_and_time():
-    assert V.when_from_flags("hours", "2026-09-10", "14:30") == datetime(2026, 9, 10, 14, 30)
+    assert V.when_from_flags("2026-09-10", "14:30") == datetime(2026, 9, 10, 14, 30)
+
+
+# ---------- errors ----------
+
+def test_die_names_the_running_command_as_argparse_does(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["/some/bin/hours", "log"])
+    with pytest.raises(SystemExit) as exc:
+        V.die("empty description")
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == "hours: error: empty description\n"
+    with pytest.raises(SystemExit) as exc:
+        V.die("no schemas", code=2)
+    assert exc.value.code == 2
+
+
+def test_warn_names_the_command_and_carries_on(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["/some/bin/payments"])
+    V.warn("banking details incomplete")
+    assert capsys.readouterr() == ("", "payments: warning: banking details incomplete\n")
 
 
 # ---------- money and duration ----------

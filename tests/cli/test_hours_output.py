@@ -64,11 +64,11 @@ def test_log_lines(v):
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["SANA", ""], "hours: empty description\n"),
-    (["SANA", "x", "-m", "0"], "hours: --minutes must be positive\n"),
-    (["SANA", "x", "-d", "4 Aug"], "hours: bad --date '4 Aug'; expected YYYY-MM-DD\n"),
-    (["SANA", "x", "-t", "9am"], "hours: bad --time '9am'; expected HH:MM\n"),
-    (["Nope", "x"], "hours: thread 'Nope' does not resolve to a thread file\n"),
+    (["SANA", ""], "hours: error: empty description\n"),
+    (["SANA", "x", "-m", "0"], "hours: error: --minutes must be positive\n"),
+    (["SANA", "x", "-d", "4 Aug"], "hours: error: bad --date '4 Aug'; expected YYYY-MM-DD\n"),
+    (["SANA", "x", "-t", "9am"], "hours: error: bad --time '9am'; expected HH:MM\n"),
+    (["Nope", "x"], "hours: error: thread 'Nope' does not resolve to a thread file\n"),
 ])
 def test_log_errors_write_nothing(v, argv, message):
     r = hours(v, "log", *argv)
@@ -93,7 +93,7 @@ def test_list_filters_and_empty(v, logged):
                            "--json").stdout)
     assert [r["description"] for r in rows] == ["Board prep"]
     r = hours(v, "list", "Nope")
-    assert (r.returncode, r.stderr) == (1, "hours: thread 'Nope' does not resolve to a thread file\n")
+    assert (r.returncode, r.stderr) == (1, "hours: error: thread 'Nope' does not resolve to a thread file\n")
 
 
 def test_list_json_row(v, logged):
@@ -136,7 +136,7 @@ def test_show_text_and_missing(v, logged):
         "amount       3750.0\n"
         "description  Finance pack review\n")
     r = hours(v, "show", "deadbeef")
-    assert (r.returncode, r.stderr) == (1, "hours: no entry with id 'deadbeef'\n")
+    assert (r.returncode, r.stderr) == (1, "hours: error: no entry with id 'deadbeef'\n")
 
 
 # ---------- edit, rm ----------
@@ -150,9 +150,9 @@ def test_edit_moves_the_entry_and_keeps_its_duration(v, logged):
 
 def test_edit_errors(v, logged):
     r = hours(v, "edit", logged[0], "-c", "rands")
-    assert (r.returncode, r.stderr) == (1, "hours: currency 'RANDS' is not a 3-letter ISO code\n")
+    assert (r.returncode, r.stderr) == (1, "hours: error: currency 'RANDS' is not a 3-letter ISO code\n")
     r = hours(v, "edit", logged[0], "-m", "-5")
-    assert (r.returncode, r.stderr) == (1, "hours: --minutes must be positive\n")
+    assert (r.returncode, r.stderr) == (1, "hours: error: --minutes must be positive\n")
 
 
 def test_rm_with_yes(v, logged):
@@ -179,7 +179,7 @@ def test_log_without_a_thread_fails_instead_of_prompting(v):
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, logged):
     r = hours(v, "rm", logged[0], input="y\n")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == f"hours: refusing to delete {logged[0]} without -y\n"
+    assert r.stderr == f"hours: error: refusing to delete {logged[0]} without -y\n"
     assert len(v.entries("Projects", "SANA")) == 1
 
 
@@ -197,7 +197,7 @@ def test_edit_refuses_a_rate_on_unbilled_time_as_log_does(v, logged):
     before = stored(v, unbilled)
     r = hours(v, "edit", unbilled, "--rate", "900")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "hours: --rate needs a currency; pass --currency as well\n"
+    assert r.stderr == "hours: error: --rate needs a currency; pass --currency as well\n"
     assert stored(v, unbilled) == before
     r = hours(v, "edit", unbilled, "--rate", "900", "-c", "usd")
     assert r.returncode == 0, r.stderr
@@ -208,5 +208,5 @@ def test_edit_refuses_a_rate_on_unbilled_time_as_log_does(v, logged):
 def test_edit_refuses_an_empty_description_as_log_does(v, logged, words):
     before = stored(v, logged[0])
     r = hours(v, "edit", logged[0], "--description", *words)
-    assert (r.returncode, r.stdout, r.stderr) == (1, "", "hours: empty description\n")
+    assert (r.returncode, r.stdout, r.stderr) == (1, "", "hours: error: empty description\n")
     assert stored(v, logged[0]) == before

@@ -53,13 +53,13 @@ def test_log_lines(v):
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["SANA", "abc"], "payments: 'abc' is not a valid amount\n"),
-    (["SANA", "-5"], "payments: amount must be positive (got -5)\n"),
-    (["SANA"], "payments: amount is required\n"),
-    (["Wellness", "100"], "payments: thread 'Topics/Wellness' has no currency\n"
+    (["SANA", "abc"], "payments: error: 'abc' is not a valid amount\n"),
+    (["SANA", "-5"], "payments: error: amount must be positive (got -5)\n"),
+    (["SANA"], "payments: error: amount is required\n"),
+    (["Wellness", "100"], "payments: error: thread 'Topics/Wellness' has no currency\n"
                           "  set `currency: ZAR` in threads/Topics/Wellness.md, or pass --currency\n"),
-    (["SANA", "10", "-d", "11 July"], "payments: bad --date '11 July'; expected YYYY-MM-DD\n"),
-    (["Nope", "10"], "payments: thread 'Nope' does not resolve to a thread file\n"),
+    (["SANA", "10", "-d", "11 July"], "payments: error: bad --date '11 July'; expected YYYY-MM-DD\n"),
+    (["Nope", "10"], "payments: error: thread 'Nope' does not resolve to a thread file\n"),
 ])
 def test_log_errors_write_nothing(v, argv, message):
     r = pay(v, "log", *argv)
@@ -101,7 +101,7 @@ def test_show_text_and_missing(v, paid):
         "account    FNB Business\n"
         "note       Invoice 2026-014\n")
     r = pay(v, "show", "deadbeef")
-    assert (r.returncode, r.stderr) == (1, "payments: no payment with id 'deadbeef'\n")
+    assert (r.returncode, r.stderr) == (1, "payments: error: no payment with id 'deadbeef'\n")
 
 
 # ---------- edit, rm ----------
@@ -134,9 +134,9 @@ def test_edit_date_alone_keeps_the_time(v, paid):
 
 def test_edit_errors(v, paid):
     r = pay(v, "edit", paid[1], "-c", "pula")
-    assert (r.returncode, r.stderr) == (1, "payments: currency 'PULA' is not a 3-letter ISO code\n")
+    assert (r.returncode, r.stderr) == (1, "payments: error: currency 'PULA' is not a 3-letter ISO code\n")
     r = pay(v, "edit", paid[1], "--amount", "0")
-    assert (r.returncode, r.stderr) == (1, "payments: amount must be positive (got 0)\n")
+    assert (r.returncode, r.stderr) == (1, "payments: error: amount must be positive (got 0)\n")
 
 
 def test_rm_with_yes(v, paid):
@@ -172,7 +172,7 @@ def test_statement_rejects_a_malformed_as_of(v, paid):
     nothing, and print the whole statement. It now fails like --pdf does."""
     r = pay(v, "statement", "--as-of", "5 July")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "payments: bad --as-of '5 July'; expected YYYY-MM-DD\n"
+    assert r.stderr == "payments: error: bad --as-of '5 July'; expected YYYY-MM-DD\n"
 
 
 def test_statement_empty(v):
@@ -197,7 +197,7 @@ def test_log_without_a_thread_fails_instead_of_prompting(v):
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, paid):
     r = pay(v, "rm", paid[0], input="y\n")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == f"payments: refusing to delete {paid[0]} without -y\n"
+    assert r.stderr == f"payments: error: refusing to delete {paid[0]} without -y\n"
     assert len(v.payments("Projects", "SANA")) == 1
 
 

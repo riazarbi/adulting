@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part C: every error looks the same
+
+Errors came in three shapes, depending on the command: `error: text is empty` (`buffer`, `tasks`, `commit`), `hours: empty description` (`hours`, `payments`, `notes`, `search`), and no prefix at all (`threads`, `people`: `not found: Nope`). Decided 2026-09-22: every message looks the same, behind one shared helper.
+
+- **Every fatal error is now `<command>: error: <message>`**, e.g. `hours: error: empty description`, `threads: error: not found: Nope`. That is the shape argparse already uses for usage errors (`buffer: error: unrecognized arguments`), so all errors now match. Warnings are `<command>: warning: <message>`. That changes the banking-details warning from `payments` (it had no prefix) and the task-ingest warning from `buffer flush` (it had no `warning:`). The message text after the prefix is unchanged, and exit codes are unchanged: 1, or 2 for `lint` with no schemas.
+- **One helper, `vault.die(msg)`, with `vault.warn(msg)`.** It takes the command name from `sys.argv[0]` the way argparse does, so shared code such as `vault.read_records` names the right command without being told. The four copies of `die()` and about 60 direct `sys.exit("...")` calls all go through it. The `tool` parameter of `resolve_target`, `resolve_currency`, `when_from_flags` and `statement_pdf.render`, and the `TOOL` constants, existed only to build prefixes; they are gone.
+- **The statement's self-checks** now say `statement check failed: …`; they used to be prefixed `statement:`, which named no command. A new test covers all three; none had one before.
+- **Tests:** about 90 expected messages updated. New tests cover `die` and `warn`, and the banking warning test asserts the whole line instead of a substring. **677 passing.**
+- **Verified on the vault copy:** every successful command's output is identical before and after. The errors differ only by the new prefix.
+
 ## 2026-09-22 - review fixes, part B (B6): plain functions, not fake argparse results
 
 Commands called each other by building a fake `argparse.Namespace` to pass to the other's `cmd_*` function, so a reader had to find the argparse setup to learn what a call needed.

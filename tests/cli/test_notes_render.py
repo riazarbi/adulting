@@ -74,7 +74,7 @@ def test_a_topic_with_quotes_still_breaks_the_pdf(v, tmp_path):
     r = notes(v, "pdf", "meeting_full", "--out", str(out))
     assert r.returncode == 1
     assert r.stdout == f"{out / 'meeting_full.md'}\n"
-    assert r.stderr.startswith("notes: PDF render failed:")
+    assert r.stderr.startswith("notes: error: PDF render failed:")
     assert "YAML" in r.stderr
     assert (out / "meeting_full.md").exists()
     assert not (out / "meeting_full.md.pdf").exists()
@@ -93,7 +93,7 @@ def test_a_failed_render_leaves_no_stale_pdf(v, tmp_path):
                        capture_output=True, text=True, env=no_latex)
     assert r.returncode == 1
     assert r.stdout == f"{out / 'with_summary.md'}\n"
-    assert r.stderr.startswith("notes: PDF render failed:")
+    assert r.stderr.startswith("notes: error: PDF render failed:")
     assert not stale.exists()
     assert (out / "with_summary.md").exists()
 
@@ -108,7 +108,7 @@ def test_renders_default_to_downloads(v):
 def test_render_of_a_missing_note(v):
     r = notes(v, "minutes", "nope")
     assert r.returncode == 1
-    assert r.stderr == f"notes: no note 'nope' in {v.home / 'notes'}\n"
+    assert r.stderr == f"notes: error: no note 'nope' in {v.home / 'notes'}\n"
 
 
 def test_help_json_lists_the_renderers(vault):

@@ -97,10 +97,11 @@ def test_require_repo_accepts_the_root_and_refuses_a_plain_directory(repo, tmp_p
     plain = tmp_path / "plain"
     plain.mkdir()
     monkeypatch.setenv("ADULTING_HOME", str(plain))
+    monkeypatch.setattr("sys.argv", ["commit"])
     with pytest.raises(SystemExit) as exc:
         C.require_repo()
     assert exc.value.code == 1
-    assert capsys.readouterr().err == f"error: not a git repository: {plain}\n"
+    assert capsys.readouterr().err == f"commit: error: not a git repository: {plain}\n"
 
 
 def test_require_repo_refuses_a_subdirectory(repo, monkeypatch):

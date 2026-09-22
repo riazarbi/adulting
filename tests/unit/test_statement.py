@@ -215,7 +215,8 @@ def test_pdf_warns_and_states_when_banking_is_missing(vault):
     r = vault.run("statement", "--thread", "SANA Partners", "--pdf", str(out),
                   "--as-of", "2026-06-30", cli="payments")
     assert r.returncode == 0, r.stderr
-    assert "banking details incomplete" in r.stderr
+    assert r.stderr == ("payments: warning: banking details incomplete in .adulting/config.yaml — "
+                        "the statement says so instead of printing a payment table\n")
     # The PDF is opaque to assert against; check the renderer's own markdown
     # says so, which is what lands in it.
     from adulting import statement_pdf as P
@@ -241,7 +242,7 @@ def test_a_failed_render_leaves_no_stale_file(vault):
                         "--pdf", str(out), "--as-of", "2026-06-30"],
                        capture_output=True, text=True, env=no_latex)
     assert r.returncode == 1
-    assert r.stderr.startswith("payments: pandoc failed\n")
+    assert r.stderr.startswith("payments: error: pandoc failed\n")
     assert "xelatex" in r.stderr
     assert not out.exists()
 
@@ -317,3 +318,21 @@ def test_reference_ignores_a_frontmatter_override(vault):
         "client_vat:", "client_reference: SOMETHING ELSE\nclient_vat:"),
         encoding="utf-8")
     assert V.client(p)["reference"] == "SANA Partners"
+
+
+def test_check_refuses_a_statement_that_does_not_add_up(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["payments"])
+    d = Decimal
+    good = {"lines": [{"balance": d("100.00"), "charge": d("100.00")}],
+            "balance": d("100.00"), "charges": d("100.00"),
+            "aging": {"current": d("100.00"), "30": d("0.00"), "60": d("0.00"), "90+": d("0.00")}}
+    S.check(good)  # returns without exiting
+    for bad, message in (
+            ({"balance": d("90.00"), "aging": {"current": d("90.00")}},
+             "closing line 100.00 != balance 90.00"),
+            ({"aging": {"current": d("50.00")}}, "aging 50.00 != balance 100.00"),
+            ({"charges": d("80.00")}, "lines charge 100.00 != charges 80.00")):
+        with pytest.raises(SystemExit) as exc:
+            S.check({**good, **bad})
+        assert exc.value.code == 1
+        assert capsys.readouterr().err == f"payments: error: statement check failed: {message}\n"

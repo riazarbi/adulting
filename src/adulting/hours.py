@@ -37,7 +37,6 @@ warning on stderr would cost the caller its stdout.
 
 import argparse
 import json
-import sys
 from datetime import timedelta
 
 from adulting.helpjson import emit_helpjson_if_requested
@@ -45,7 +44,6 @@ from adulting import buffer as B
 from adulting import statement as S
 from adulting import vault as V
 
-TOOL = 'hours'
 SUBDIR = 'hours'
 FENCE = V.HOURS_FENCE
 HEADING = ' — hours'
@@ -85,13 +83,13 @@ def resolve_billing(tpath, ref, currency_flag, rate_flag):
     currency = currency_flag or V.thread_meta(tpath)[0]
     if not currency:
         if rate_flag is not None and int(rate_flag) != 0:
-            sys.exit(f"{TOOL}: --rate needs a currency\n"
-                     f"  pass --currency, or set `currency:` on the thread; "
-                     f"omit --rate to log the time as unbilled")
+            V.die("--rate needs a currency\n"
+                  f"  pass --currency, or set `currency:` on the thread; "
+                  f"omit --rate to log the time as unbilled")
         return None, 0
     currency = currency.upper()
     if not V.is_currency_code(currency):
-        sys.exit(f"{TOOL}: currency {currency!r} is not a 3-letter ISO code")
+        V.die(f"currency {currency!r} is not a 3-letter ISO code")
     return currency, resolve_rate(tpath, rate_flag)
 
 
@@ -153,17 +151,17 @@ def report_logged(entry, ref):
 def cmd_log(args):
     desc = ' '.join(args.description).strip()
     if not desc:
-        sys.exit(f"{TOOL}: empty description")
+        V.die("empty description")
 
-    kind, name, tpath = V.resolve_target(TOOL, args.thread)
+    kind, name, tpath = V.resolve_target(args.thread)
     ref = V.thread_ref(kind, name)
     currency, rate = resolve_billing(tpath, ref, args.currency, args.rate)
     minutes = args.minutes if args.minutes is not None else V.config_default(
         'hours', 'minutes', DEFAULT_MINUTES)
     if minutes <= 0:
-        sys.exit(f"{TOOL}: --minutes must be positive")
+        V.die("--minutes must be positive")
 
-    entry = build_entry(desc, V.when_from_flags(TOOL, args.date, args.time),
+    entry = build_entry(desc, V.when_from_flags(args.date, args.time),
                         minutes, rate, currency, V.all_ids())
     append_entry(kind, name, entry)
     report_logged(entry, ref)
@@ -174,7 +172,7 @@ def cmd_log(args):
 def collect(thread=None, since=None, until=None):
     want = None
     if thread:
-        kind, name, _ = V.resolve_target(TOOL, thread)
+        kind, name, _ = V.resolve_target(thread)
         want = V.thread_ref(kind, name)
     for path, ref, e in V.load_all(SUBDIR, FENCE):
         if want and ref != want:
@@ -268,7 +266,7 @@ def find_entry(entry_id):
     for path, ref, e in V.load_all(SUBDIR, FENCE):
         if e.get('id') == entry_id:
             return path, ref, e
-    sys.exit(f"{TOOL}: no entry with id {entry_id!r}")
+    V.die(f"no entry with id {entry_id!r}")
 
 
 def cmd_show(args):
@@ -290,28 +288,28 @@ def cmd_edit(args):
     if args.description is not None:
         target['name'] = ' '.join(args.description).strip()
         if not target['name']:
-            sys.exit(f"{TOOL}: empty description")
+            V.die("empty description")
     if args.rate is not None:
         target['rate'] = int(args.rate)
     if args.currency is not None:
         ccy = args.currency.upper()
         if not V.is_currency_code(ccy):
-            sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
+            V.die(f"currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
     # As in `log`: a rate is money, and money needs a currency.
     if target.get('rate') and not target.get('currency'):
-        sys.exit(f"{TOOL}: --rate needs a currency; pass --currency as well")
+        V.die("--rate needs a currency; pass --currency as well")
 
     if args.date or args.time:
         start = V.local(target['startTime'])
         mins = V.minutes_of(target)
-        when = V.when_from_flags(TOOL, args.date or start.strftime('%Y-%m-%d'),
+        when = V.when_from_flags(args.date or start.strftime('%Y-%m-%d'),
                                  args.time or start.strftime('%H:%M'))
         target['startTime'] = V.to_iso(when)
         target['endTime'] = V.to_iso(when + timedelta(minutes=mins))
     if args.minutes is not None:
         if args.minutes <= 0:
-            sys.exit(f"{TOOL}: --minutes must be positive")
+            V.die("--minutes must be positive")
         target['endTime'] = V.to_iso(
             V.from_iso(target['startTime']) + timedelta(minutes=args.minutes))
 
@@ -323,7 +321,7 @@ def cmd_edit(args):
 def cmd_rm(args):
     path, ref, entry = find_entry(args.id)
     if not args.yes:
-        sys.exit(f"{TOOL}: refusing to delete {args.id} without -y")
+        V.die(f"refusing to delete {args.id} without -y")
     entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
     save(path, entries, ref, fm.get('currency', ''))

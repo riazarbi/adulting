@@ -29,14 +29,12 @@ the frontmatter date is missing or malformed.
 
 import argparse
 import re
-import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
-TOOL = 'search'
 HOURS_FENCE = V.HOURS_FENCE
 PAYMENTS_FENCE = V.PAYMENTS_FENCE
 
@@ -66,10 +64,6 @@ DEFAULT_WINDOW_DAYS = 7
 # Body lines that count as a log entry.
 ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE):', re.M)
 DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
-
-
-def die(msg, code=1):
-    sys.exit(f"{TOOL}: {msg}")
 
 
 def event_date(fm_value, fallback_stem):
@@ -274,12 +268,12 @@ def resolve_thread_arg(arg):
     if not arg:
         return None
     try:
-        kind, name, _ = V.resolve_target(TOOL, arg, fold_case=True)
+        kind, name, _ = V.resolve_target(arg, fold_case=True)
         return V.thread_ref(kind, name)
     except SystemExit:
         raise
     except Exception:  # noqa: BLE001
-        die(f"could not resolve thread {arg!r}")
+        V.die(f"could not resolve thread {arg!r}")
 
 
 def apply_filters(records, thread=None, type_=None, since=None, until=None,
@@ -502,7 +496,7 @@ def cmd_stream(args):
         kinds = tuple(k.strip() for k in args.kind.split(',') if k.strip())
         bad = [k for k in kinds if k not in STREAM_KINDS]
         if bad:
-            die(f"unknown kind(s) {', '.join(bad)}; "
+            V.die(f"unknown kind(s) {', '.join(bad)}; "
                 f"choose from {', '.join(STREAM_KINDS)}")
 
     events = (stream_documents() + stream_records() + stream_entities()

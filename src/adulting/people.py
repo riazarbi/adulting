@@ -40,14 +40,14 @@ def discover_people():
 def cmd_new(args):
     name = args.name.strip()
     if not name:
-        sys.exit("empty name")
+        V.die("empty name")
     if not V.is_plain_name(name):
-        sys.exit(f"name {name!r} cannot contain '/' or start with '.'")
+        V.die(f"name {name!r} cannot contain '/' or start with '.'")
 
     people_dir().mkdir(parents=True, exist_ok=True)
     path = people_dir() / f"{name}.md"
     if path.exists():
-        sys.exit(f"already exists: {path}")
+        V.die(f"already exists: {path}")
     path.write_text(
         f"---\nstatus: open\ncategory: {args.category}\nstarted: {today()}\n---\n\n# {name}\n",
         encoding='utf-8',
@@ -68,9 +68,9 @@ def cmd_delete(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
     if not path.exists():
-        sys.exit(f"not found: {path}")
+        V.die(f"not found: {path}")
     if not args.yes:
-        sys.exit(f"refusing to delete {path} without -y")
+        V.die(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
 
@@ -119,7 +119,7 @@ def cmd_show(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
     if not path.exists():
-        sys.exit(f"not found: {path}")
+        V.die(f"not found: {path}")
     if args.json:
         fm = V.read_frontmatter(path)
         print(json.dumps({

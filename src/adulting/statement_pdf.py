@@ -177,18 +177,18 @@ def markdown(st, supplier, client, bank):
     return '\n'.join(out) + '\n'
 
 
-def render(st, out_path, tool='payments'):
+def render(st, out_path):
     """Write the PDF. Renders in a temp dir so no scratch files leak into CWD."""
     if not shutil.which('pandoc'):
-        sys.exit(f"{tool}: pandoc not found on PATH (needed for --pdf)")
+        V.die("pandoc not found on PATH (needed for --pdf)")
 
     supplier = V.supplier()
     client_party = V.client(st['thread_path'])
     bank = V.banking()
 
     if not client_party['name']:
-        sys.exit(f"{tool}: thread {st['thread']!r} has no client_name\n"
-                 f"  set `client_name:` in threads/{st['thread']}.md")
+        V.die(f"thread {st['thread']!r} has no client_name\n"
+              f"  set `client_name:` in threads/{st['thread']}.md")
 
     doc = markdown(st, supplier, client_party, bank)
     out_path = Path(out_path).resolve()
@@ -208,7 +208,7 @@ def render(st, out_path, tool='payments'):
             capture_output=True, text=True, cwd=workdir)
     if proc.returncode != 0:
         sys.stdout.flush()
-        sys.exit(f"{tool}: pandoc failed\n{proc.stderr.strip()}")
+        V.die(f"pandoc failed\n{proc.stderr.strip()}")
     if not out_path.exists():
-        sys.exit(f"{tool}: pandoc reported success but wrote no file")
+        V.die("pandoc reported success but wrote no file")
     return out_path, bank

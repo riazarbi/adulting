@@ -30,7 +30,6 @@ from adulting import buffer as B
 from adulting import vault as V
 from adulting import statement as S
 
-TOOL = 'payments'
 SUBDIR = 'payments'
 FENCE = V.PAYMENTS_FENCE
 HEADING = ' — payments'
@@ -50,9 +49,9 @@ def parse_amount(raw):
     try:
         amt = Decimal(str(raw).replace(',', '').strip())
     except (InvalidOperation, AttributeError):
-        sys.exit(f"{TOOL}: {raw!r} is not a valid amount")
+        V.die(f"{raw!r} is not a valid amount")
     if amt <= 0:
-        sys.exit(f"{TOOL}: amount must be positive (got {amt})")
+        V.die(f"amount must be positive (got {amt})")
     return amt
 
 
@@ -114,13 +113,13 @@ def report_logged(p, ref):
 
 def cmd_log(args):
     if args.amount is None:
-        sys.exit(f"{TOOL}: amount is required")
+        V.die("amount is required")
 
-    kind, name, tpath = V.resolve_target(TOOL, args.thread)
+    kind, name, tpath = V.resolve_target(args.thread)
     ref = V.thread_ref(kind, name)
-    currency = V.resolve_currency(TOOL, tpath, ref, args.currency)
+    currency = V.resolve_currency(tpath, ref, args.currency)
     amount = parse_amount(args.amount)
-    received = V.when_from_flags(TOOL, args.date, args.time)
+    received = V.when_from_flags(args.date, args.time)
 
     p = build_payment(amount, received, currency, args.account,
                       ' '.join(args.note).strip() if args.note else '', V.all_ids())
@@ -133,7 +132,7 @@ def cmd_log(args):
 def collect(thread=None, since=None, until=None):
     want = None
     if thread:
-        kind, name, _ = V.resolve_target(TOOL, thread)
+        kind, name, _ = V.resolve_target(thread)
         want = V.thread_ref(kind, name)
     for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
         if want and ref != want:
@@ -188,7 +187,7 @@ def find_payment(pid):
     for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
         if p.get('id') == pid:
             return path, ref, p
-    sys.exit(f"{TOOL}: no payment with id {pid!r}")
+    V.die(f"no payment with id {pid!r}")
 
 
 def cmd_show(args):
@@ -211,7 +210,7 @@ def cmd_edit(args):
     if args.currency is not None:
         ccy = args.currency.upper()
         if not V.is_currency_code(ccy):
-            sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
+            V.die(f"currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
     if args.account is not None:
         target['account'] = args.account
@@ -222,7 +221,7 @@ def cmd_edit(args):
         # as `hours edit` does.
         was = V.local(target['received'])
         target['received'] = V.to_iso(V.when_from_flags(
-            TOOL, args.date or was.strftime('%Y-%m-%d'),
+            args.date or was.strftime('%Y-%m-%d'),
             args.time or was.strftime('%H:%M')))
 
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
@@ -233,7 +232,7 @@ def cmd_edit(args):
 def cmd_rm(args):
     path, ref, p = find_payment(args.id)
     if not args.yes:
-        sys.exit(f"{TOOL}: refusing to delete {args.id} without -y")
+        V.die(f"refusing to delete {args.id} without -y")
     records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
     fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
     save(path, records, ref, fm.get('currency', ''))
@@ -248,7 +247,7 @@ def billed(thread=None, since=None, until=None):
     out = {}
     want = None
     if thread:
-        kind, name, _ = V.resolve_target(TOOL, thread)
+        kind, name, _ = V.resolve_target(thread)
         want = V.thread_ref(kind, name)
     for _, ref, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
         if want and ref != want:
@@ -277,14 +276,14 @@ def _as_of(raw):
     try:
         return datetime.strptime(raw, '%Y-%m-%d').date()
     except ValueError:
-        sys.exit(f"{TOOL}: bad --as-of {raw!r}; expected YYYY-MM-DD")
+        V.die(f"bad --as-of {raw!r}; expected YYYY-MM-DD")
 
 
 def one_thread_statement(thread_arg, as_of):
     """Everything `_statement.build` needs for a single thread."""
-    kind, name, tpath = V.resolve_target(TOOL, thread_arg)
+    kind, name, tpath = V.resolve_target(thread_arg)
     ref = V.thread_ref(kind, name)
-    currency = V.resolve_currency(TOOL, tpath, ref, None)
+    currency = V.resolve_currency(tpath, ref, None)
 
     entries = []
     for _, r, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
@@ -319,13 +318,12 @@ def cmd_pdf(args):
     from adulting import statement_pdf as P
     st = one_thread_statement(args.thread, _as_of(args.as_of))
     if not st['lines']:
-        sys.exit(f"{TOOL}: nothing to state for {st['thread']!r} as at {st['as_of']}")
-    out, bank = P.render(st, args.pdf, tool=TOOL)
+        V.die(f"nothing to state for {st['thread']!r} as at {st['as_of']}")
+    out, bank = P.render(st, args.pdf)
     if not bank['complete']:
         sys.stdout.flush()
-        print(f"warning: banking details incomplete in .adulting/config.yaml — "
-              f"the statement says so instead of printing a payment table",
-              file=sys.stderr)
+        V.warn("banking details incomplete in .adulting/config.yaml — "
+               "the statement says so instead of printing a payment table")
     print(f"{out}: {len(st['lines'])} lines, {st['hours_total']:.2f} h, "
           f"charges {V.fmt_money(st['charges'], st['currency'])}, "
           f"paid {V.fmt_money(st['payments'], st['currency'])}, "
@@ -336,7 +334,7 @@ def cmd_pdf(args):
 def cmd_statement(args):
     if args.pdf:
         if not args.thread:
-            sys.exit(f"{TOOL}: --pdf needs --thread; a statement is per client")
+            V.die("--pdf needs --thread; a statement is per client")
         return cmd_pdf(args)
     # --as-of is an upper bound on the text view too, so the two agree.
     # Validate it first: a malformed date compared as a string bounds nothing.

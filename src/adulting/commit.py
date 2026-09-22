@@ -12,9 +12,9 @@ checks out, or pushes — the only mutating git calls it makes are
 import argparse
 import os
 import subprocess
-import sys
 from pathlib import Path
 
+from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting.vault import vault_home
 
@@ -30,14 +30,6 @@ CODES = {
 }
 
 
-def die(msg):
-    """All errors go to stderr with a non-zero exit. The agent harness
-    discards stdout whenever stderr is non-empty, so success paths must
-    keep stderr completely clean."""
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
 def git(*args, check=True):
     """Run a git command against the vault. Subprocess stderr is always
     captured, never passed through to ours."""
@@ -50,7 +42,7 @@ def git(*args, check=True):
            '-c', 'core.quotepath=false']
     r = subprocess.run(cmd + list(args), capture_output=True, text=True)
     if check and r.returncode != 0:
-        die(f"git {' '.join(args)} failed: {(r.stderr or r.stdout).strip()}")
+        V.die(f"git {' '.join(args)} failed: {(r.stderr or r.stdout).strip()}")
     return r
 
 
@@ -59,13 +51,13 @@ def require_repo():
     subdirectory of one, `git add -A` would sweep in files outside it."""
     home = vault_home()
     if not home.is_dir():
-        die(f"ADULTING_HOME is not a directory: {home}")
+        V.die(f"ADULTING_HOME is not a directory: {home}")
     r = git('rev-parse', '--show-toplevel', check=False)
     if r.returncode != 0:
-        die(f"not a git repository: {home}")
+        V.die(f"not a git repository: {home}")
     top = Path(r.stdout.strip()).resolve()
     if top != home.resolve():
-        die(f"ADULTING_HOME ({home}) is not the root of its git repository ({top})")
+        V.die(f"ADULTING_HOME ({home}) is not the root of its git repository ({top})")
 
 
 def has_head():
@@ -200,9 +192,9 @@ def cmd_review(args):
 def cmd_save(args):
     require_repo()
     if '\n' in args.message:
-        die("--message must be a single line; put the detail in --body")
+        V.die("--message must be a single line; put the detail in --body")
     if not args.message.strip():
-        die("--message must not be empty")
+        V.die("--message must not be empty")
 
     entries = status_entries()
     if not entries:
@@ -234,7 +226,7 @@ def cmd_save(args):
         argv += ['-m', args.body]
     r = git(*argv, check=False)
     if r.returncode != 0:
-        die(f"git commit failed: {(r.stderr or r.stdout).strip()}")
+        V.die(f"git commit failed: {(r.stderr or r.stdout).strip()}")
 
     sha = git('rev-parse', '--short', 'HEAD').stdout.strip()
     print(f"committed {sha}: {args.message}")

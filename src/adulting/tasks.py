@@ -165,17 +165,17 @@ def walk_anchors():
 
 
 def find_anchor(uuid_prefix: str) -> Anchor:
-    """Resolve a uuid prefix to a single anchor. die() on not-found or
+    """Resolve a uuid prefix to a single anchor. Dies on not-found or
     ambiguous. Prefix matches against the 8-char uuid stored in the
     anchor — any prefix length is accepted (1..8)."""
     p = uuid_prefix.lower()
     hits = [a for a in walk_anchors() if a.uuid.startswith(p)]
     if not hits:
-        die(f"no task found with uuid prefix {uuid_prefix!r}")
+        V.die(f"no task found with uuid prefix {uuid_prefix!r}")
     if len(hits) > 1:
         joined = ', '.join(f"{a.uuid} ({a.path.name}:{a.line_no + 1})"
                            for a in hits)
-        die(f"uuid prefix {uuid_prefix!r} is ambiguous: {joined}")
+        V.die(f"uuid prefix {uuid_prefix!r} is ambiguous: {joined}")
     return hits[0]
 
 
@@ -198,11 +198,6 @@ def mutate_anchor(anchor: Anchor, **changes) -> Anchor:
 
 
 # ---------- helpers ----------
-
-def die(msg, code=1):
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(code)
-
 
 def today_iso() -> str:
     return date.today().isoformat()
@@ -369,7 +364,7 @@ def cmd_set_description(args):
     anchor = find_anchor(args.uuid)
     new_text = args.text.strip()
     if not new_text:
-        die("description is empty")
+        V.die("description is empty")
     mutate_anchor(anchor, body=new_text)
     print(f"updated: {anchor.uuid}  body={new_text[:60]}")
     return 0
@@ -383,7 +378,7 @@ def cmd_set_assignee(args):
     if person.startswith('people/'):
         person = person[len('people/'):]
     if not V.person_exists(person):
-        die(f"person {person!r} does not resolve to people/{person}.md")
+        V.die(f"person {person!r} does not resolve to people/{person}.md")
     mutate_anchor(anchor, assignee=person)
     print(f"updated: {anchor.uuid}  assignee={person}")
     return 0
@@ -395,7 +390,7 @@ def _set_date(uuid_prefix, date_str, field_name):
     try:
         validate_date(date_str)
     except ValueError as e:
-        die(str(e))
+        V.die(str(e))
     anchor = find_anchor(uuid_prefix)
     mutate_anchor(anchor, **{field_name: date_str})
     print(f"updated: {anchor.uuid}  {field_name}={date_str}")
@@ -416,7 +411,7 @@ def cmd_set_priority(args):
     try:
         prio = validate_priority(args.priority)
     except ValueError as e:
-        die(str(e))
+        V.die(str(e))
     anchor = find_anchor(args.uuid)
     mutate_anchor(anchor, priority=prio)
     print(f"updated: {anchor.uuid}  priority={prio}")
@@ -429,7 +424,7 @@ def cmd_add_depends(args):
     anchor = find_anchor(args.uuid)
     dep = find_anchor(args.dep_uuid)
     if dep.uuid == anchor.uuid:
-        die("a task cannot depend on itself")
+        V.die("a task cannot depend on itself")
     if dep.uuid in anchor.depends:
         print(f"{anchor.uuid} already depends on {dep.uuid}")
         return 0
@@ -446,7 +441,7 @@ def cmd_rm_depends(args):
     prefix = args.dep_uuid.lower()
     listed = [d for d in anchor.depends if d.startswith(prefix)]
     if len(listed) > 1:
-        die(f"uuid prefix {args.dep_uuid!r} is ambiguous: {', '.join(listed)}")
+        V.die(f"uuid prefix {args.dep_uuid!r} is ambiguous: {', '.join(listed)}")
     if listed:
         mutate_anchor(anchor, depends=tuple(d for d in anchor.depends if d != listed[0]))
         print(f"{anchor.uuid} no longer depends on {listed[0]}")

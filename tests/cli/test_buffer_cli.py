@@ -80,24 +80,24 @@ def test_add_ref_date_files_under_that_day_and_keeps_the_clock(v):
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["add", ""], "error: text is empty"),
-    (["add-text", "Nope", "x"], "error: thread 'Nope' does not resolve to threads/<Kind>/<Name>.md "
+    (["add", ""], "buffer: error: text is empty"),
+    (["add-text", "Nope", "x"], "buffer: error: thread 'Nope' does not resolve to threads/<Kind>/<Name>.md "
                                 "(expected Projects/X, Processes/X, or Topics/X)"),
-    (["add-text", "Projects/SGB", " "], "error: text is empty"),
-    (["add-ref", "People/SGB", "notes/x"], "error: thread 'People/SGB' does not resolve to threads/<Kind>/<Name>.md"),
+    (["add-text", "Projects/SGB", " "], "buffer: error: text is empty"),
+    (["add-ref", "People/SGB", "notes/x"], "buffer: error: thread 'People/SGB' does not resolve to threads/<Kind>/<Name>.md"),
     (["add-ref", "Projects/SGB", "notes/nope"],
-     "error: ref target 'notes/nope' does not resolve to a vault file "
+     "buffer: error: ref target 'notes/nope' does not resolve to a vault file "
      "(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)"),
     (["add-ref", "Projects/SGB", "notes/2026-09-10-14-30-00", "--date", "10 Sep"],
-     "error: --date must be YYYY-MM-DD; got '10 Sep'"),
-    (["add-action", "Projects/SGB", " "], "error: description is empty"),
+     "buffer: error: --date must be YYYY-MM-DD; got '10 Sep'"),
+    (["add-action", "Projects/SGB", " "], "buffer: error: description is empty"),
     (["add-action", "Projects/SGB", "(Ghost) x"],
-     "error: assignee 'Ghost' does not resolve to people/Ghost.md (create the person file first)"),
-    (["add-action", "Projects/SGB", "(Riaz Arbi)  "], "error: description after assignee is empty"),
-    (["add-action", "Projects/SGB", "x", "--due", "Friday"], "error: --due must be YYYY-MM-DD; got 'Friday'"),
+     "buffer: error: assignee 'Ghost' does not resolve to people/Ghost.md (create the person file first)"),
+    (["add-action", "Projects/SGB", "(Riaz Arbi)  "], "buffer: error: description after assignee is empty"),
+    (["add-action", "Projects/SGB", "x", "--due", "Friday"], "buffer: error: --due must be YYYY-MM-DD; got 'Friday'"),
     (["add-action", "Projects/SGB", "x", "--scheduled", "1/2/26"],
-     "error: --scheduled must be YYYY-MM-DD; got '1/2/26'"),
-    (["add-action", "Projects/SGB", "x", "--depends", "XYZ"], "error: --depends must be 8 hex chars; got 'XYZ'"),
+     "buffer: error: --scheduled must be YYYY-MM-DD; got '1/2/26'"),
+    (["add-action", "Projects/SGB", "x", "--depends", "XYZ"], "buffer: error: --depends must be 8 hex chars; got 'XYZ'"),
 ])
 def test_add_errors_write_nothing(v, argv, message):
     r = buf(v, *argv)
@@ -159,9 +159,9 @@ def test_rm(v):
     r = buf(v, "rm", "4")
     assert r.stdout == "removed line 4: garbage line\n"
     assert "garbage line" not in buffer_text(v)
-    for argv, message in ((["rm", "abc"], "error: line number must be an integer; got 'abc'"),
-                          (["rm", "0"], "error: line 0 out of range (buffer has 12 lines)"),
-                          (["rm", "6"], "error: line 6 is empty")):
+    for argv, message in ((["rm", "abc"], "buffer: error: line number must be an integer; got 'abc'"),
+                          (["rm", "0"], "buffer: error: line 0 out of range (buffer has 12 lines)"),
+                          (["rm", "6"], "buffer: error: line 6 is empty")):
         assert buf(v, *argv).stderr == message + "\n"
 
 

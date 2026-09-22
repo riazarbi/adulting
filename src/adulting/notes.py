@@ -55,10 +55,10 @@ def note_path(stem):
     if name.endswith('.md'):
         name = name[:-3]
     if '/' in name or not name:
-        sys.exit(f"{TOOL}: give a note stem like 2026-09-10-14-30-00, got {stem!r}")
+        V.die(f"give a note stem like 2026-09-10-14-30-00, got {stem!r}")
     path = notes_dir() / f"{name}.md"
     if not path.is_file():
-        sys.exit(f"{TOOL}: no note {name!r} in {notes_dir()}")
+        V.die(f"no note {name!r} in {notes_dir()}")
     return path
 
 
@@ -106,8 +106,7 @@ def ingest_actions():
     except (Exception, SystemExit):  # noqa: BLE001 - a failed ingest must not stop notes
         rc = 1
     if rc != 0 and sys.stderr.isatty():
-        print(f"{TOOL}: warning: some ACTION lines were not ingested; run `tasks` to see why",
-              file=sys.stderr)
+        V.warn("some ACTION lines were not ingested; run `tasks` to see why")
 
 
 # ---------- writing a new note ----------
@@ -152,16 +151,16 @@ def buffer_ref(thread, stem, topic):
 def cmd_new(args):
     topic = args.topic.strip()
     if not topic:
-        sys.exit(f"{TOOL}: --topic is empty")
+        V.die("--topic is empty")
     people = [p.strip() for p in (args.person or []) if p.strip()]
     if args.person and args.type not in PEOPLE_TYPES:
-        sys.exit(f"{TOOL}: --person is only for Meeting and Correspondence notes")
+        V.die("--person is only for Meeting and Correspondence notes")
     if (args.counterparty is not None or args.location is not None) and args.type != 'Meeting':
-        sys.exit(f"{TOOL}: --counterparty and --location are only for Meeting notes")
+        V.die("--counterparty and --location are only for Meeting notes")
 
     threads = []
     for arg in args.thread:
-        kind, name, _ = V.resolve_target(TOOL, arg)
+        kind, name, _ = V.resolve_target(arg)
         ref = V.thread_ref(kind, name)
         if ref not in threads:
             threads.append(ref)
@@ -169,7 +168,7 @@ def cmd_new(args):
     stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     path = notes_dir() / f"{stem}.md"
     if path.exists():
-        sys.exit(f"{TOOL}: {path} already exists; try again in a second")
+        V.die(f"{path} already exists; try again in a second")
     notes_dir().mkdir(parents=True, exist_ok=True)
     path.write_text(note_text(stem, args.type, topic, threads, people,
                               (args.counterparty or '').strip(), (args.location or '').strip()),
@@ -205,7 +204,7 @@ def cmd_cat(args):
 def cmd_last(args):
     rows = all_notes()
     if not rows:
-        sys.exit(f"{TOOL}: no notes in {notes_dir()}")
+        V.die(f"no notes in {notes_dir()}")
     print(rows[-1]['path'])
 
 
@@ -214,7 +213,7 @@ def cmd_copy(args):
     stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     target = notes_dir() / f"{stem}.md"
     if target.exists():
-        sys.exit(f"{TOOL}: {target} already exists; try again in a second")
+        V.die(f"{target} already exists; try again in a second")
     # As the old `sed '/^topic:/s/$/ COPY/'` did: every line that starts
     # with `topic:` gets the suffix, body lines included.
     lines = source.read_text(encoding='utf-8').split('\n')
@@ -226,7 +225,7 @@ def cmd_copy(args):
 def cmd_delete(args):
     path = note_path(args.stem)
     if not args.yes:
-        sys.exit(f"{TOOL}: refusing to delete {path} without -y")
+        V.die(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
 
@@ -256,7 +255,7 @@ def cmd_render(args):
     ok, message = render.to_pdf(md_path, pdf_path)
     if not ok:
         sys.stdout.flush()
-        sys.exit(f"{TOOL}: PDF render failed: {message}")
+        V.die(f"PDF render failed: {message}")
     print(pdf_path)
 
 

@@ -227,7 +227,7 @@ def test_home_that_is_not_a_directory_fails_cleanly(gitvault, tmp_path):
     gitvault.env["ADULTING_HOME"] = str(tmp_path / "missing")
     r = gitvault.run("review")
     assert r.returncode == 1
-    assert r.stderr.startswith("error: ADULTING_HOME is not a directory:")
+    assert r.stderr.startswith("commit: error: ADULTING_HOME is not a directory:")
     assert r.stdout == ""
 
 
@@ -245,7 +245,7 @@ def test_empty_message_is_rejected(gitvault):
     gitvault.write("notes/new.md", "hello\n")
     r = gitvault.run("save", "--message", "   ")
     assert r.returncode == 1
-    assert r.stderr == "error: --message must not be empty\n"
+    assert r.stderr == "commit: error: --message must not be empty\n"
 
 
 def test_review_listing_format(gitvault):
@@ -341,7 +341,7 @@ def test_a_failing_git_commit_is_reported(gitvault):
 
     r = gitvault.run("save", "--message", "Refused")
     assert r.returncode == 1
-    assert r.stderr.startswith("error: git commit failed:")
+    assert r.stderr.startswith("commit: error: git commit failed:")
     assert "hook says no" in r.stderr
     assert len(gitvault.log_subjects()) == before
 

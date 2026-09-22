@@ -35,23 +35,23 @@ def cmd_new(args):
     category = args.category
     name = args.name.strip()
     if not name:
-        sys.exit("empty name")
+        V.die("empty name")
     if not V.is_plain_name(name):
-        sys.exit(f"name {name!r} cannot contain '/' or start with '.'")
+        V.die(f"name {name!r} cannot contain '/' or start with '.'")
 
     # Billing defaults for `hours`. Optional -- most threads are never billed.
     currency = (args.currency or '').strip().upper()
     if currency and not V.is_currency_code(currency):
-        sys.exit(f"currency {currency!r} is not a 3-letter ISO code")
+        V.die(f"currency {currency!r} is not a 3-letter ISO code")
     rate = args.rate
     if rate is not None and not currency:
-        sys.exit("--rate needs a --currency")
+        V.die("--rate needs a --currency")
 
     target_dir = threads_dir() / KIND_DIRS[kind]
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
     if path.exists():
-        sys.exit(f"already exists: {path}")
+        V.die(f"already exists: {path}")
     billing = ''
     if currency:
         billing += f"currency: {currency}\n"
@@ -69,12 +69,12 @@ def cmd_delete(args):
     try:
         match = V.resolve_thread(args.thread)
     except ValueError as e:
-        sys.exit(str(e))
+        V.die(str(e))
     if not match:
-        sys.exit(f"not found: {args.thread}")
+        V.die(f"not found: {args.thread}")
     kind, name, path = match
     if not args.yes:
-        sys.exit(f"refusing to delete {path} without -y")
+        V.die(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
 
@@ -124,9 +124,9 @@ def cmd_show(args):
     try:
         match = V.resolve_thread(args.thread)
     except ValueError as e:
-        sys.exit(str(e))
+        V.die(str(e))
     if not match:
-        sys.exit(f"not found: {args.thread}")
+        V.die(f"not found: {args.thread}")
     kind, name, path = match
     if args.json:
         fm = V.read_frontmatter(path)

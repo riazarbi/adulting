@@ -27,6 +27,27 @@ def vault_home():
     return Path(os.environ.get('ADULTING_HOME', os.path.expanduser('~/vault')))
 
 
+# ---------- errors ----------
+
+def program():
+    """The running command's name, found the way argparse finds it."""
+    return os.path.basename(sys.argv[0])
+
+
+def die(msg, code=1):
+    """Stop with `<command>: error: <msg>` on stderr. argparse reports usage
+    errors in the same shape, so every error from every command looks alike.
+    Nothing else may reach stderr on success: the agent harness discards
+    stdout whenever stderr is non-empty."""
+    print(f"{program()}: error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def warn(msg):
+    """`<command>: warning: <msg>` on stderr, and carry on."""
+    print(f"{program()}: warning: {msg}", file=sys.stderr)
+
+
 KIND_DIRS = {'project': 'Projects', 'process': 'Processes', 'topic': 'Topics'}
 
 CLOSE = '```'
@@ -247,26 +268,26 @@ def thread_meta(path):
     return fm.get('currency') or None, rate
 
 
-def resolve_target(tool, thread_arg, fold_case=False):
+def resolve_target(thread_arg, fold_case=False):
     try:
         match = resolve_thread(thread_arg, fold_case=fold_case)
     except ValueError as e:
-        sys.exit(f"{tool}: {e}")
+        die(f"{e}")
     if not match:
-        sys.exit(f"{tool}: thread {thread_arg!r} does not resolve to a thread file")
+        die(f"thread {thread_arg!r} does not resolve to a thread file")
     return match
 
 
-def resolve_currency(tool, tpath, ref, flag):
+def resolve_currency(tpath, ref, flag):
     """Thread currency, or the flag, or a hard error. Never guessed."""
     currency = flag or thread_meta(tpath)[0]
     if not currency:
-        sys.exit(f"{tool}: thread {ref!r} has no currency\n"
-                 f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
-                 f"or pass --currency")
+        die(f"thread {ref!r} has no currency\n"
+            f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
+            f"or pass --currency")
     currency = currency.upper()
     if not is_currency_code(currency):
-        sys.exit(f"{tool}: currency {currency!r} is not a 3-letter ISO code")
+        die(f"currency {currency!r} is not a 3-letter ISO code")
     return currency
 
 
@@ -355,7 +376,7 @@ def read_records(path, fence, key='entries'):
     try:
         return json.loads(raw).get(key, []) or []
     except json.JSONDecodeError as e:
-        sys.exit(f"malformed JSON in {path}: {e}")
+        die(f"malformed JSON in {path}: {e}")
 
 
 def write_records(path, records, fence, ref, currency, key='entries',
@@ -372,7 +393,7 @@ def write_records(path, records, fence, ref, currency, key='entries',
         lines = path.read_text(encoding='utf-8').split('\n')
         blk = find_block(lines, fence)
         if blk is None:
-            sys.exit(f"{path} has no {fence} block")
+            die(f"{path} has no {fence} block")
         out = lines[:blk[0] + 1] + payload + lines[blk[1]:]
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -507,16 +528,16 @@ def is_currency_code(code):
     return bool(re.match(r'^[A-Z]{3}$', code))
 
 
-def when_from_flags(tool, date_s, time_s):
+def when_from_flags(date_s, time_s):
     now = datetime.now()
     try:
         d = datetime.strptime(date_s, '%Y-%m-%d').date() if date_s else now.date()
     except ValueError:
-        sys.exit(f"{tool}: bad --date {date_s!r}; expected YYYY-MM-DD")
+        die(f"bad --date {date_s!r}; expected YYYY-MM-DD")
     try:
         t = datetime.strptime(time_s, '%H:%M').time() if time_s else now.time()
     except ValueError:
-        sys.exit(f"{tool}: bad --time {time_s!r}; expected HH:MM")
+        die(f"bad --time {time_s!r}; expected HH:MM")
     return datetime.combine(d, t).replace(second=0, microsecond=0)
 
 

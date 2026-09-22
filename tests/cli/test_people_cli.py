@@ -78,7 +78,7 @@ def test_show_accepts_the_wikilink_form_and_json(v):
 def test_show_missing_person(v):
     r = people(v, "show", "Nobody")
     assert r.returncode == 1
-    assert r.stderr == f"not found: {v.home / 'people' / 'Nobody.md'}\n"
+    assert r.stderr == f"people: error: not found: {v.home / 'people' / 'Nobody.md'}\n"
 
 
 # ---------- new ----------
@@ -102,7 +102,7 @@ def test_new_creates_the_people_dir(vault):
 def test_new_refuses_an_existing_person(v):
     r = people(v, "new", "--name", "Riaz Arbi", "--category", "personal")
     assert r.returncode == 1
-    assert r.stderr.startswith("already exists: ")
+    assert r.stderr.startswith("people: error: already exists: ")
 
 
 def test_new_rejects_an_unknown_category(vault):
@@ -124,7 +124,7 @@ def test_delete_with_yes(v):
 def test_delete_missing_person(v):
     r = people(v, "delete", "Nobody", "-y")
     assert r.returncode == 1
-    assert r.stderr.startswith("not found: ")
+    assert r.stderr.startswith("people: error: not found: ")
 
 
 def test_help_json_lists_subcommands(vault):
@@ -152,7 +152,7 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(v):
     path = v.home / "people" / "Old Contact.md"
     r = people(v, "delete", "Old Contact", input="y\n")
     assert r.returncode == 1
-    assert r.stderr == f"refusing to delete {path} without -y\n"
+    assert r.stderr == f"people: error: refusing to delete {path} without -y\n"
     assert path.exists()
 
 
@@ -163,7 +163,7 @@ def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     for blank in ("", "  "):
         r = people(vault, "new", "--name", blank, "--category", "personal")
         assert r.returncode == 1
-        assert r.stderr == "empty name\n"
+        assert r.stderr == "people: error: empty name\n"
         assert list((vault.home / "people").iterdir()) == []
     r = people(vault, "new", "--name", " Igor Novak ", "--category", "personal")
     assert r.returncode == 0
@@ -176,5 +176,5 @@ def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     people/ (or crash), and a leading `.` would make a hidden file."""
     r = people(vault, "new", "--name", name, "--category", "personal")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == f"name {name!r} cannot contain '/' or start with '.'\n"
+    assert r.stderr == f"people: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []

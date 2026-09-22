@@ -76,11 +76,6 @@ UNKNOWN_LINE_RE = re.compile(
 
 # ---------- helpers ----------
 
-def die(msg, code=1):
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(code)
-
-
 def now_ts():
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
@@ -96,7 +91,7 @@ def stamp(date=None):
     if not date:
         return now_ts()
     if not V.DATE_RE.match(date):
-        die(f"--date must be YYYY-MM-DD; got {date!r}")
+        V.die(f"--date must be YYYY-MM-DD; got {date!r}")
     return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
 
 
@@ -106,9 +101,9 @@ def canonical_thread(arg, message):
     try:
         match = V.resolve_thread(arg.strip())
     except ValueError as e:
-        die(str(e))
+        V.die(str(e))
     if not match:
-        die(message)
+        V.die(message)
     kind, name, _ = match
     return V.thread_ref(kind, name)
 
@@ -181,7 +176,7 @@ def cmd_add(args):
 def buffer_unknown(text):
     text = text.strip()
     if not text:
-        die("text is empty")
+        V.die("text is empty")
     line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
     append_line(line)
     print(f"buffered: {line}")
@@ -200,7 +195,7 @@ def buffer_text(thread, text):
                 f"(expected Projects/X, Processes/X, or Topics/X)")
     text = text.strip()
     if not text:
-        die("text is empty")
+        V.die("text is empty")
     line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
     append_line(line)
     print(f"buffered: {line}")
@@ -219,7 +214,7 @@ def buffer_ref(thread, target, summary, date=None):
     target = target.strip()
     summary = (summary or '').strip()
     if not ref_target_resolves(target):
-        die(f"ref target {target!r} does not resolve to a vault file "
+        V.die(f"ref target {target!r} does not resolve to a vault file "
             f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
     body = f"[[{target}]]" + (f" {summary}" if summary else "")
     line = f"- [[{thread}]] REF: {body} <!--{stamp(date)}-->"
@@ -240,15 +235,15 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
         thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
     text = text.strip()
     if not text:
-        die("description is empty")
+        V.die("description is empty")
     am = ASSIGNEE_PREFIX_RE.match(text)
     if am:
         assignee = am.group(1).strip()
         body = am.group(2).strip()
         if not body:
-            die("description after assignee is empty")
+            V.die("description after assignee is empty")
         if not V.person_exists(assignee):
-            die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
+            V.die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
                 f"(create the person file first)")
         body_text = f"({assignee}) {body}"
     else:
@@ -258,17 +253,17 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
     attrs = {'depends': list(depends or [])}
     if due:
         if not V.DATE_RE.match(due):
-            die(f"--due must be YYYY-MM-DD; got {due!r}")
+            V.die(f"--due must be YYYY-MM-DD; got {due!r}")
         attrs['due'] = due
     if scheduled:
         if not V.DATE_RE.match(scheduled):
-            die(f"--scheduled must be YYYY-MM-DD; got {scheduled!r}")
+            V.die(f"--scheduled must be YYYY-MM-DD; got {scheduled!r}")
         attrs['scheduled'] = scheduled
     if priority:
         attrs['priority'] = priority
     for d in attrs['depends']:
         if not V.UUID8_RE.match(d):
-            die(f"--depends must be 8 hex chars; got {d!r}")
+            V.die(f"--depends must be 8 hex chars; got {d!r}")
 
     attr_str = format_action_attrs(attrs)
     comment = now_ts() + (f" {attr_str}" if attr_str else "")
@@ -322,13 +317,13 @@ def cmd_rm(args):
     try:
         ln = int(args.line_number)
     except ValueError:
-        die(f"line number must be an integer; got {args.line_number!r}")
+        V.die(f"line number must be an integer; got {args.line_number!r}")
     lines = read_buffer()
     if ln < 1 or ln > len(lines):
-        die(f"line {ln} out of range (buffer has {len(lines)} lines)")
+        V.die(f"line {ln} out of range (buffer has {len(lines)} lines)")
     removed = lines[ln - 1]
     if not removed.strip():
-        die(f"line {ln} is empty")
+        V.die(f"line {ln} is empty")
     del lines[ln - 1]
     write_buffer(lines)
     print(f"removed line {ln}: {removed}")
@@ -580,7 +575,7 @@ def cmd_flush(args):
     try:
         tasks.ingest()
     except (Exception, SystemExit) as e:  # noqa: BLE001
-        print(f"buffer: flushed, but the task ingest failed: {e}", file=sys.stderr)
+        V.warn(f"flushed, but the task ingest failed: {e}")
     return 0
 
 
@@ -630,7 +625,7 @@ def dispatch_proposal(proposal, raw_text):
         return buffer_action(proposal['thread'], proposal['body'],
                              proposal.get('due'), proposal.get('scheduled'),
                              proposal.get('priority'))
-    die(f"internal error: unknown subcmd {sub!r}")
+    V.die(f"internal error: unknown subcmd {sub!r}")
 
 
 def cmd_suggest(args):

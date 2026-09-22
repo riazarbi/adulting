@@ -743,8 +743,7 @@ def main():
 
     schemas = load_schemas(Path(args.schemas))
     if not schemas:
-        print(f"no schemas loaded from {args.schemas}", file=sys.stderr)
-        sys.exit(2)
+        V.die(f"no schemas loaded from {args.schemas}", code=2)
 
     files = [Path(p) for p in args.paths] if args.paths else list(discover_files())
 

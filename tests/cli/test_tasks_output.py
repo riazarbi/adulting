@@ -185,12 +185,12 @@ def test_uuid_prefix_errors(board):
     # DEFERRED BUG 7: the ambiguous-prefix error names files by basename,
     # not by vault path.
     r = tasks(board, "show", "aaaa")
-    assert (r.returncode, r.stderr) == (1, "error: uuid prefix 'aaaa' is ambiguous: "
+    assert (r.returncode, r.stderr) == (1, "tasks: error: uuid prefix 'aaaa' is ambiguous: "
                                            "aaaa0001 (2026-09-10-14-30-00.md:9), "
                                            "aaaa0002 (2026-09-10-14-30-00.md:10), "
                                            "aaaa0003 (2026-09-13.md:7)\n")
     r = tasks(board, "show", "ffff")
-    assert (r.returncode, r.stderr) == (1, "error: no task found with uuid prefix 'ffff'\n")
+    assert (r.returncode, r.stderr) == (1, "tasks: error: no task found with uuid prefix 'ffff'\n")
 
 
 # ---------- mutations ----------
@@ -223,14 +223,14 @@ def test_mutations_print_and_rewrite_the_line(board):
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["set-description", "bbbb0001", "  "], "error: description is empty"),
-    (["set-assignee", "bbbb0001", "Ghost"], "error: person 'Ghost' does not resolve to people/Ghost.md"),
+    (["set-description", "bbbb0001", "  "], "tasks: error: description is empty"),
+    (["set-assignee", "bbbb0001", "Ghost"], "tasks: error: person 'Ghost' does not resolve to people/Ghost.md"),
     # DEFERRED BUG 7: the date errors use a comma where every other error
     # uses a semicolon.
-    (["set-due", "bbbb0001", "soon"], "error: date must be YYYY-MM-DD, got 'soon'"),
-    (["set-scheduled", "bbbb0001", "30/9"], "error: date must be YYYY-MM-DD, got '30/9'"),
-    (["set-priority", "bbbb0001", "Z"], "error: priority must be H, M, or L; got 'Z'"),
-    (["add-depends", "aaaa0003", "aaaa0003"], "error: a task cannot depend on itself"),
+    (["set-due", "bbbb0001", "soon"], "tasks: error: date must be YYYY-MM-DD, got 'soon'"),
+    (["set-scheduled", "bbbb0001", "30/9"], "tasks: error: date must be YYYY-MM-DD, got '30/9'"),
+    (["set-priority", "bbbb0001", "Z"], "tasks: error: priority must be H, M, or L; got 'Z'"),
+    (["add-depends", "aaaa0003", "aaaa0003"], "tasks: error: a task cannot depend on itself"),
 ])
 def test_mutation_errors_leave_the_file_alone(board, argv, message):
     before = board.read("logs/Topics/zeta/2026-09-13.md")
@@ -254,7 +254,7 @@ def test_add_passes_every_flag_to_the_buffer(base):
 def test_add_passes_the_buffer_exit_code_through(base):
     r = tasks(base, "add", "Projects/Nope", "x")
     assert r.returncode == 1
-    assert r.stderr == "error: thread 'Projects/Nope' does not resolve to threads/<Kind>/<Name>.md\n"
+    assert r.stderr == "tasks: error: thread 'Projects/Nope' does not resolve to threads/<Kind>/<Name>.md\n"
 
 
 def test_help_json(vault):

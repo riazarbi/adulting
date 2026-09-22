@@ -109,7 +109,7 @@ def test_unresolvable_thread_fails(v):
     r = search(v, "notes", "--thread", "Nope")
     assert r.returncode == 1
     assert r.stdout == ""
-    assert r.stderr == "search: thread 'Nope' does not resolve to a thread file\n"
+    assert r.stderr == "search: error: thread 'Nope' does not resolve to a thread file\n"
 
 
 # ---------- activity and overview ----------
@@ -246,7 +246,7 @@ def test_stream_with_nothing_in_the_default_window(v):
 def test_stream_unknown_kind_message(v):
     r = search(v, "stream", "--kind", "note,bogus,nope")
     assert r.returncode == 1
-    assert r.stderr == ("search: unknown kind(s) bogus, nope; choose from note, log, "
+    assert r.stderr == ("search: error: unknown kind(s) bogus, nope; choose from note, log, "
                         "task, done, hours, payment, thread, person, pending\n")
 
 

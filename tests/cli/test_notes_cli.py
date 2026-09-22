@@ -102,10 +102,10 @@ def test_cat_accepts_a_trailing_md(v):
 
 
 @pytest.mark.parametrize("stem, message", [
-    ("2026-01-01-00-00-00", "notes: no note '2026-01-01-00-00-00' in {notes}\n"),
-    ("notes/2026-09-10-14-30-00", "notes: give a note stem like 2026-09-10-14-30-00, "
+    ("2026-01-01-00-00-00", "notes: error: no note '2026-01-01-00-00-00' in {notes}\n"),
+    ("notes/2026-09-10-14-30-00", "notes: error: give a note stem like 2026-09-10-14-30-00, "
                                   "got 'notes/2026-09-10-14-30-00'\n"),
-    ("", "notes: give a note stem like 2026-09-10-14-30-00, got ''\n"),
+    ("", "notes: error: give a note stem like 2026-09-10-14-30-00, got ''\n"),
 ])
 def test_bad_stems(v, stem, message):
     r = notes(v, "cat", stem)
@@ -120,7 +120,7 @@ def test_last_prints_the_newest_note_by_timestamp(v):
 
 def test_last_with_no_notes(vault):
     r = notes(vault, "last")
-    assert (r.returncode, r.stderr) == (1, f"notes: no notes in {vault.home / 'notes'}\n")
+    assert (r.returncode, r.stderr) == (1, f"notes: error: no notes in {vault.home / 'notes'}\n")
 
 
 # ---------- copy, delete ----------
@@ -142,7 +142,7 @@ def test_delete_needs_yes(v):
     path = v.home / "notes" / "2026-09-12-07-00-00.md"
     r = notes(v, "delete", "2026-09-12-07-00-00")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == f"notes: refusing to delete {path} without -y\n"
+    assert r.stderr == f"notes: error: refusing to delete {path} without -y\n"
     assert path.exists()
     r = notes(v, "delete", "2026-09-12-07-00-00", "-y")
     assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")

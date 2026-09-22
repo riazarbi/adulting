@@ -83,14 +83,14 @@ def test_show_json_resolves_every_reference_form(v, ref):
 def test_show_not_found(v, ref):
     r = threads(v, "show", ref)
     assert r.returncode == 1
-    assert r.stderr == f"not found: {ref}\n"
+    assert r.stderr == f"threads: error: not found: {ref}\n"
 
 
 def test_bare_name_in_two_kinds_is_ambiguous(v):
     v.write_thread("Topics", "SGB")
     r = threads(v, "show", "SGB")
     assert r.returncode == 1
-    assert r.stderr == "ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB\n"
+    assert r.stderr == "threads: error: ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB\n"
     assert threads(v, "show", "Topics/SGB").returncode == 0
 
 
@@ -117,14 +117,14 @@ def test_new_with_billing_orders_currency_then_rate(vault):
 def test_new_refuses_an_existing_thread(v):
     r = threads(v, "new", *FLAGS, "--name", "SGB")
     assert r.returncode == 1
-    assert r.stderr.startswith("already exists: ")
+    assert r.stderr.startswith("threads: error: already exists: ")
 
 
 def test_new_error_messages(vault):
     r = threads(vault, "new", *FLAGS, "--name", "X", "--currency", "rands")
-    assert (r.returncode, r.stderr) == (1, "currency 'RANDS' is not a 3-letter ISO code\n")
+    assert (r.returncode, r.stderr) == (1, "threads: error: currency 'RANDS' is not a 3-letter ISO code\n")
     r = threads(vault, "new", *FLAGS, "--name", "X", "--rate", "900")
-    assert (r.returncode, r.stderr) == (1, "--rate needs a --currency\n")
+    assert (r.returncode, r.stderr) == (1, "threads: error: --rate needs a --currency\n")
     r = threads(vault, "new", "--kind", "people", "--category", "personal", "--name", "X")
     assert r.returncode == 2 and "invalid choice" in r.stderr
 
@@ -139,7 +139,7 @@ def test_delete_with_yes(v):
 
 
 def test_delete_not_found_and_ambiguous(v):
-    assert threads(v, "delete", "Nope", "-y").stderr == "not found: Nope\n"
+    assert threads(v, "delete", "Nope", "-y").stderr == "threads: error: not found: Nope\n"
     v.write_thread("Topics", "SGB")
     r = threads(v, "delete", "SGB", "-y")
     assert r.returncode == 1
@@ -167,7 +167,7 @@ def test_new_fails_instead_of_prompting_for_a_missing_field(vault, missing):
 def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     for blank in ("", "  "):
         r = threads(vault, "new", *FLAGS, "--name", blank)
-        assert (r.returncode, r.stderr) == (1, "empty name\n")
+        assert (r.returncode, r.stderr) == (1, "threads: error: empty name\n")
     assert list((vault.home / "threads").rglob("*.md")) == []
     assert threads(vault, "new", *FLAGS, "--name", " Acme ").returncode == 0
     assert (vault.home / "threads" / "Projects" / "Acme.md").exists()
@@ -177,7 +177,7 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(v):
     path = v.home / "threads" / "Projects" / "SGB.md"
     r = threads(v, "delete", "SGB", input="y\n")
     assert r.returncode == 1
-    assert r.stderr == f"refusing to delete {path} without -y\n"
+    assert r.stderr == f"threads: error: refusing to delete {path} without -y\n"
     assert path.exists()
 
 
@@ -187,5 +187,5 @@ def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     outside threads/ (or crash), and a leading `.` would make a hidden file."""
     r = threads(vault, "new", *FLAGS, "--name", name)
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == f"name {name!r} cannot contain '/' or start with '.'\n"
+    assert r.stderr == f"threads: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []

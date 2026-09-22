@@ -117,15 +117,15 @@ def test_the_new_note_passes_lint(v):
 
 
 @pytest.mark.parametrize("argv, message", [
-    (["--type", "Log", "--topic", "  ", "--thread", "Topics/Zeta"], "notes: --topic is empty\n"),
+    (["--type", "Log", "--topic", "  ", "--thread", "Topics/Zeta"], "notes: error: --topic is empty\n"),
     (["--type", "Log", "--topic", "x", "--thread", "Nope"],
-     "notes: thread 'Nope' does not resolve to a thread file\n"),
+     "notes: error: thread 'Nope' does not resolve to a thread file\n"),
     (["--type", "Log", "--topic", "x", "--thread", "Topics/Zeta", "--person", "Riaz Arbi"],
-     "notes: --person is only for Meeting and Correspondence notes\n"),
+     "notes: error: --person is only for Meeting and Correspondence notes\n"),
     (["--type", "Report", "--topic", "x", "--thread", "Topics/Zeta", "--counterparty", "ACME"],
-     "notes: --counterparty and --location are only for Meeting notes\n"),
+     "notes: error: --counterparty and --location are only for Meeting notes\n"),
     (["--type", "Correspondence", "--topic", "x", "--thread", "Topics/Zeta", "--location", "Online"],
-     "notes: --counterparty and --location are only for Meeting notes\n"),
+     "notes: error: --counterparty and --location are only for Meeting notes\n"),
 ])
 def test_errors_write_nothing(v, argv, message):
     r = notes(v, "new", *argv)

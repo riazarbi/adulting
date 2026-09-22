@@ -222,16 +222,6 @@ def validate_priority(s):
 
 # ---------- frontmatter parsing (used for thread cache) ----------
 
-def parse_frontmatter_threads(text):
-    """The thread targets in a file's frontmatter: notes carry a `threads:`
-    list, logs a singular `thread:`. Wikilinks are unwrapped."""
-    fm, _ = V.parse_frontmatter_doc(text)
-    raw = fm.get('threads') or fm.get('thread') or []
-    if isinstance(raw, str):
-        raw = [raw]
-    return [V.unwiki(t) for t in raw if t]
-
-
 def build_threads_cache():
     """Walk all source files once, return {source_relpath: [threads]}."""
     cache = {}
@@ -240,7 +230,7 @@ def build_threads_cache():
         if text is None:
             continue
         rel = str(f.relative_to(vault_home()).with_suffix(''))
-        cache[rel] = parse_frontmatter_threads(text)
+        cache[rel] = V.note_threads(V.parse_frontmatter_doc(text)[0])
     return cache
 
 
@@ -273,7 +263,7 @@ def cmd_default(args):
         if text is None:
             unreadable.append((str(path), ["file is not valid UTF-8; skipped"]))
             continue
-        threads = parse_frontmatter_threads(text)
+        threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
         for i, raw_line, assignee, body, attr_block in find_action_lines(text):
             errors = []
             if not body:

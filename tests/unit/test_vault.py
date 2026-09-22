@@ -151,6 +151,23 @@ def test_new_id_is_eight_lowercase_hex_characters():
         assert re.fullmatch(r"[0-9a-f]{8}", V.new_id(set()))
 
 
+def test_note_threads_reads_either_key_and_unwraps_wikilinks():
+    note = '---\ntopic: x\nthreads:\n  - "[[Projects/SGB]]"\n  - Topics/Plain\ntype: Log\n---\nthreads: body\n'
+    assert V.note_threads(V.parse_frontmatter_doc(note)[0]) == ["Projects/SGB", "Topics/Plain"]
+    log = "---\nthread: '[[Topics/zeta]]'\n---\n"
+    assert V.note_threads(V.parse_frontmatter_doc(log)[0]) == ["Topics/zeta"]
+    assert V.note_threads({}) == []
+    assert V.note_threads({"threads": ["", "  ", "Topics/Plain"]}) == ["Topics/Plain"]
+
+
+def test_read_config_reads_the_owner_without_quotes():
+    assert V.read_config() == {}
+    cfg = V.vault_home() / ".adulting" / "config.yaml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('billing:\n  x: 1\nowner: "Riaz Arbi"\n')
+    assert V.read_config().get("owner") == "Riaz Arbi"
+
+
 # ---------- actions ----------
 
 def test_parse_action_attrs_keeps_good_values_and_reports_bad_ones():

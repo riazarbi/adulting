@@ -118,17 +118,6 @@ def extract_people(lines):
     return out
 
 
-def read_owner(config_path):
-    """The `owner:` from config.yaml, outer double quotes removed; '' if none."""
-    if not config_path.exists():
-        return ''
-    for line in records(config_path.read_text(**ENCODING)):
-        m = re.match(r'^owner:[ \t\n\r\f\v]*', line)
-        if m:
-            return re.sub(r'^"|"$', '', line[m.end():])
-    return ''
-
-
 # ---------- the metadata header ----------
 
 def header(lines, kind):

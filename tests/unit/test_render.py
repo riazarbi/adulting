@@ -29,13 +29,6 @@ def test_extract_people_unwraps_only_people_links():
     assert R.extract_people(["---", "people:", "  - A", "other: x", "  - B", "---"]) == ["A"]
 
 
-def test_read_owner(tmp_path):
-    assert R.read_owner(tmp_path / "missing.yaml") == ""
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text('billing:\n  x: 1\nowner: "Riaz Arbi"\nowner: Second\n')
-    assert R.read_owner(cfg) == "Riaz Arbi"
-
-
 def test_is_hr_and_pad_rules():
     assert R.is_hr("---") and R.is_hr(" * * * ") and R.is_hr("___")
     assert not R.is_hr("--") and not R.is_hr("-- text")

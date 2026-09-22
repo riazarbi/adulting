@@ -95,17 +95,13 @@ def note_records():
             continue
         if not fm:
             continue
-        raw = fm.get('threads') or fm.get('thread') or []
-        if isinstance(raw, str):
-            raw = [raw]
-        threads = [V.unwiki(t) or t for t in raw]
         out.append({
             'kind': 'note',
             'path': str(path),
             'date': event_date(fm.get('timestamp'), path.stem),
             'type': str(fm.get('type', '') or '').strip(),
             'topic': str(fm.get('topic', '') or '').strip(),
-            'threads': [t for t in threads if t],
+            'threads': V.note_threads(fm),
             'body': body,
         })
     return out

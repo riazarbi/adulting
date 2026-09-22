@@ -65,9 +65,6 @@ def note_path(stem):
 def note_info(path):
     """What `list` shows about one note, read from its frontmatter."""
     fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
-    raw = fm.get('threads') or fm.get('thread') or []
-    if isinstance(raw, str):
-        raw = [raw]
     timestamp = str(fm.get('timestamp') or '')
     return {
         'stem': path.stem,
@@ -75,7 +72,7 @@ def note_info(path):
         'timestamp': timestamp,
         'date': timestamp[:10],
         'type': str(fm.get('type') or ''),
-        'threads': [V.unwiki(t) for t in raw if t],
+        'threads': V.note_threads(fm),
         'topic': str(fm.get('topic') or ''),
     }
 
@@ -242,7 +239,7 @@ def cmd_render(args):
     out_dir = (Path(args.out).expanduser() if args.out else Path.home() / 'Downloads').resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     text = source.read_text(**render.ENCODING)
-    owner = render.read_owner(V.vault_home() / '.adulting' / 'config.yaml')
+    owner = V.read_config().get('owner', '')
     if args.subcommand == 'pdf':
         markdown = render.pdf_markdown(text, owner)
     elif args.subcommand == 'minutes':

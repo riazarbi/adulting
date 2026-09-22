@@ -148,6 +148,15 @@ def unwiki(s):
     return m.group(1) if m else (s or '').strip()
 
 
+def note_threads(fm):
+    """The thread refs in a note's or log's frontmatter: notes carry a
+    `threads:` list, logs a singular `thread:`. Wikilinks are unwrapped."""
+    raw = fm.get('threads') or fm.get('thread') or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [unwiki(t) for t in raw if unwiki(t)]
+
+
 def fuzzy_score(query, name):
     """Score a name against a query (lowercase compare). Higher = better.
     Heuristic ladder: exact > startswith > initials-equal > substring >

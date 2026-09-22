@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part B (B4): one frontmatter thread reader, one config reader
+
+- **`vault.note_threads(fm)`** reads the threads a note (`threads:`) or log (`thread:`) belongs to, wikilinks unwrapped. It replaces three copies, in `notes list`, `search`'s note records, and `tasks`' thread cache; `tasks.parse_frontmatter_threads` is gone.
+- **The owner comes from `vault.read_config()`.** `render.read_owner` was a second config reader used only for `owner:`. It differed only on odd configs: it kept single quotes and trailing spaces, and took the first of two `owner:` lines where `read_config` takes the last.
+- **Not merged: `parse_frontmatter` and `parse_frontmatter_doc`.** The review suggested it, but they read different things (thread files versus notes and logs), and merging them risks changing `threads show --json`. Left for a separate, measured change if ever wanted.
+- **Tests:** the thread reader and owner tests moved to the vault tests. **672 passing.**
+- **Verified on the vault copy:** `notes list` (text and JSON), `search activity`/`stream`, `tasks list` and `tasks --dry-run` give identical output before and after. So do all 116 minutes renders, and the text of all 228 PDFs matches.
+
 ## 2026-09-22 - review fixes, part B (B3): one ACTION attribute parser
 
 `buffer` and `tasks` each parsed an ACTION's `due:`/`scheduled:`/`priority:`/`depends:` attributes, and each checked people files and dates with its own copy of the same code.

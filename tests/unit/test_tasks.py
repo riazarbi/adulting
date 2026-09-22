@@ -34,14 +34,6 @@ def test_parse_anchor_rejects_other_lines(line):
     assert T.parse_anchor(line) is None
 
 
-def test_parse_frontmatter_threads():
-    note = '---\ntopic: x\nthreads:\n  - "[[Projects/SGB]]"\n  - Topics/Plain\ntype: Log\n---\nthreads: body\n'
-    assert T.parse_frontmatter_threads(note) == ["Projects/SGB", "Topics/Plain"]
-    log = "---\nthread: '[[Topics/zeta]]'\n---\n"
-    assert T.parse_frontmatter_threads(log) == ["Topics/zeta"]
-    assert T.parse_frontmatter_threads("no frontmatter") == []
-
-
 def test_sort_keys_and_thread_cell():
     high_late = T.parse_anchor("TASK: [#H] a <!--aaaa0002 entry:2026-05-27 due:2026-06-30-->")
     high_soon = T.parse_anchor("TASK: [#H] b <!--aaaa0003 entry:2026-05-28 due:2026-06-01-->")

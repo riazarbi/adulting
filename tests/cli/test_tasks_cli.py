@@ -437,7 +437,6 @@ def test_mutations_print_and_rewrite_the_line(board):
     # uses a semicolon.
     (["set-due", "bbbb0001", "soon"], "tasks: error: date must be YYYY-MM-DD, got 'soon'"),
     (["set-scheduled", "bbbb0001", "30/9"], "tasks: error: date must be YYYY-MM-DD, got '30/9'"),
-    (["set-priority", "bbbb0001", "Z"], "tasks: error: priority must be H, M, or L; got 'Z'"),
     (["add-depends", "aaaa0003", "aaaa0003"], "tasks: error: a task cannot depend on itself"),
 ])
 def test_mutation_errors_leave_the_file_alone(board, argv, message):
@@ -575,6 +574,15 @@ def test_rm_depends_unknown_target_fails(vault):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "tasks: error: no task found with uuid prefix 'deadbeef'\n"
     assert vault.read("notes/2026-05-27-09-15-22.md") == before
+
+
+def test_set_priority_takes_only_h_m_or_l(board):
+    before = board.snapshot()
+    r = tasks(board, "set-priority", "bbbb0001", "Z")
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.splitlines()[-1] == (
+        "tasks set-priority: error: argument priority: invalid choice: 'Z' (choose from 'H', 'M', 'L')")
+    assert board.snapshot() == before
 
 
 # ---------- add ----------

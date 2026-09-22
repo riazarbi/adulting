@@ -63,7 +63,7 @@ def test_regroup_lines_orders_groups_then_unknowns_then_unparsed():
 
 @pytest.fixture
 def buffer_home():
-    h = B.vault_home()
+    h = B.V.vault_home()
     for rel in ("threads/Projects/SGB.md", "people/Riaz Arbi.md", "notes/n.md",
                 "hours/Projects/SGB.md"):
         (h / rel).parent.mkdir(parents=True, exist_ok=True)

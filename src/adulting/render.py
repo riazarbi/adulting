@@ -1,15 +1,14 @@
 """Render a note as PDF-ready markdown: `notes pdf`, `notes minutes`, `notes agenda`.
 
-These began as the bash scripts notes_pdf, notes_minutes and notes_agenda,
-and still produce their output byte for byte, quirks included, so a note
-renders exactly as it always has. The fixtures in tests/fixtures/render pin
-that output; change it only on purpose.
+The fixtures in tests/fixtures/render pin the output byte for byte, quirks
+included (the deferred bugs listed in the refactor story); change it only on
+purpose.
 
 Text is read and written with errors='surrogateescape', so a note that is not
 valid UTF-8 passes through unchanged.
 
 The markdown is turned into a PDF by pandoc with xelatex, run from a scratch
-directory as before.
+directory.
 """
 
 import re
@@ -35,7 +34,7 @@ MINUTES_SUMMARY = (
     "\\newpage\n## Action Items\n\n" + HR_DASHES + "\n\n"
     "\\newpage\n\n")
 
-LEGACY_ACTION_RE = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
+CHECKBOX_ACTION_RE = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
 ACTION_RE = re.compile(r'^(?:ACTION|TASK|DONE):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
 COMMENT_RE = re.compile(r'\s*<!--[^>]*-->\s*')
 DONE_BOX_RE = re.compile(r'^-\s*\[x\]')
@@ -229,7 +228,7 @@ def action_rows(lines, owner):
     owner."""
     rows, seen = [], set()
     for line in lines:
-        m = LEGACY_ACTION_RE.match(line) or ACTION_RE.match(line)
+        m = CHECKBOX_ACTION_RE.match(line) or ACTION_RE.match(line)
         if not m:
             continue
         assignee = (m.group(1) or '').strip() or owner

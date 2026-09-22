@@ -20,9 +20,6 @@ import sys
 from datetime import date, timedelta
 
 from adulting import vault as V
-from adulting.vault import vault_home
-
-
 
 
 # Tokens that we never want to count as content (too generic to rank threads).
@@ -81,7 +78,7 @@ MONTH_IDX = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
 
 def load_threads():
     threads = []
-    threads_dir = vault_home() / 'threads'
+    threads_dir = V.vault_home() / 'threads'
     if not threads_dir.exists():
         return threads
     for kind_dir in sorted(threads_dir.iterdir()):
@@ -93,7 +90,7 @@ def load_threads():
 
 
 def load_people():
-    people_dir = vault_home() / 'people'
+    people_dir = V.vault_home() / 'people'
     if not people_dir.exists():
         return []
     return sorted(f.stem for f in people_dir.glob('*.md'))
@@ -120,16 +117,16 @@ def build_thread_index(threads):
     for thread in threads:
         name_tokens = _tokenize(thread.split('/', 1)[1])
         bump(thread, name_tokens, weight=10)
-        thread_file = vault_home() / 'threads' / f"{thread}.md"
+        thread_file = V.vault_home() / 'threads' / f"{thread}.md"
         if thread_file.exists():
             bump(thread, _tokenize(thread_file.read_text(encoding='utf-8', errors='ignore')))
-        log_dir = vault_home() / 'logs' / thread
+        log_dir = V.vault_home() / 'logs' / thread
         if log_dir.exists():
             for log in log_dir.glob('*.md'):
                 bump(thread, _tokenize(log.read_text(encoding='utf-8', errors='ignore')))
 
     thread_link_re = re.compile(r'\[\[((?:Projects|Processes|Topics)/[^\]]+)\]\]')
-    notes_dir = vault_home() / 'notes'
+    notes_dir = V.vault_home() / 'notes'
     if notes_dir.exists():
         for note in notes_dir.glob('*.md'):
             try:

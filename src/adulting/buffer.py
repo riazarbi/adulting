@@ -50,13 +50,10 @@ from datetime import datetime
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting.suggester import suggest
-from adulting.vault import vault_home
-
-
 
 
 def buffer_file():
-    return vault_home() / 'buffer.md'
+    return V.vault_home() / 'buffer.md'
 
 ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
@@ -136,7 +133,6 @@ def read_buffer():
 
 
 def write_buffer(lines):
-    buffer_file().parent.mkdir(parents=True, exist_ok=True)
     text = '\n'.join(lines)
     if text and not text.endswith('\n'):
         text += '\n'
@@ -237,8 +233,8 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
         body_text = text
 
     # The same rules the ACTION's attributes meet when they are ingested.
-    tokens = [f"due:{due}" if due else '', f"scheduled:{scheduled}" if scheduled else '',
-              f"priority:{priority}" if priority else '']
+    tokens = [f"{k}:{v}" for k, v in (('due', due), ('scheduled', scheduled),
+                                       ('priority', priority)) if v]
     tokens += [f"depends:{d}" for d in depends or []]
     attrs, errors = V.parse_action_attrs(tokens)
     if errors:
@@ -498,7 +494,7 @@ def cmd_flush(args):
     written_files = []
     for (thread, date), group in sorted(by_group.items()):
         kind, name = thread.split('/', 1)
-        log_dir = vault_home() / 'logs' / kind / name
+        log_dir = V.vault_home() / 'logs' / kind / name
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{date}.md"
 
@@ -536,7 +532,7 @@ def cmd_flush(args):
 
     if not args.quiet:
         for path, n in written_files:
-            rel = path.relative_to(vault_home())
+            rel = path.relative_to(V.vault_home())
             print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
         # Flush now so these lines come out ahead of anything the ingest
@@ -621,55 +617,55 @@ def main():
     parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_a = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
-    p_a.add_argument('text', help="The raw text to capture.")
-    p_a.set_defaults(func=cmd_add)
+    p = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
+    p.add_argument('text', help="The raw text to capture.")
+    p.set_defaults(func=cmd_add)
 
-    p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; run it with -y, else store as UNKNOWN.")
-    p_s.add_argument('text', help="The raw text to suggest a structured entry for.")
-    p_s.add_argument('-y', '--yes', action='store_true', help="Accept and run the suggestion.")
-    p_s.set_defaults(func=cmd_suggest)
+    p = sub.add_parser('suggest', help="Propose a structured add-* for raw text; run it with -y, else store as UNKNOWN.")
+    p.add_argument('text', help="The raw text to suggest a structured entry for.")
+    p.add_argument('-y', '--yes', action='store_true', help="Accept and run the suggestion.")
+    p.set_defaults(func=cmd_suggest)
 
-    p_at = sub.add_parser('add-text', help="Append a TEXT entry.")
-    p_at.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    p_at.add_argument('text', help="The observation to record.")
-    p_at.set_defaults(func=cmd_add_text)
+    p = sub.add_parser('add-text', help="Append a TEXT entry.")
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('text', help="The observation to record.")
+    p.set_defaults(func=cmd_add_text)
 
-    p_ar = sub.add_parser('add-ref', help="Append a REF entry.")
-    p_ar.add_argument('--date', metavar='YYYY-MM-DD',
+    p = sub.add_parser('add-ref', help="Append a REF entry.")
+    p.add_argument('--date', metavar='YYYY-MM-DD',
                       help="File under this day instead of today. Use the "
                            "date the thing happened, not the date you are "
                            "recording it.")
-    p_ar.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    p_ar.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
                          "hours/<Kind>/<Thread>, payments/<Kind>/<Thread>, "
                          "or <Kind>/<Thread>.")
-    p_ar.add_argument('summary', nargs='?', default='', help="Optional words shown after the link.")
-    p_ar.set_defaults(func=cmd_add_ref)
+    p.add_argument('summary', nargs='?', default='', help="Optional words shown after the link.")
+    p.set_defaults(func=cmd_add_ref)
 
-    p_aa = sub.add_parser('add-action', help="Append an ACTION entry. Also reachable as `tasks add`.")
-    p_aa.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    p_aa.add_argument('text', help="'(Assignee) description' or just 'description'.")
-    p_aa.add_argument('--due', help='YYYY-MM-DD due date applied on flush+ingest.')
-    p_aa.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
-    p_aa.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
-    p_aa.add_argument('--depends', action='append', default=[],
+    p = sub.add_parser('add-action', help="Append an ACTION entry. Also reachable as `tasks add`.")
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('text', help="'(Assignee) description' or just 'description'.")
+    p.add_argument('--due', help='YYYY-MM-DD due date applied on flush+ingest.')
+    p.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
+    p.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
+    p.add_argument('--depends', action='append', default=[],
                       help="A task's 8-character uuid, from `tasks list`; repeatable.")
-    p_aa.set_defaults(func=cmd_add_action)
+    p.set_defaults(func=cmd_add_action)
 
-    p_list = sub.add_parser('list', help="Show buffer with line numbers.")
-    p_list.add_argument('filter', nargs='?', default='', help="Only lines containing this text, ignoring case.")
-    p_list.set_defaults(func=cmd_list)
+    p = sub.add_parser('list', help="Show buffer with line numbers.")
+    p.add_argument('filter', nargs='?', default='', help="Only lines containing this text, ignoring case.")
+    p.set_defaults(func=cmd_list)
 
-    p_rm = sub.add_parser('rm', help="Remove a single line by line number.")
-    p_rm.add_argument('line_number', metavar='line-number', help="The line's number, from `buffer list`.")
-    p_rm.set_defaults(func=cmd_rm)
+    p = sub.add_parser('rm', help="Remove a single line by line number.")
+    p.add_argument('line_number', metavar='line-number', help="The line's number, from `buffer list`.")
+    p.set_defaults(func=cmd_rm)
 
-    p_tend = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")
-    p_tend.set_defaults(func=cmd_tend)
+    p = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")
+    p.set_defaults(func=cmd_tend)
 
-    p_flush = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
-    p_flush.set_defaults(func=cmd_flush)
+    p = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
+    p.set_defaults(func=cmd_flush)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

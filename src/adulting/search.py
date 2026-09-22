@@ -33,26 +33,14 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
+from adulting import buffer as B
+from adulting import tasks as T
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
-HOURS_FENCE = V.HOURS_FENCE
-PAYMENTS_FENCE = V.PAYMENTS_FENCE
 
 STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
                 'thread', 'person', 'pending')
-
-# A buffer line: thread wikilink, type tag, body, timestamp comment.
-BUFFER_LINE_RE = re.compile(
-    r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF):\s+(.+?)\s+'
-    r'<!--(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}')
-
-# A task anchor, in a note or a log. `entry:` is when it was taken on and
-# `end:` when it was finished — two events from one line, on different days.
-ANCHOR_RE = re.compile(
-    r'^(TASK|DONE):\s+(?:\[#[^\]]+\]\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s+'
-    r'<!--\s*([a-f0-9]{8})\s+entry:(\d{4}-\d{2}-\d{2})'
-    r'(?:\s+end:(\d{4}-\d{2}-\d{2}))?')
 
 # REF lines pointing at these are the record's own pointer back into the
 # log. The record is already a stream event read from its own file, so
@@ -64,13 +52,13 @@ DEFAULT_WINDOW_DAYS = 7
 
 # Body lines that count as a log entry.
 ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE):', re.M)
-DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
+LEADING_DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
 
 
 def event_date(fm_value, fallback_stem):
     """Event date as YYYY-MM-DD. Frontmatter wins; filename is the fallback."""
     for candidate in (str(fm_value or ''), fallback_stem):
-        m = DATE_RE.match(candidate.strip().strip('"\''))
+        m = LEADING_DATE_RE.match(candidate.strip().strip('"\''))
         if m:
             return m.group(1)
     return ''
@@ -163,32 +151,32 @@ def stream_documents():
             if line.startswith(('TEXT:', 'REF:')):
                 out.append(_event('log', r['date'], thread,
                                   line.split(':', 1)[1].strip(), r['path']))
+    # A task anchor is two events: `entry:` when it was taken on and `end:`
+    # when it was finished, usually on different days.
     for r in note_records() + log_records():
         thread = ', '.join(r['threads']) or '-'
         for line in r['body'].splitlines():
-            m = ANCHOR_RE.match(line.strip())
-            if not m:
+            a = T.parse_anchor(line.strip())
+            if not a:
                 continue
-            body = m.group(3)
-            if m.group(2):
-                body = f"({m.group(2)}) {body}"
-            out.append(_event('task', m.group(5), thread, body, r['path']))
-            if m.group(6):
-                out.append(_event('done', m.group(6), thread, body, r['path']))
+            body = f"({a.assignee}) {a.body}" if a.assignee else a.body
+            out.append(_event('task', a.entry, thread, body, r['path']))
+            if a.end:
+                out.append(_event('done', a.end, thread, body, r['path']))
     return out
 
 
 def stream_records():
     """Hours and payments, from their own files at their own times."""
     out = []
-    for path, ref, e in _safe_load('hours', HOURS_FENCE):
+    for path, ref, e in _safe_load('hours', V.HOURS_FENCE):
         if not e.get('startTime'):
             continue
         when = V.local(e['startTime'])
         out.append(_event('hours', when.strftime('%Y-%m-%d'), ref,
                           f"{V.fmt_duration(minutes_between(e))} {e.get('name','')}",
                           str(path), when.strftime('%H:%M')))
-    for path, ref, p in _safe_load('payments', PAYMENTS_FENCE, 'payments'):
+    for path, ref, p in _safe_load('payments', V.PAYMENTS_FENCE, 'payments'):
         if not p.get('received'):
             continue
         when = V.local(p['received'])
@@ -225,7 +213,7 @@ def stream_entities():
             except Exception:  # noqa: BLE001
                 continue
             started = str(fm.get('started') or '')[:10]
-            if not DATE_RE.match(started):
+            if not LEADING_DATE_RE.match(started):
                 continue
             rel = path.relative_to(base).with_suffix('')
             thread = str(rel) if kind == 'thread' else '-'
@@ -247,12 +235,9 @@ def stream_pending():
     if not buffer_file.exists():
         return []
     out = []
-    for line in buffer_file.read_text(encoding='utf-8').splitlines():
-        m = BUFFER_LINE_RE.match(line.strip())
-        if not m:
-            continue
-        thread, tag, body, date, clock = (m.group(1), m.group(2), m.group(3),
-                                          m.group(4), m.group(5))
+    entries, _, _ = B.parse_buffer_entries(buffer_file.read_text(encoding='utf-8').splitlines())
+    for e in entries:
+        thread, tag, body, date, clock = e['thread'], e['type'], e['body'], e['date'], e['ts'][11:16]
         # A buffered REF back at an hours or payments record is that
         # record's own pointer. The record is already a stream event read
         # from its own file, so showing the pointer too would list it twice
@@ -266,10 +251,7 @@ def stream_pending():
 
 def resolve_thread_arg(arg):
     """Accept 'SGB', 'Processes/SGB' or a wikilink. Returns the canonical ref."""
-    if not arg:
-        return None
-    kind, name, _ = V.resolve_target(arg, fold_case=True)
-    return V.thread_ref(kind, name)
+    return V.thread_ref(*V.resolve_target(arg, fold_case=True)[:2]) if arg else None
 
 
 def apply_filters(records, thread=None, type_=None, since=None, until=None,
@@ -308,11 +290,7 @@ def snippet(body, needle, width=90):
 def hours_in_window(since=None, until=None):
     """Minutes logged per thread ref within the window."""
     mins = defaultdict(int)
-    try:
-        records = list(V.load_all('hours', HOURS_FENCE))
-    except Exception:  # noqa: BLE001 - no hours yet is not an error
-        return mins
-    for _path, ref, rec in records:
+    for _path, ref, rec in V.load_all('hours', V.HOURS_FENCE):
         start, end = rec.get('startTime'), rec.get('endTime')
         if not start or not end:
             continue
@@ -458,29 +436,26 @@ def cmd_overview(args):
                    for r in recent],
     }
 
-    def render(_):
-        print(f"{data['thread']}")
-        if args.since or args.until:
-            print(f"window: {args.since or 'start'} to {args.until or 'today'}")
-        print()
-        types = ', '.join(f"{k} {v}" for k, v in sorted(by_type.items())) or '-'
-        print(f"  notes      {data['notes']:>4}   ({types})")
-        print(f"  logs       {data['logs']:>4}   {entries} entries")
-        print(f"  tasks      {data['tasks_open']:>4} open, {data['tasks_done']} done")
-        print(f"  hours      {fmt_hours(mins):>4}")
-        print(f"  last       {data['last'] or '-'}")
-        if recent:
-            print("\n  recent:")
-            w = max(len(r['path']) for r in recent)
-            for r in recent:
-                label = r['topic'] or f"{r.get('entries', 0)} entries"
-                print(f"    {r['path'].ljust(w)}  {r['date']}  "
-                      f"{r['type'] or '-'}  {label}")
-
     if args.json:
         print(json.dumps(data, indent=2))
-    else:
-        render(None)
+        return 0
+    print(f"{data['thread']}")
+    if args.since or args.until:
+        print(f"window: {args.since or 'start'} to {args.until or 'today'}")
+    print()
+    types = ', '.join(f"{k} {v}" for k, v in sorted(by_type.items())) or '-'
+    print(f"  notes      {data['notes']:>4}   ({types})")
+    print(f"  logs       {data['logs']:>4}   {entries} entries")
+    print(f"  tasks      {data['tasks_open']:>4} open, {data['tasks_done']} done")
+    print(f"  hours      {fmt_hours(mins):>4}")
+    print(f"  last       {data['last'] or '-'}")
+    if recent:
+        print("\n  recent:")
+        w = max(len(r['path']) for r in recent)
+        for r in recent:
+            label = r['topic'] or f"{r.get('entries', 0)} entries"
+            print(f"    {r['path'].ljust(w)}  {r['date']}  "
+                  f"{r['type'] or '-'}  {label}")
     return 0
 
 
@@ -554,50 +529,50 @@ def main():
         'search', "Search notes and logs, and summarise thread activity.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    n = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
-    n.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
-    n.add_argument('--type', help='Note type, e.g. Meeting. Case-insensitive.')
-    n.add_argument('--text', help='Case-insensitive literal, over topic and body.')
-    n.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
+    p = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
+    p.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('--type', help='Note type, e.g. Meeting. Case-insensitive.')
+    p.add_argument('--text', help='Case-insensitive literal, over topic and body.')
+    p.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                    help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
-    V.add_window_flags(n)
-    n.set_defaults(func=cmd_notes)
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_notes)
 
-    l = sub.add_parser('logs', help="Find daily logs by thread, date or text.")
-    l.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
-    l.add_argument('--text', help='Case-insensitive literal, over the entry lines.')
-    l.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
+    p = sub.add_parser('logs', help="Find daily logs by thread, date or text.")
+    p.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('--text', help='Case-insensitive literal, over the entry lines.')
+    p.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                    help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
-    V.add_window_flags(l)
-    l.set_defaults(func=cmd_logs)
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_logs)
 
-    a = sub.add_parser('activity',
+    p = sub.add_parser('activity',
                        help="Rank threads by what happened in a window.")
-    a.add_argument('--thread', help='Limit to one thread.')
-    V.add_window_flags(a)
-    a.set_defaults(func=cmd_activity)
+    p.add_argument('--thread', help='Limit to one thread.')
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_activity)
 
-    o = sub.add_parser('overview', help="The whole picture of one thread.")
-    o.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    o.add_argument('--limit', type=int, default=5,
+    p = sub.add_parser('overview', help="The whole picture of one thread.")
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('--limit', type=int, default=5,
                    help='Recent items to list (default 5; 0 for all).')
-    V.add_window_flags(o)
-    o.set_defaults(func=cmd_overview)
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_overview)
 
-    st = sub.add_parser('stream',
+    p = sub.add_parser('stream',
                         help="Every dated record, merged into one chronology.")
-    st.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
-    st.add_argument('--kind', help=f"Comma-separated: {', '.join(STREAM_KINDS)}. "
+    p.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('--kind', help=f"Comma-separated: {', '.join(STREAM_KINDS)}. "
                                    f"Default all.")
-    st.add_argument('--text', help='Case-insensitive literal over thread and summary.')
-    st.add_argument('--today', action='store_true',
+    p.add_argument('--text', help='Case-insensitive literal over thread and summary.')
+    p.add_argument('--today', action='store_true',
                     help="Just today. Shorthand for --since and --until today.")
-    st.add_argument('--reverse', action='store_true',
+    p.add_argument('--reverse', action='store_true',
                     help='Oldest first (default is newest first).')
-    st.add_argument('--limit', type=int, default=100,
+    p.add_argument('--limit', type=int, default=100,
                     help='Max events (default 100; 0 for all).')
-    V.add_window_flags(st)
-    st.set_defaults(func=cmd_stream)
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_stream)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

@@ -96,7 +96,7 @@ def test_rank_threads_prefers_rare_terms():
 
 @pytest.fixture
 def small_vault():
-    home = G.vault_home()
+    home = G.V.vault_home()
     files = {
         "threads/Processes/SGB.md": "# SGB\nlease fund symonds\n",
         "threads/Topics/Wellness.md": "# Wellness\nsquash gym\n",

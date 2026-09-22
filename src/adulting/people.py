@@ -12,10 +12,9 @@ import sys
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
-from adulting.vault import vault_home
 
 def people_dir():
-    return vault_home() / 'people'
+    return V.vault_home() / 'people'
 
 
 def discover_people():
@@ -110,30 +109,30 @@ def main():
     parser = V.command_parser('people', "Manage people files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_list = sub.add_parser('list', help="List person files (open by default).")
-    p_list.add_argument('query', nargs='?', default=None,
+    p = sub.add_parser('list', help="List person files (open by default).")
+    p.add_argument('query', nargs='?', default=None,
                         help="Optional fuzzy search; ranks results by similarity.")
-    p_list.add_argument('--all', action='store_true',
+    p.add_argument('--all', action='store_true',
                         help="Include closed people (default: open only).")
-    p_list.add_argument('--json', action='store_true', help="JSON output.")
-    p_list.set_defaults(func=cmd_list)
+    p.add_argument('--json', action='store_true', help="JSON output.")
+    p.set_defaults(func=cmd_list)
 
-    p_show = sub.add_parser('show', help="Show a single person file.")
-    p_show.add_argument('person', help="Full name (matches filename without .md).")
-    p_show.add_argument('--json', action='store_true', help="JSON output.")
-    p_show.set_defaults(func=cmd_show)
+    p = sub.add_parser('show', help="Show a single person file.")
+    p.add_argument('person', help="Full name (matches filename without .md).")
+    p.add_argument('--json', action='store_true', help="JSON output.")
+    p.set_defaults(func=cmd_show)
 
-    p_new = sub.add_parser('new', help="Create a person file.")
-    p_new.add_argument('--name', required=True, help="Full name; becomes the filename.")
-    p_new.add_argument('--category', required=True, choices=V.CATEGORIES,
+    p = sub.add_parser('new', help="Create a person file.")
+    p.add_argument('--name', required=True, help="Full name; becomes the filename.")
+    p.add_argument('--category', required=True, choices=V.CATEGORIES,
                        help="Relationship category.")
-    p_new.set_defaults(func=cmd_new)
+    p.set_defaults(func=cmd_new)
 
-    p_delete = sub.add_parser('delete', help="Permanently delete a person file.")
-    p_delete.add_argument('person', help="Full name.")
-    p_delete.add_argument('-y', '--yes', action='store_true',
+    p = sub.add_parser('delete', help="Permanently delete a person file.")
+    p.add_argument('person', help="Full name.")
+    p.add_argument('-y', '--yes', action='store_true',
                           help="Required: confirms the permanent delete.")
-    p_delete.set_defaults(func=cmd_delete)
+    p.set_defaults(func=cmd_delete)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

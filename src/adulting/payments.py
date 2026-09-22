@@ -33,13 +33,11 @@ from adulting import statement as S
 from adulting import statement_pdf as P
 
 SUBDIR = 'payments'
-FENCE = V.PAYMENTS_FENCE
 HEADING = ' — payments'
 KEY = 'payments'
 
 # `hours` side, for the statement.
 HOURS_SUBDIR = 'hours'
-HOURS_FENCE = V.HOURS_FENCE
 
 
 def by_received(p):
@@ -82,14 +80,14 @@ def build_payment(amount, received, currency, account, note, ids):
 
 
 def save(path, records, ref, currency):
-    V.write_records(path, records, FENCE, ref, currency, key=KEY,
+    V.write_records(path, records, V.PAYMENTS_FENCE, ref, currency, key=KEY,
                     sort_key=by_received, heading=HEADING)
 
 
 def append_payment(kind, name, payment):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
-    save(path, V.read_records(path, FENCE, KEY) + [payment], ref, payment['currency'])
+    save(path, V.read_records(path, V.PAYMENTS_FENCE, KEY) + [payment], ref, payment['currency'])
     # A REF in the buffer puts this payment in the thread's daily log on the
     # next flush, filed under the day it was received. Best-effort and
     # silent: see buffer.add_ref. `ref` is already the directory form.
@@ -133,7 +131,7 @@ def collect(thread=None, since=None, until=None):
     if thread:
         kind, name, _ = V.resolve_target(thread)
         want = V.thread_ref(kind, name)
-    for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
+    for path, ref, p in V.load_all(SUBDIR, V.PAYMENTS_FENCE, KEY):
         if want and ref != want:
             continue
         if not p.get('received'):
@@ -184,14 +182,15 @@ def cmd_list(args):
 
 
 def find_payment(pid):
-    for path, ref, p in V.load_all(SUBDIR, FENCE, KEY):
-        if p.get('id') == pid:
-            return path, ref, p
-    V.die(f"no payment with id {pid!r}")
+    """(path, thread_ref, payments, payment): see vault.find_record."""
+    found = V.find_record(SUBDIR, V.PAYMENTS_FENCE, pid, KEY)
+    if not found:
+        V.die(f"no payment with id {pid!r}")
+    return found
 
 
 def cmd_show(args):
-    _, ref, p = find_payment(args.id)
+    _, ref, _, p = find_payment(args.id)
     row = as_output(as_row(ref, p))
     if args.json:
         print(json.dumps(row, indent=2))
@@ -202,9 +201,7 @@ def cmd_show(args):
 
 
 def cmd_edit(args):
-    path, ref, _ = find_payment(args.id)
-    records = V.read_records(path, FENCE, KEY)
-    target = next(p for p in records if p.get('id') == args.id)
+    path, ref, records, target = find_payment(args.id)
 
     if args.amount is not None:
         target['amount'] = amount_json(parse_amount(args.amount))
@@ -228,10 +225,10 @@ def cmd_edit(args):
 
 
 def cmd_rm(args):
-    path, ref, _ = find_payment(args.id)
+    path, ref, records, target = find_payment(args.id)
     if not args.yes:
         V.die(f"refusing to delete {args.id} without -y")
-    records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
+    records = [x for x in records if x is not target]
     save(path, records, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
     return 0
@@ -269,7 +266,7 @@ def one_thread_statement(thread_arg, as_of):
     currency = V.resolve_currency(tpath, ref, None)
 
     entries = []
-    for _, r, e in V.load_all(HOURS_SUBDIR, HOURS_FENCE):
+    for _, r, e in V.load_all(HOURS_SUBDIR, V.HOURS_FENCE):
         if r != ref or not e.get('startTime') or not e.get('endTime'):
             continue
         # Only time billed in the statement's currency is charged. Unbilled
@@ -284,7 +281,7 @@ def one_thread_statement(thread_arg, as_of):
                         'rate': e.get('rate', 0) or 0})
 
     paid = []
-    for _, r, pm in V.load_all(SUBDIR, FENCE, KEY):
+    for _, r, pm in V.load_all(SUBDIR, V.PAYMENTS_FENCE, KEY):
         if r != ref or not pm.get('received'):
             continue
         paid.append({'on': V.local(pm['received']).date(),
@@ -374,48 +371,48 @@ def main():
         'payments', "Record money received against threads.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    log = sub.add_parser('log', help="Record a receipt.")
-    log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    log.add_argument('amount', nargs='?', help="Amount received.")
-    log.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
-    log.add_argument('-d', '--date', help="Date received, YYYY-MM-DD (default today).")
-    log.add_argument('-t', '--time', help="HH:MM (default now).")
-    log.add_argument('-a', '--account', help="Which account it landed in.")
-    log.add_argument('-n', '--note', nargs='*', help="Free-text note.")
-    log.set_defaults(func=cmd_log)
+    p = sub.add_parser('log', help="Record a receipt.")
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('amount', nargs='?', help="Amount received.")
+    p.add_argument('-c', '--currency', help="ISO code; defaults to the thread's.")
+    p.add_argument('-d', '--date', help="Date received, YYYY-MM-DD (default today).")
+    p.add_argument('-t', '--time', help="HH:MM (default now).")
+    p.add_argument('-a', '--account', help="Which account it landed in.")
+    p.add_argument('-n', '--note', nargs='*', help="Free-text note.")
+    p.set_defaults(func=cmd_log)
 
-    ls = sub.add_parser('list', help="List payments.")
-    ls.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
-    V.add_window_flags(ls)
-    ls.set_defaults(func=cmd_list)
+    p = sub.add_parser('list', help="List payments.")
+    p.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_list)
 
-    st = sub.add_parser('statement', help="Billed vs received, by thread and currency.")
-    st.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
-    V.add_window_flags(st)
-    st.add_argument('--as-of', help="Statement date, YYYY-MM-DD; drives aging (default: today).")
-    st.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
-    st.set_defaults(func=cmd_statement)
+    p = sub.add_parser('statement', help="Billed vs received, by thread and currency.")
+    p.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(p)
+    p.add_argument('--as-of', help="Statement date, YYYY-MM-DD; drives aging (default: today).")
+    p.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
+    p.set_defaults(func=cmd_statement)
 
-    sh = sub.add_parser('show', help="Show one payment.")
-    sh.add_argument('id', help="The payment's 8-character id, from `payments list`.")
-    sh.add_argument('--json', action='store_true', help='JSON output.')
-    sh.set_defaults(func=cmd_show)
+    p = sub.add_parser('show', help="Show one payment.")
+    p.add_argument('id', help="The payment's 8-character id, from `payments list`.")
+    p.add_argument('--json', action='store_true', help='JSON output.')
+    p.set_defaults(func=cmd_show)
 
-    ed = sub.add_parser('edit', help="Change one field of a payment.")
-    ed.add_argument('id', help="The payment's 8-character id, from `payments list`.")
-    ed.add_argument('--amount', help="New amount received.")
-    ed.add_argument('-c', '--currency', help="New ISO currency code.")
-    ed.add_argument('-d', '--date', help="New date received, YYYY-MM-DD.")
-    ed.add_argument('-t', '--time', help="New time received, HH:MM.")
-    ed.add_argument('-a', '--account', help="New account it landed in.")
-    ed.add_argument('-n', '--note', nargs='*', help="New free-text note.")
-    ed.set_defaults(func=cmd_edit)
+    p = sub.add_parser('edit', help="Change one field of a payment.")
+    p.add_argument('id', help="The payment's 8-character id, from `payments list`.")
+    p.add_argument('--amount', help="New amount received.")
+    p.add_argument('-c', '--currency', help="New ISO currency code.")
+    p.add_argument('-d', '--date', help="New date received, YYYY-MM-DD.")
+    p.add_argument('-t', '--time', help="New time received, HH:MM.")
+    p.add_argument('-a', '--account', help="New account it landed in.")
+    p.add_argument('-n', '--note', nargs='*', help="New free-text note.")
+    p.set_defaults(func=cmd_edit)
 
-    rm = sub.add_parser('rm', help="Delete a payment.")
-    rm.add_argument('id', help="The payment's 8-character id, from `payments list`.")
-    rm.add_argument('-y', '--yes', action='store_true',
+    p = sub.add_parser('rm', help="Delete a payment.")
+    p.add_argument('id', help="The payment's 8-character id, from `payments list`.")
+    p.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
-    rm.set_defaults(func=cmd_rm)
+    p.set_defaults(func=cmd_rm)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

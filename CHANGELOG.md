@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review round 2, part R-C: consistency
+
+- **Shared names used directly:**
+  - `V.HOURS_FENCE`, `V.PAYMENTS_FENCE` and `V.KIND_DIRS` replace the local copies in `hours`, `payments`, `search` and `threads`. `search.DATE_RE` is renamed `LEADING_DATE_RE`, so it no longer shadows `V.DATE_RE`.
+  - `search` parses task anchors with `tasks.parse_anchor` and buffer lines with `buffer.parse_buffer_entries`, instead of its own copies of their regexes. They are stricter, and on the vault copy they match exactly the same lines.
+- **One naming style:** `V.vault_home()` everywhere, no module imports `vault_home` on its own, and every subparser is `p = sub.add_parser(...)`.
+- **Dead code removed:**
+  - The `rm-depends` branch that could not run.
+  - The `if not tok` guard in `parse_action_attrs`; `buffer_action` no longer builds empty tokens.
+  - `write_buffer`'s mkdir and `require_repo`'s second vault check, both made unreachable by `require_vault`.
+  - The single-use closure in `search overview`, and a four-line `resolve_thread_arg` (now one).
+  - `hours edit/rm` and `payments edit/rm` used to read the file again to find the record they had just found. The new `vault.find_record` returns the record together with its file's list.
+  - The first handler in `search.hours_in_window`, which could not trigger. **Kept:** the second. A hand-edited `startTime` that is not ISO reaches it, and without it `search activity` crashes with a traceback; a new test proves it is reachable.
+- **Validate or catch, not both:** `tasks.validate_date` and `validate_priority` are gone. `set-due` and `set-scheduled` stop directly, and `set-priority` takes `choices=H,M,L`, so a bad priority is now an argparse usage error (exit 2).
+- **Comments that told history** in `notes` and `render` now say what the code does, and `LEGACY_ACTION_RE` is `CHECKBOX_ACTION_RE`.
+- **`--since` and `--until` must be real dates** (`vault.iso_date`). `hours list --since x` used to be accepted, and bounded nothing.
+- **Verified on the vault copy:** `search` stream/overview/activity, `tasks`, `hours` and `payments` edit/rm, and the buffer's pending events are identical before and after. **765 passing.**
+
 ## 2026-09-22 - review round 2, part R-B: the rest of the deduplication
 
 R-B1 and R-B3 went in with R-A.

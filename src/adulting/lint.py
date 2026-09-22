@@ -16,11 +16,9 @@ from pathlib import Path
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
-from adulting.vault import vault_home
 
 # The schemas ship inside the package, next to this module.
 SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
-
 
 
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
@@ -315,7 +313,7 @@ def wikilink_exists(target):
 
 def find_file_schema(path, fm, schemas):
     """Match by filename + applies_when + (new) directory scope."""
-    home = vault_home()
+    home = V.vault_home()
     rel = path.relative_to(home) if home in path.parents or path.parent == home else path
     rel_str = str(rel)
     for s in schemas.values():
@@ -684,7 +682,7 @@ def _rotate_to_min(seq):
 
 def discover_files():
     for sub in ('notes', 'threads', 'people', 'logs', 'hours', 'payments'):
-        d = vault_home() / sub
+        d = V.vault_home() / sub
         if not d.is_dir():
             continue
         for root, dirs, files in os.walk(d):

@@ -47,7 +47,7 @@ def test_cap_block_truncates_and_says_so():
 
 @pytest.fixture
 def repo():
-    home = C.vault_home()
+    home = C.V.vault_home()
     home.mkdir(parents=True, exist_ok=True)
 
     def git(*args):
@@ -60,10 +60,6 @@ def repo():
     git("commit", "-qm", "seed")
     return home, git
 
-
-def test_vault_home_follows_the_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("ADULTING_HOME", str(tmp_path / "elsewhere"))
-    assert C.vault_home() == tmp_path / "elsewhere"
 
 
 def test_status_entries_parses_every_kind_of_change(repo):

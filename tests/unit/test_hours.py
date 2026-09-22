@@ -95,7 +95,7 @@ def test_collect_filters_by_date(appended):
 
 
 def test_find_entry_returns_its_file_and_thread(appended):
-    path, ref, e = H.find_entry("aaaa0001")
+    path, ref, _, e = H.find_entry("aaaa0001")
     assert (path.name, ref, e["id"]) == ("SANA.md", "Projects/SANA", "aaaa0001")
 
 
@@ -108,5 +108,5 @@ def test_find_entry_refuses_an_unknown_id(appended, monkeypatch, capsys):
 
 
 def test_as_row_charges_the_entry(appended):
-    _, ref, e = H.find_entry("aaaa0001")
+    _, ref, _, e = H.find_entry("aaaa0001")
     assert H.as_row(ref, e)["amount"] == Decimal("3750.00")

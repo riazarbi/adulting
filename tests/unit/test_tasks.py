@@ -35,17 +35,10 @@ def test_parse_anchor_rejects_other_lines(line):
 
 
 
-def test_validators():
-    assert T.validate_date("2026-05-27") == "2026-05-27"
-    with pytest.raises(ValueError):
-        T.validate_date("27 May")
-    with pytest.raises(ValueError):
-        T.validate_priority("Z")
-
 
 @pytest.fixture
 def tasks_home():
-    h = T.vault_home()
+    h = T.V.vault_home()
     files = {
         "notes/2026-01-01-00-00-00.md": '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\n'
                                         "TASK: one <!--aaaa0001 entry:2026-01-01-->\nplain\n",

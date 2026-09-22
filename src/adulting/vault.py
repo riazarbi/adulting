@@ -21,7 +21,6 @@ from decimal import Decimal
 from pathlib import Path
 
 
-
 def vault_home():
     """The vault directory. Read on every call, not at import, so tests
     can point it somewhere else."""
@@ -92,10 +91,19 @@ RECORD_DIRS = [('hours', HOURS_FENCE), ('payments', PAYMENTS_FENCE)]
 
 # ---------- command-line flags ----------
 
+def iso_date(value):
+    """An argparse type: a real date written YYYY-MM-DD, kept as text."""
+    try:
+        datetime.strptime(value, '%Y-%m-%d')
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a date as YYYY-MM-DD, got {value!r}")
+    return value
+
+
 def add_window_flags(parser):
     """--since, --until and --json, worded the same for every command."""
-    parser.add_argument('--since', metavar='YYYY-MM-DD', help='On or after this date.')
-    parser.add_argument('--until', metavar='YYYY-MM-DD', help='On or before this date.')
+    parser.add_argument('--since', metavar='YYYY-MM-DD', type=iso_date, help='On or after this date.')
+    parser.add_argument('--until', metavar='YYYY-MM-DD', type=iso_date, help='On or before this date.')
     parser.add_argument('--json', action='store_true', help='JSON output.')
 
 
@@ -486,6 +494,19 @@ def record_files(subdir):
                 yield Path(root) / f
 
 
+def find_record(subdir, fence, record_id, key='entries'):
+    """(path, thread_ref, records, record) for the record with this id, or
+    None. `records` is every record in its file and `record` is the one in
+    that list, so an edit to it can be saved with the rest."""
+    for path in record_files(subdir):
+        records = read_records(path, fence, key)
+        for r in records:
+            if r.get('id') == record_id:
+                fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+                return path, unwiki(fm.get('thread', '')) or path.stem, records, r
+    return None
+
+
 def load_all(subdir, fence, key='entries'):
     """Yield (path, thread_ref, record) for every record in a subdir."""
     for path in record_files(subdir):
@@ -546,8 +567,6 @@ def parse_action_attrs(tokens):
     attrs = {'depends': []}
     errors = []
     for tok in tokens:
-        if not tok:
-            continue
         if ':' not in tok:
             errors.append(f"unknown attr token {tok!r}")
             continue

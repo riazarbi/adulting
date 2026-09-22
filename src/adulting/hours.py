@@ -45,7 +45,6 @@ from adulting import statement as S
 from adulting import vault as V
 
 SUBDIR = 'hours'
-FENCE = V.HOURS_FENCE
 HEADING = ' — hours'
 
 DEFAULT_MINUTES = 60
@@ -108,14 +107,14 @@ def build_entry(desc, when, minutes, rate, currency, ids):
 
 
 def save(path, entries, ref, currency):
-    V.write_records(path, entries, FENCE, ref, currency,
+    V.write_records(path, entries, V.HOURS_FENCE, ref, currency,
                     sort_key=by_start, heading=HEADING)
 
 
 def append_entry(kind, name, entry):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
-    save(path, V.read_records(path, FENCE) + [entry], ref,
+    save(path, V.read_records(path, V.HOURS_FENCE) + [entry], ref,
          entry.get('currency'))
     # A REF in the buffer puts this entry in the thread's daily log on the
     # next flush, filed under the day the work happened. Best-effort and
@@ -168,7 +167,7 @@ def collect(thread=None, since=None, until=None):
     if thread:
         kind, name, _ = V.resolve_target(thread)
         want = V.thread_ref(kind, name)
-    for path, ref, e in V.load_all(SUBDIR, FENCE):
+    for path, ref, e in V.load_all(SUBDIR, V.HOURS_FENCE):
         if want and ref != want:
             continue
         if not e.get('startTime'):
@@ -259,14 +258,15 @@ def cmd_report(args):
 
 
 def find_entry(entry_id):
-    for path, ref, e in V.load_all(SUBDIR, FENCE):
-        if e.get('id') == entry_id:
-            return path, ref, e
-    V.die(f"no entry with id {entry_id!r}")
+    """(path, thread_ref, entries, entry): see vault.find_record."""
+    found = V.find_record(SUBDIR, V.HOURS_FENCE, entry_id)
+    if not found:
+        V.die(f"no entry with id {entry_id!r}")
+    return found
 
 
 def cmd_show(args):
-    _, ref, e = find_entry(args.id)
+    _, ref, _, e = find_entry(args.id)
     row = as_output(as_row(ref, e))
     if args.json:
         print(json.dumps(row, indent=2))
@@ -278,9 +278,7 @@ def cmd_show(args):
 
 
 def cmd_edit(args):
-    path, ref, _ = find_entry(args.id)
-    entries = V.read_records(path, FENCE)
-    target = next(e for e in entries if e.get('id') == args.id)
+    path, ref, entries, target = find_entry(args.id)
 
     if args.description is not None:
         target['name'] = ' '.join(args.description).strip()
@@ -317,10 +315,10 @@ def cmd_edit(args):
 
 
 def cmd_rm(args):
-    path, ref, _ = find_entry(args.id)
+    path, ref, entries, target = find_entry(args.id)
     if not args.yes:
         V.die(f"refusing to delete {args.id} without -y")
-    entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
+    entries = [e for e in entries if e is not target]
     save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
     return 0
@@ -333,51 +331,51 @@ def main():
         'hours', "Track consulting hours in the adulting vault.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    log = sub.add_parser('log', help="Append an entry.")
-    log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    log.add_argument('description', nargs='*', help="What was done.")
-    log.add_argument('-m', '--minutes', type=int, help="Duration (default 60).")
-    log.add_argument('-r', '--rate', type=int, help="Hourly rate; 0 = unbillable.")
-    log.add_argument('-c', '--currency',
+    p = sub.add_parser('log', help="Append an entry.")
+    p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p.add_argument('description', nargs='*', help="What was done.")
+    p.add_argument('-m', '--minutes', type=int, help="Duration (default 60).")
+    p.add_argument('-r', '--rate', type=int, help="Hourly rate; 0 = unbillable.")
+    p.add_argument('-c', '--currency',
                      help="ISO code; defaults to the thread's. Without either, "
                           "the entry is recorded as unbilled.")
-    log.add_argument('-d', '--date', help="YYYY-MM-DD (default today).")
-    log.add_argument('-t', '--time', help="HH:MM (default now).")
-    log.set_defaults(func=cmd_log)
+    p.add_argument('-d', '--date', help="YYYY-MM-DD (default today).")
+    p.add_argument('-t', '--time', help="HH:MM (default now).")
+    p.set_defaults(func=cmd_log)
 
-    ls = sub.add_parser('list', help="List entries.")
-    ls.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
-    V.add_window_flags(ls)
-    ls.set_defaults(func=cmd_list)
+    p = sub.add_parser('list', help="List entries.")
+    p.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_list)
 
-    rep = sub.add_parser('report',
+    p = sub.add_parser('report',
                          help="Totals by thread and currency, with unbilled "
                               "time totalled separately.")
-    rep.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
-    V.add_window_flags(rep)
-    rep.set_defaults(func=cmd_report)
+    p.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(p)
+    p.set_defaults(func=cmd_report)
 
-    sh = sub.add_parser('show', help="Show one entry.")
-    sh.add_argument('id', help="The entry's 8-character id, from `hours list`.")
-    sh.add_argument('--json', action='store_true', help='JSON output.')
-    sh.set_defaults(func=cmd_show)
+    p = sub.add_parser('show', help="Show one entry.")
+    p.add_argument('id', help="The entry's 8-character id, from `hours list`.")
+    p.add_argument('--json', action='store_true', help='JSON output.')
+    p.set_defaults(func=cmd_show)
 
-    ed = sub.add_parser('edit', help="Change one field of an entry.")
-    ed.add_argument('id', help="The entry's 8-character id, from `hours list`.")
-    ed.add_argument('--description', nargs='*', help="New description.")
-    ed.add_argument('-m', '--minutes', type=int,
+    p = sub.add_parser('edit', help="Change one field of an entry.")
+    p.add_argument('id', help="The entry's 8-character id, from `hours list`.")
+    p.add_argument('--description', nargs='*', help="New description.")
+    p.add_argument('-m', '--minutes', type=int,
                     help="New duration; the start stays where it is.")
-    ed.add_argument('-r', '--rate', type=int, help="New hourly rate; needs a currency.")
-    ed.add_argument('-c', '--currency', help="New ISO currency code.")
-    ed.add_argument('-d', '--date', help="Move to this day, YYYY-MM-DD; the duration is kept.")
-    ed.add_argument('-t', '--time', help="Move to this start time, HH:MM; the duration is kept.")
-    ed.set_defaults(func=cmd_edit)
+    p.add_argument('-r', '--rate', type=int, help="New hourly rate; needs a currency.")
+    p.add_argument('-c', '--currency', help="New ISO currency code.")
+    p.add_argument('-d', '--date', help="Move to this day, YYYY-MM-DD; the duration is kept.")
+    p.add_argument('-t', '--time', help="Move to this start time, HH:MM; the duration is kept.")
+    p.set_defaults(func=cmd_edit)
 
-    rm = sub.add_parser('rm', help="Delete an entry.")
-    rm.add_argument('id', help="The entry's 8-character id, from `hours list`.")
-    rm.add_argument('-y', '--yes', action='store_true',
+    p = sub.add_parser('rm', help="Delete an entry.")
+    p.add_argument('id', help="The entry's 8-character id, from `hours list`.")
+    p.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
-    rm.set_defaults(func=cmd_rm)
+    p.set_defaults(func=cmd_rm)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

@@ -17,10 +17,9 @@ Renders go to ~/Downloads, or --out DIR, as <stem>.md and <stem>.md.pdf.
 
 Non-interactive: nothing prompts, nothing opens an app, and deleting needs -y.
 
-Every subcommand except `new` first ingests ACTION: lines into tasks, as the
-old `notes` did, so a note shows its task anchors. If any ACTION line cannot be
-ingested, the command carries on, with a one-line warning when stderr is a
-terminal.
+Every subcommand except `new` first ingests ACTION: lines into tasks, so a
+note shows its task anchors. If any ACTION line cannot be ingested, the
+command carries on, with a one-line warning when stderr is a terminal.
 """
 
 import json
@@ -106,7 +105,8 @@ def ingest_actions():
 # ---------- writing a new note ----------
 
 def quote(text):
-    """A double-quoted YAML string. Only `"` is escaped, as the old bash did."""
+    """A double-quoted YAML string. Only `"` is escaped; a backslash is
+    written as typed."""
     return '"' + text.replace('"', '\\"') + '"'
 
 
@@ -118,8 +118,8 @@ def people_entry(name):
 
 
 def note_text(stem, note_type, topic, threads, people=(), counterparty='', location=''):
-    """The frontmatter and heading of a new note, field for field as the
-    old `notes new` wrote them. A Meeting always has a `location:` line."""
+    """The frontmatter and heading of a new note. A Meeting always has a
+    `location:` line, empty if none was given."""
     lines = ['---', f'topic: {topic}', f'type: {note_type}', 'threads:']
     lines += [f'  - "[[{thread}]]"' for thread in threads]
     lines += [f'timestamp: {stem}', f'aliases: [{quote(topic)}]']
@@ -210,8 +210,8 @@ def cmd_copy(args):
     target = notes_dir() / f"{stem}.md"
     if target.exists():
         V.die(f"{target} already exists; try again in a second")
-    # As the old `sed '/^topic:/s/$/ COPY/'` did: every line that starts
-    # with `topic:` gets the suffix, body lines included.
+    # Every line that starts with `topic:` gets the suffix, body lines
+    # included, and the copy keeps the original timestamp (deferred bug 4).
     lines = source.read_text(encoding='utf-8').split('\n')
     lines = [line + ' COPY' if line.startswith('topic:') else line for line in lines]
     target.write_text('\n'.join(lines), encoding='utf-8')

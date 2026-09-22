@@ -86,3 +86,16 @@ def test_the_suggester_reports_a_bad_date_instead_of_a_traceback(vault):
                        capture_output=True, text=True, env=vault.env)
     assert (r.returncode, r.stderr) == (0, "")
     assert json.loads(r.stdout)["subcmd"] == "add"
+
+
+@pytest.mark.parametrize("cli, argv", [
+    ("hours", ["list"]), ("hours", ["report"]), ("payments", ["list"]), ("payments", ["statement"]),
+    ("search", ["notes"]), ("search", ["stream"]),
+])
+@pytest.mark.parametrize("flag, value", [("--since", "x"), ("--until", "2026-13-01")])
+def test_a_window_date_must_be_a_real_date(vault, cli, argv, flag, value):
+    """`hours list --since x` used to be accepted, and bounded nothing."""
+    r = vault.run(*argv, flag, value, cli=cli)
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.splitlines()[-1] == (
+        f"{cli} {argv[0]}: error: argument {flag}: expected a date as YYYY-MM-DD, got {value!r}")

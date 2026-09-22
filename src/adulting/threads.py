@@ -12,10 +12,9 @@ import sys
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
-from adulting.vault import vault_home
 
 def threads_dir():
-    return vault_home() / 'threads'
+    return V.vault_home() / 'threads'
 
 
 def cmd_new(args):
@@ -100,34 +99,34 @@ def main():
     parser = V.command_parser('threads', "Manage thread files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_list = sub.add_parser('list', help="List thread files (open by default).")
-    p_list.add_argument('query', nargs='?', default=None,
+    p = sub.add_parser('list', help="List thread files (open by default).")
+    p.add_argument('query', nargs='?', default=None,
                         help="Optional fuzzy search; ranks results by similarity.")
-    p_list.add_argument('--all', action='store_true',
+    p.add_argument('--all', action='store_true',
                         help="Include paused/closed threads (default: open only).")
-    p_list.add_argument('--json', action='store_true', help="JSON output.")
-    p_list.set_defaults(func=cmd_list)
+    p.add_argument('--json', action='store_true', help="JSON output.")
+    p.set_defaults(func=cmd_list)
 
-    p_show = sub.add_parser('show', help="Show a single thread file.")
-    p_show.add_argument('thread', help="Thread name or 'Kind/Name'.")
-    p_show.add_argument('--json', action='store_true', help="JSON output.")
-    p_show.set_defaults(func=cmd_show)
+    p = sub.add_parser('show', help="Show a single thread file.")
+    p.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p.add_argument('--json', action='store_true', help="JSON output.")
+    p.set_defaults(func=cmd_show)
 
-    p_new = sub.add_parser('new', help="Create a thread file.")
-    p_new.add_argument('--name', required=True, help="Thread name; becomes the filename.")
-    p_new.add_argument('--kind', required=True, choices=list(V.KIND_DIRS),
+    p = sub.add_parser('new', help="Create a thread file.")
+    p.add_argument('--name', required=True, help="Thread name; becomes the filename.")
+    p.add_argument('--kind', required=True, choices=list(V.KIND_DIRS),
                        help="Which directory the thread lives in.")
-    p_new.add_argument('--category', required=True, choices=V.CATEGORIES,
+    p.add_argument('--category', required=True, choices=V.CATEGORIES,
                        help="Thread category.")
-    p_new.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
-    p_new.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")
-    p_new.set_defaults(func=cmd_new)
+    p.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
+    p.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")
+    p.set_defaults(func=cmd_new)
 
-    p_delete = sub.add_parser('delete', help="Permanently delete a thread file.")
-    p_delete.add_argument('thread', help="Thread name or 'Kind/Name'.")
-    p_delete.add_argument('-y', '--yes', action='store_true',
+    p = sub.add_parser('delete', help="Permanently delete a thread file.")
+    p.add_argument('thread', help="Thread name or 'Kind/Name'.")
+    p.add_argument('-y', '--yes', action='store_true',
                           help="Required: confirms the permanent delete.")
-    p_delete.set_defaults(func=cmd_delete)
+    p.set_defaults(func=cmd_delete)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

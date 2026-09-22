@@ -16,8 +16,6 @@ from pathlib import Path
 
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
-from adulting.vault import vault_home
-
 
 
 DEFAULT_MAX_FILE_LINES = 150
@@ -37,7 +35,7 @@ def git(*args, check=True):
     # refuses it as "dubious ownership". Passed per-command via -c; never
     # written to a config file. core.quotepath=false keeps non-ASCII note
     # filenames readable instead of \303\251-escaped.
-    cmd = ['git', '-C', str(vault_home()),
+    cmd = ['git', '-C', str(V.vault_home()),
            '-c', 'safe.directory=*',
            '-c', 'core.quotepath=false']
     r = subprocess.run(cmd + list(args), capture_output=True, text=True)
@@ -49,8 +47,7 @@ def git(*args, check=True):
 def require_repo():
     """The vault must be the root of a git repo. If it were merely a
     subdirectory of one, `git add -A` would sweep in files outside it."""
-    home = vault_home()
-    V.require_vault()
+    home = V.vault_home()
     r = git('rev-parse', '--show-toplevel', check=False)
     if r.returncode != 0:
         V.die(f"not a git repository: {home}")
@@ -248,25 +245,25 @@ def main():
             "rebases, resets, or pushes."))
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
-    p_review = sub.add_parser(
+    p = sub.add_parser(
         'review',
         help="Show everything that changed since the last commit. Read-only.")
-    p_review.add_argument('--max-file-lines', type=int, default=DEFAULT_MAX_FILE_LINES,
+    p.add_argument('--max-file-lines', type=int, default=DEFAULT_MAX_FILE_LINES,
                           help=f"Max diff lines shown per file (default: {DEFAULT_MAX_FILE_LINES}).")
-    p_review.add_argument('--max-lines', type=int, default=DEFAULT_MAX_LINES,
+    p.add_argument('--max-lines', type=int, default=DEFAULT_MAX_LINES,
                           help=f"Max lines of output overall (default: {DEFAULT_MAX_LINES}).")
-    p_review.set_defaults(func=cmd_review)
+    p.set_defaults(func=cmd_review)
 
-    p_save = sub.add_parser(
+    p = sub.add_parser(
         'save',
         help="Stage every change in the vault and commit it.")
-    p_save.add_argument('--message', required=True,
+    p.add_argument('--message', required=True,
                         help="Commit subject. Single line; use --body for detail.")
-    p_save.add_argument('--body',
+    p.add_argument('--body',
                         help="Commit body. May span multiple lines.")
-    p_save.add_argument('--dry-run', action='store_true',
+    p.add_argument('--dry-run', action='store_true',
                         help="Report what would be staged and committed; change nothing.")
-    p_save.set_defaults(func=cmd_save)
+    p.set_defaults(func=cmd_save)
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()

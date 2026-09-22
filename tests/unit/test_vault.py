@@ -14,6 +14,13 @@ import pytest
 from adulting import vault as V
 
 
+# ---------- location ----------
+
+def test_vault_home_follows_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADULTING_HOME", str(tmp_path / "elsewhere"))
+    assert V.vault_home() == tmp_path / "elsewhere"
+
+
 # ---------- frontmatter ----------
 
 def test_parse_frontmatter_doc_reads_scalars_and_strips_quotes():
@@ -162,7 +169,7 @@ def test_read_config_reads_sections_scalars_and_comments():
 def test_parse_action_attrs_keeps_good_values_and_reports_bad_ones():
     attrs, errors = V.parse_action_attrs(
         ["due:2026-09-20", "priority:H", "depends:aaaaaaaa", "depends:bbbbbbbb",
-         "scheduled:2026-09-15", ""])
+         "scheduled:2026-09-15"])
     assert attrs == {"depends": ["aaaaaaaa", "bbbbbbbb"], "due": "2026-09-20",
                      "priority": "H", "scheduled": "2026-09-15"}
     assert errors == []
@@ -386,3 +393,12 @@ def test_vault_file_needs_the_exact_spelling_and_stays_in_the_vault():
     assert V.vault_file("people") is None            # a folder is not a file
     assert V.vault_file("people/Nobody.md") is None
     assert V.person_exists("Riaz Arbi") and not V.person_exists("riaz arbi")
+
+
+def test_find_record_returns_the_record_inside_its_files_list():
+    path = V.vault_home() / "hours" / "Projects" / "SGB.md"
+    V.write_records(path, [{"id": "aaaa0001"}, {"id": "aaaa0002"}], V.HOURS_FENCE, "Projects/SGB", None)
+    found_path, ref, records, record = V.find_record("hours", V.HOURS_FENCE, "aaaa0002")
+    assert (found_path, ref, record) == (path, "Projects/SGB", {"id": "aaaa0002"})
+    assert record is records[1]
+    assert V.find_record("hours", V.HOURS_FENCE, "deadbeef") is None

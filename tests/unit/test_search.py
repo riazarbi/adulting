@@ -124,3 +124,16 @@ def test_resolve_thread_arg(search_home):
     assert S.resolve_thread_arg("sgb") == "Processes/SGB"
     with pytest.raises(SystemExit):
         S.resolve_thread_arg("Nope")
+
+
+def test_hours_in_window_skips_an_entry_with_a_malformed_time():
+    """A hand-edited startTime that is not ISO would otherwise crash
+    `search activity` with a traceback; lint is what reports it."""
+    V = S.V
+    home = V.vault_home()
+    (home / "hours" / "Projects").mkdir(parents=True)
+    (home / "hours" / "Projects" / "Alpha.md").write_text(
+        '---\nthread: "[[Projects/Alpha]]"\n---\n\n```simple-time-tracker\n'
+        '{"entries": [{"id": "aaaa0001", "startTime": "9am", "endTime": "2026-08-26T10:00:00.000Z"},\n'
+        '{"id": "aaaa0002", "startTime": "2026-08-26T09:00:00.000Z", "endTime": "2026-08-26T10:00:00.000Z"}]}\n```\n')
+    assert dict(S.hours_in_window()) == {"Projects/Alpha": 60}

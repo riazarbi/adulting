@@ -5,6 +5,7 @@ were run green against it. The last section specifies the removal of the
 `suggest` prompt and was written to fail against the old script.
 """
 
+import json
 import re
 from datetime import date
 
@@ -12,11 +13,6 @@ import pytest
 
 
 TS = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
-
-
-def buf(vault, *argv, input=""):
-    # input="" closes stdin, so any prompt would hit EOF instead of hanging.
-    return vault.run(*argv, cli="buffer", input=input)
 
 
 @pytest.fixture
@@ -35,20 +31,20 @@ def buffer_text(vault):
 # ---------- add-* ----------
 
 def test_add_writes_an_unknown_entry(buffer_vault):
-    r = buf(buffer_vault, "add", "  chase SGB  ")
+    r = buffer_vault.run("add", "  chase SGB  ", cli="buffer")
     assert re.fullmatch(rf"buffered: - UNKNOWN: chase SGB <!--{TS}-->\n", r.stdout)
     assert buffer_text(buffer_vault) == r.stdout[len("buffered: "):]
 
 
 def test_add_text_ref_action_line_shapes(buffer_vault):
     lines = [
-        buf(buffer_vault, "add-text", "Projects/SGB", "Auth wall unresolved").stdout,
-        buf(buffer_vault, "add-ref", "Projects/SGB", "notes/2026-09-10-14-30-00", "Kickoff").stdout,
-        buf(buffer_vault, "add-ref", "Topics/Wellness", "Projects/SGB").stdout,
-        buf(buffer_vault, "add-action", "Projects/SGB", "(Riaz Arbi) Draft scope", "--due", "2026-09-20",
+        buffer_vault.run("add-text", "Projects/SGB", "Auth wall unresolved", cli="buffer").stdout,
+        buffer_vault.run("add-ref", "Projects/SGB", "notes/2026-09-10-14-30-00", "Kickoff", cli="buffer").stdout,
+        buffer_vault.run("add-ref", "Topics/Wellness", "Projects/SGB", cli="buffer").stdout,
+        buffer_vault.run("add-action", "Projects/SGB", "(Riaz Arbi) Draft scope", "--due", "2026-09-20",
             "--priority", "H", "--scheduled", "2026-09-15", "--depends", "bbbbbbbb",
-            "--depends", "aaaaaaaa").stdout,
-        buf(buffer_vault, "add-action", "Projects/SGB", "Plain action").stdout,
+            "--depends", "aaaaaaaa", cli="buffer").stdout,
+        buffer_vault.run("add-action", "Projects/SGB", "Plain action", cli="buffer").stdout,
     ]
     shapes = [re.sub(TS, "TS", l) for l in lines]
     assert shapes == [
@@ -63,7 +59,7 @@ def test_add_text_ref_action_line_shapes(buffer_vault):
 
 
 def test_add_ref_date_files_under_that_day_and_keeps_the_clock(buffer_vault):
-    r = buf(buffer_vault, "add-ref", "--date", "2026-08-04", "Projects/SGB", "notes/2026-09-10-14-30-00")
+    r = buffer_vault.run("add-ref", "--date", "2026-08-04", "Projects/SGB", "notes/2026-09-10-14-30-00", cli="buffer")
     assert re.search(r"<!--2026-08-04T\d{2}:\d{2}:\d{2}-->", r.stdout)
 
 
@@ -87,7 +83,7 @@ def test_add_ref_date_files_under_that_day_and_keeps_the_clock(buffer_vault):
     (["add-action", "Projects/SGB", "x", "--depends", "XYZ"], "buffer: error: depends must be 8 hex chars; got 'XYZ'"),
 ])
 def test_add_errors_write_nothing(buffer_vault, argv, message):
-    r = buf(buffer_vault, *argv)
+    r = buffer_vault.run(*argv, cli="buffer")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message + "\n")
     assert not (buffer_vault.home / "buffer.md").exists()
 
@@ -99,12 +95,12 @@ def test_add_ref_accepts_every_record_kind(buffer_vault):
     buffer_vault.write("logs/Projects/SGB/2026-09-10.md", "x")
     for target in ("people/Igor Novak", "hours/Projects/SGB", "payments/Projects/SGB",
                    "logs/Projects/SGB/2026-09-10", "Topics/Wellness"):
-        assert buf(buffer_vault, "add-ref", "Projects/SGB", target).returncode == 0, target
+        assert buffer_vault.run("add-ref", "Projects/SGB", target, cli="buffer").returncode == 0, target
 
 
 def test_quiet_does_not_silence_add(buffer_vault):
     # DEFERRED BUG 6: --quiet does not silence the add-* commands.
-    r = buf(buffer_vault, "--quiet", "add-text", "Projects/SGB", "still printed")
+    r = buffer_vault.run("--quiet", "add-text", "Projects/SGB", "still printed", cli="buffer")
     assert r.stdout.startswith("buffered: ")
 
 
@@ -128,29 +124,29 @@ MESSY = [
 
 def test_list_numbers_lines_and_skips_blanks(buffer_vault):
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    out = buf(buffer_vault, "list").stdout.splitlines()
+    out = buffer_vault.run("list", cli="buffer").stdout.splitlines()
     assert out[0] == "   1  " + MESSY[0]
     assert out[6] == "   8  " + MESSY[7]
     assert len(out) == 11
 
 
 def test_list_filter_and_empty_messages(buffer_vault):
-    assert buf(buffer_vault, "list").stdout == "(buffer empty)\n"
+    assert buffer_vault.run("list", cli="buffer").stdout == "(buffer empty)\n"
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    assert [l[:4] for l in buf(buffer_vault, "list", "WELLNESS").stdout.splitlines()] == ["   1", "   8", "  12"]
-    assert buf(buffer_vault, "list", "zzz").stdout == "(no matching entries)\n"
+    assert [l[:4] for l in buffer_vault.run("list", "WELLNESS", cli="buffer").stdout.splitlines()] == ["   1", "   8", "  12"]
+    assert buffer_vault.run("list", "zzz", cli="buffer").stdout == "(no matching entries)\n"
 
 
 def test_rm(buffer_vault):
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    r = buf(buffer_vault, "rm", "4")
+    r = buffer_vault.run("rm", "4", cli="buffer")
     assert r.stdout == "removed line 4: garbage line\n"
     assert "garbage line" not in buffer_text(buffer_vault)
     before = buffer_text(buffer_vault)
     for argv, message in ((["rm", "abc"], "buffer: error: line number must be an integer; got 'abc'"),
                           (["rm", "0"], "buffer: error: line 0 out of range (buffer has 12 lines)"),
                           (["rm", "6"], "buffer: error: line 6 is empty")):
-        r = buf(buffer_vault, *argv)
+        r = buffer_vault.run(*argv, cli="buffer")
         assert (r.returncode, r.stdout, r.stderr) == (1, "", message + "\n"), argv
         assert buffer_text(buffer_vault) == before
 
@@ -182,7 +178,7 @@ def violation(line_no, message, raw):
 
 def test_tend_regroups_and_reports_every_violation(buffer_vault):
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    r = buf(buffer_vault, "tend")
+    r = buffer_vault.run("tend", cli="buffer")
     assert (r.returncode, r.stdout) == (1, "")
     assert buffer_text(buffer_vault) == REGROUPED
     lines = REGROUPED.split("\n")
@@ -201,31 +197,37 @@ def test_tend_regroups_and_reports_every_violation(buffer_vault):
 
 def test_tend_is_idempotent(buffer_vault):
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    first = buf(buffer_vault, "tend")
-    second = buf(buffer_vault, "tend")
+    first = buffer_vault.run("tend", cli="buffer")
+    second = buffer_vault.run("tend", cli="buffer")
     assert buffer_text(buffer_vault) == REGROUPED
     assert first.stderr == second.stderr
 
 
 def test_tend_reports_unresolvable_ref_targets_and_assignees(buffer_vault):
-    buffer_vault.write("buffer.md",
-          "- [[Projects/SGB]] REF: [[notes/nope]] x <!--2026-09-10T09:00:00-->\n"
-          "- [[Projects/SGB]] ACTION: (Ghost) x <!--2026-09-10T10:00:00-->\n")
-    stderr = buf(buffer_vault, "tend").stderr
-    assert "REF target 'notes/nope' does not resolve to a vault file" in stderr
-    assert "ACTION assignee 'Ghost' does not resolve to people/Ghost.md" in stderr
+    ref = "- [[Projects/SGB]] REF: [[notes/nope]] x <!--2026-09-10T09:00:00-->"
+    action = "- [[Projects/SGB]] ACTION: (Ghost) x <!--2026-09-10T10:00:00-->"
+    buffer_vault.write("buffer.md", f"{ref}\n{action}\n")
+    r = buffer_vault.run("tend", cli="buffer")
+    fix = "    fix: edit via `buffer rm {n}` and re-add via the matching `buffer add-*`\n"
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == (
+        "buffer has 2 violation(s):\n"
+        "  buffer.md:1: REF target 'notes/nope' does not resolve to a vault file\n"
+        f"    line: {ref}\n" + fix.format(n=1) +
+        "  buffer.md:2: ACTION assignee 'Ghost' does not resolve to people/Ghost.md\n"
+        f"    line: {action}\n" + fix.format(n=2))
 
 
 def test_tend_clean_and_quiet(buffer_vault):
     buffer_vault.write("buffer.md", "- [[Projects/SGB]] TEXT: ok <!--2026-09-10T09:00:00-->\n"
                           "- [[Topics/Wellness]] TEXT: ok <!--2026-09-10T09:00:00-->\n")
-    assert buf(buffer_vault, "tend").stdout == "buffer tended: 2 entries, 2 group(s).\n"
-    assert buf(buffer_vault, "--quiet", "tend").stdout == ""
+    assert buffer_vault.run("tend", cli="buffer").stdout == "buffer tended: 2 entries, 2 group(s).\n"
+    assert buffer_vault.run("--quiet", "tend", cli="buffer").stdout == ""
 
 
 def test_tend_creates_an_empty_buffer_file(buffer_vault):
     # DEFERRED BUG 5: tend on a vault with no buffer.md writes an empty one.
-    r = buf(buffer_vault, "tend")
+    r = buffer_vault.run("tend", cli="buffer")
     assert (r.returncode, r.stdout) == (0, "buffer tended: 0 entries, 0 group(s).\n")
     assert buffer_text(buffer_vault) == ""
 
@@ -242,7 +244,7 @@ CLEAN = (
 def test_flush_writes_logs_clears_the_buffer_and_ingests_actions(buffer_vault):
     buffer_vault.write("buffer.md", CLEAN)
     buffer_vault.write("logs/Topics/Wellness/2026-09-11.md", "---\nthread: x\n---\nexisting no newline")
-    r = buf(buffer_vault, "flush")
+    r = buffer_vault.run("flush", cli="buffer")
     assert r.returncode == 0
     out = r.stdout.splitlines()
     assert out[:3] == [
@@ -266,18 +268,9 @@ def test_flush_writes_logs_clears_the_buffer_and_ingests_actions(buffer_vault):
         "TEXT: second day\n")
 
 
-def test_flush_keeps_action_attrs_in_the_log_line(buffer_vault):
-    """The attrs ride into the log line for `tasks` to apply on ingest; the
-    ingested anchor still carries them."""
-    buffer_vault.write("buffer.md",
-          "- [[Projects/SGB]] ACTION: Draft <!--2026-09-10T15:00:00 due:2026-09-20 priority:H-->\n")
-    buf(buffer_vault, "--quiet", "flush")
-    assert "due:2026-09-20" in buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
-
-
 def test_flush_refuses_while_tend_fails_and_writes_nothing(buffer_vault):
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    r = buf(buffer_vault, "flush")
+    r = buffer_vault.run("flush", cli="buffer")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr.startswith("buffer has 9 violation(s):\n")
     assert list((buffer_vault.home / "logs").rglob("*.md")) == []
@@ -285,9 +278,9 @@ def test_flush_refuses_while_tend_fails_and_writes_nothing(buffer_vault):
 
 
 def test_flush_empty_and_quiet(buffer_vault):
-    assert buf(buffer_vault, "flush").stdout == "buffer is empty; nothing to flush.\n"
+    assert buffer_vault.run("flush", cli="buffer").stdout == "buffer is empty; nothing to flush.\n"
     buffer_vault.write("buffer.md", "- [[Projects/SGB]] TEXT: quiet <!--2026-09-10T09:00:00-->\n")
-    r = buf(buffer_vault, "--quiet", "flush")
+    r = buffer_vault.run("--quiet", "flush", cli="buffer")
     # DEFERRED BUG 6: --quiet silences flush but not the task ingest it runs.
     assert r.stdout == "Ingested: 0.  Failed: 0.\n"
     assert "TEXT: quiet" in buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
@@ -296,7 +289,7 @@ def test_flush_empty_and_quiet(buffer_vault):
 # ---------- suggest ----------
 
 def test_suggest_with_yes_runs_the_suggestion(buffer_vault):
-    r = buf(buffer_vault, "suggest", "Draft the SGB scope note by 2026-09-30", "-y")
+    r = buffer_vault.run("suggest", "Draft the SGB scope note by 2026-09-30", "-y", cli="buffer")
     assert r.returncode == 0
     lines = r.stdout.splitlines()
     assert lines[:2] == ["suggested:",
@@ -306,15 +299,15 @@ def test_suggest_with_yes_runs_the_suggestion(buffer_vault):
 
 
 def test_suggest_without_a_structured_suggestion_stores_unknown(buffer_vault):
-    r = buf(buffer_vault, "suggest", "zzzz qqqq", "-y")
+    r = buffer_vault.run("suggest", "zzzz qqqq", "-y", cli="buffer")
     lines = r.stdout.splitlines()
     assert lines[0] == "no structured suggestion; storing as UNKNOWN."
     assert re.fullmatch(rf"buffered: - UNKNOWN: zzzz qqqq <!--{TS}-->", lines[1])
-    assert buf(buffer_vault, "--quiet", "suggest", "zzzz qqqq").stdout.startswith("buffered: - UNKNOWN")
+    assert buffer_vault.run("--quiet", "suggest", "zzzz qqqq", cli="buffer").stdout.startswith("buffered: - UNKNOWN")
 
 
 def test_suggest_without_yes_and_without_a_terminal_stores_unknown(buffer_vault):
-    r = buf(buffer_vault, "suggest", "Draft the SGB scope note by 2026-09-30")
+    r = buffer_vault.run("suggest", "Draft the SGB scope note by 2026-09-30", cli="buffer")
     lines = r.stdout.splitlines()
     assert lines[1] == "  buffer add-action Projects/SGB 'Draft the SGB scope note' --due 2026-09-30"
     assert "storing as UNKNOWN." in lines[2]
@@ -323,15 +316,6 @@ def test_suggest_without_yes_and_without_a_terminal_stores_unknown(buffer_vault)
 
 
 # ---------- no interactivity (fails against the pre-port script) ----------
-
-def test_suggest_never_prompts_even_on_a_terminal(buffer_vault):
-    r = buffer_vault.run_on_a_terminal("suggest", "Draft the SGB scope note by 2026-09-30", cli="buffer")
-    assert r.returncode == 0
-    assert "accept?" not in r.stdout
-    assert r.stdout.splitlines()[2] == "not accepted (pass -y to accept); storing as UNKNOWN."
-    assert "- UNKNOWN: Draft the SGB scope note by 2026-09-30" in buffer_text(buffer_vault)
-    assert "ACTION" not in buffer_text(buffer_vault)
-
 
 def test_a_failed_ingest_after_flush_warns_and_keeps_the_flush(vault):
     """The buffer is cleared before the ingest runs, so an ingest failure
@@ -368,3 +352,45 @@ def test_add_ref_needs_the_exact_name_of_a_vault_file(buffer_vault, target):
     assert r.stderr == (f"buffer: error: ref target {target!r} does not resolve to a vault file "
                         "(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)\n")
     assert buffer_vault.snapshot() == before
+
+
+# ---------- thread names are matched exactly, as `threads` lists them ----------
+
+def test_add_refuses_a_wrongly_cased_thread(vault):
+    """macOS ignores case, so asking the filesystem let `Projects/sgb`
+    through, and flush wrote a wikilink that breaks on Linux."""
+    vault.write_thread("Projects", "SGB")
+    r = vault.run("add-text", "Projects/sgb", "wrong case", cli="buffer")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "buffer: error: thread 'Projects/sgb' does not resolve to a thread file\n"
+    assert not (vault.home / "buffer.md").exists()
+
+
+def test_add_accepts_any_form_and_stores_the_canonical_name(vault):
+    vault.write_thread("Projects", "SGB")
+    for form in ("SGB", "[[Projects/SGB]]", "Projects/SGB"):
+        r = vault.run("add-text", form, f"via {form}", cli="buffer")
+        assert r.returncode == 0, r.stderr
+    lines = vault.read("buffer.md").splitlines()
+    assert [line.split(" TEXT:")[0] for line in lines] == ["- [[Projects/SGB]]"] * 3
+
+
+def test_tend_flags_a_hand_written_wrongly_cased_thread(vault):
+    vault.write_thread("Projects", "SGB")
+    line = "- [[Projects/sgb]] TEXT: hand written <!--2026-09-10T09:00:00-->"
+    vault.write("buffer.md", line + "\n")
+    r = vault.run("tend", cli="buffer")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == ("buffer has 1 violation(s):\n"
+                        "  buffer.md:1: thread 'Projects/sgb' does not resolve\n"
+                        f"    line: {line}\n"
+                        "    fix: edit via `buffer rm 1` and re-add via the matching `buffer add-*`\n")
+
+
+def test_depends_help_says_a_whole_uuid(vault):
+    """--depends must be exactly 8 hex characters, so calling it a prefix
+    invites a shorter one that is then refused."""
+    manifest = json.loads(vault.run("--help-json", cli="buffer").stdout)
+    [sub] = [s for s in manifest["subcommands"] if s["name"] == "add-action"]
+    [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
+    assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."

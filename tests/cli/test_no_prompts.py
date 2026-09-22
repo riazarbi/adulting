@@ -32,36 +32,65 @@ def ids(vault, cli):
 
 
 REFUSALS = [
-    # (command, argv; "{hours}" / "{payments}" are filled with a record id)
-    ("hours", ["rm", "{hours}"]),
-    ("payments", ["rm", "{payments}"]),
-    ("people", ["delete", "Riaz Arbi"]),
-    ("people", ["delete", "../threads/Projects/SGB", "-y"]),
-    ("threads", ["delete", "SGB"]),
-    ("notes", ["delete", "2026-09-10-14-30-00"]),
-    ("hours", ["log"]),
-    ("payments", ["log"]),
-    ("people", ["new", "--category", "personal"]),
-    ("threads", ["new", "--kind", "project", "--category", "professional"]),
-    ("notes", ["new", "--type", "Log", "--topic", "x"]),
-    ("buffer", ["add-action"]),
-    ("tasks", ["add"]),
-    ("commit", ["save"]),
+    # (command, argv, exit code, last line of stderr). "{hours}", "{payments}"
+    # and "{home}" are filled in with a record id and the vault's path.
+    ("hours", ["rm", "{hours}"], 1, "hours: error: refusing to delete {hours} without -y"),
+    ("payments", ["rm", "{payments}"], 1, "payments: error: refusing to delete {payments} without -y"),
+    ("people", ["delete", "Riaz Arbi"], 1,
+     "people: error: refusing to delete {home}/people/Riaz Arbi.md without -y"),
+    ("people", ["delete", "../threads/Projects/SGB", "-y"], 1,
+     "people: error: name '../threads/Projects/SGB' cannot contain '/' or start with '.'"),
+    ("threads", ["delete", "SGB"], 1,
+     "threads: error: refusing to delete {home}/threads/Projects/SGB.md without -y"),
+    ("notes", ["delete", "2026-09-10-14-30-00"], 1,
+     "notes: error: refusing to delete {home}/notes/2026-09-10-14-30-00.md without -y"),
+    ("hours", ["log"], 2, "hours log: error: the following arguments are required: thread"),
+    ("payments", ["log"], 2, "payments log: error: the following arguments are required: thread"),
+    ("people", ["new", "--category", "personal"], 2,
+     "people new: error: the following arguments are required: --name"),
+    ("threads", ["new", "--kind", "project", "--category", "professional"], 2,
+     "threads new: error: the following arguments are required: --name"),
+    ("notes", ["new", "--type", "Log", "--topic", "x"], 2,
+     "notes new: error: the following arguments are required: --thread"),
+    ("buffer", ["add-action"], 2,
+     "buffer add-action: error: the following arguments are required: thread, text"),
+    ("tasks", ["add"], 2, "tasks add: error: the following arguments are required: thread, text"),
+    ("commit", ["save"], 2, "commit save: error: the following arguments are required: --message"),
 ]
 
 
-@pytest.mark.parametrize("cli, argv", REFUSALS, ids=[" ".join([c, *a]) for c, a in REFUSALS])
-def test_refuses_on_a_terminal_without_asking(one_of_each, cli, argv):
-    record = {"hours": ids(one_of_each, "hours")[0], "payments": ids(one_of_each, "payments")[0]}
-    argv = [a.format(**record) for a in argv]
+@pytest.mark.parametrize("cli, argv, code, message", REFUSALS,
+                         ids=[" ".join([c, *a]) for c, a, _, _ in REFUSALS])
+def test_refuses_on_a_terminal_without_asking(one_of_each, cli, argv, code, message):
+    fill = {"hours": ids(one_of_each, "hours")[0], "payments": ids(one_of_each, "payments")[0],
+            "home": one_of_each.home}
     buffer = one_of_each.home / "buffer.md"
     buffer.unlink(missing_ok=True)   # hours and payments log REFs there
     before = one_of_each.snapshot()
-    r = one_of_each.run_on_a_terminal(*argv, cli=cli)
-    assert r.returncode in (1, 2), r.stderr
-    assert r.stdout == ""
-    assert "?" not in r.stderr.split("\n")[-2]   # the last line is an error, not a question
+    r = one_of_each.run_on_a_terminal(*[a.format(**fill) for a in argv], cli=cli)
+    assert (r.returncode, r.stdout) == (code, "")
+    assert r.stderr.splitlines()[-1] == message.format(**fill)
     assert one_of_each.snapshot() == before
+
+
+def test_buffer_rm_deletes_the_line_without_asking(one_of_each):
+    """`buffer rm` takes no -y: the line number is the confirmation. It must
+    not start asking on a terminal either."""
+    first = one_of_each.lines("buffer.md")[0]
+    r = one_of_each.run_on_a_terminal("rm", "1", cli="buffer")
+    assert (r.returncode, r.stdout, r.stderr) == (0, f"removed line 1: {first}\n", "")
+    assert first not in one_of_each.read("buffer.md")
+
+
+@pytest.mark.parametrize("cli, argv, printed", [
+    ("hours", ["edit", "{id}", "-m", "45"], r"logged {id}  Projects/SGB  .* 0h 45m @ 100 ZAR = 75 ZAR\n"),
+    ("payments", ["edit", "{id}", "--amount", "120"], r"received {id}  Projects/SGB  .* 120 ZAR\n"),
+])
+def test_edit_changes_the_record_without_asking(one_of_each, cli, argv, printed):
+    rid = ids(one_of_each, cli)[0]
+    r = one_of_each.run_on_a_terminal(*[a.format(id=rid) for a in argv], cli=cli)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert re.fullmatch(printed.format(id=rid), r.stdout)
 
 
 def test_suggest_stores_unknown_on_a_terminal_without_asking(one_of_each):
@@ -81,8 +110,10 @@ def test_search_completes_on_a_terminal(one_of_each, argv):
 
 
 def test_no_command_reads_stdin():
-    """The cheap guarantee behind the tests above: nothing in the package
-    calls input() or reads sys.stdin."""
+    """A cheap early warning: nothing in the package calls input() or reads
+    sys.stdin. It is only a text search, and `os.read(0, ...)` would get
+    past it; the terminal tests above are what actually protect the
+    no-prompts rule."""
     readers = re.compile(r"\binput\(|sys\.stdin|getpass")
     hits = [f"{p.name}:{n}: {line.strip()}"
             for p in sorted(SRC.glob("*.py"))

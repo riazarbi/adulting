@@ -79,7 +79,7 @@ MONTH_IDX = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
 def load_threads():
     threads = []
     threads_dir = V.vault_home() / 'threads'
-    if not threads_dir.exists():
+    if not threads_dir.is_dir():
         return threads
     for kind_dir in sorted(threads_dir.iterdir()):
         if not kind_dir.is_dir():
@@ -91,7 +91,7 @@ def load_threads():
 
 def load_people():
     people_dir = V.vault_home() / 'people'
-    if not people_dir.exists():
+    if not people_dir.is_dir():
         return []
     return sorted(f.stem for f in people_dir.glob('*.md'))
 
@@ -118,16 +118,16 @@ def build_thread_index(threads):
         name_tokens = _tokenize(thread.split('/', 1)[1])
         bump(thread, name_tokens, weight=10)
         thread_file = V.vault_home() / 'threads' / f"{thread}.md"
-        if thread_file.exists():
+        if thread_file.is_file():
             bump(thread, _tokenize(thread_file.read_text(encoding='utf-8', errors='ignore')))
         log_dir = V.vault_home() / 'logs' / thread
-        if log_dir.exists():
+        if log_dir.is_dir():
             for log in log_dir.glob('*.md'):
                 bump(thread, _tokenize(log.read_text(encoding='utf-8', errors='ignore')))
 
     thread_link_re = re.compile(r'\[\[((?:Projects|Processes|Topics)/[^\]]+)\]\]')
     notes_dir = V.vault_home() / 'notes'
-    if notes_dir.exists():
+    if notes_dir.is_dir():
         for note in notes_dir.glob('*.md'):
             try:
                 text = note.read_text(encoding='utf-8', errors='ignore')

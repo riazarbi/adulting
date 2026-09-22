@@ -11,11 +11,6 @@ from datetime import date
 import pytest
 
 
-def people(vault, *argv, input=""):
-    # input="" closes stdin, so any prompt would hit EOF instead of hanging.
-    return vault.run(*argv, cli="people", input=input)
-
-
 @pytest.fixture
 def people_vault(vault):
     vault.write_person("Riaz Arbi", category="professional", started="2026-01-02")
@@ -27,7 +22,7 @@ def people_vault(vault):
 # ---------- list ----------
 
 def test_list_shows_open_people_in_a_table(people_vault):
-    r = people(people_vault, "list")
+    r = people_vault.run("list", cli="people")
     assert r.returncode == 0
     assert r.stdout == (
         "PERSON                 STATUS    CATEGORY\n"
@@ -36,11 +31,11 @@ def test_list_shows_open_people_in_a_table(people_vault):
 
 
 def test_list_all_includes_closed(people_vault):
-    assert "people/Old Contact     closed    professional" in people(people_vault, "list", "--all").stdout
+    assert "people/Old Contact     closed    professional" in people_vault.run("list", "--all", cli="people").stdout
 
 
 def test_list_json_fields(people_vault):
-    rows = json.loads(people(people_vault, "list", "--json").stdout)
+    rows = json.loads(people_vault.run("list", "--json", cli="people").stdout)
     assert rows[1] == {
         "name": "Riaz Arbi", "person": "people/Riaz Arbi",
         "path": "people/Riaz Arbi.md", "status": "open",
@@ -48,35 +43,35 @@ def test_list_json_fields(people_vault):
 
 
 def test_list_query_ranks_by_similarity(people_vault):
-    rows = json.loads(people(people_vault, "list", "--json", "ra").stdout)
+    rows = json.loads(people_vault.run("list", "--json", "ra", cli="people").stdout)
     assert [r["name"] for r in rows] == ["Riaz Arbi"]  # initials match
-    rows = json.loads(people(people_vault, "list", "--json", "people/bern").stdout)
+    rows = json.loads(people_vault.run("list", "--json", "people/bern", cli="people").stdout)
     assert [r["name"] for r in rows][0] == "Bern Sellmeyer"
 
 
 def test_list_empty_messages(vault, people_vault):
-    assert people(people_vault, "list", "zzzzzz").stdout == "(no matches)\n"
+    assert people_vault.run("list", "zzzzzz", cli="people").stdout == "(no matches)\n"
     for f in (vault.home / "people").iterdir():
         f.unlink()
-    assert people(vault, "list").stdout == "(no people)\n"
+    assert vault.run("list", cli="people").stdout == "(no people)\n"
 
 
 # ---------- show ----------
 
 def test_show_prints_the_file(people_vault):
-    r = people(people_vault, "show", "Riaz Arbi")
+    r = people_vault.run("show", "Riaz Arbi", cli="people")
     assert r.stdout == (people_vault.home / "people" / "Riaz Arbi.md").read_text()
 
 
 def test_show_accepts_the_wikilink_form_and_json(people_vault):
-    r = people(people_vault, "show", "people/Riaz Arbi", "--json")
+    r = people_vault.run("show", "people/Riaz Arbi", "--json", cli="people")
     assert json.loads(r.stdout) == {
         "name": "Riaz Arbi", "path": "people/Riaz Arbi.md", "status": "open",
         "category": "professional", "started": "2026-01-02"}
 
 
 def test_show_missing_person(people_vault):
-    r = people(people_vault, "show", "Nobody")
+    r = people_vault.run("show", "Nobody", cli="people")
     assert r.returncode == 1
     assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'Nobody.md'}\n"
 
@@ -84,7 +79,7 @@ def test_show_missing_person(people_vault):
 # ---------- new ----------
 
 def test_new_with_flags_writes_the_file(vault):
-    r = people(vault, "new", "--name", "Igor Novak", "--category", "professional")
+    r = vault.run("new", "--name", "Igor Novak", "--category", "professional", cli="people")
     path = vault.home / "people" / "Igor Novak.md"
     assert r.returncode == 0
     assert r.stdout == f"created: {path}\n"
@@ -96,7 +91,7 @@ def test_new_with_flags_writes_the_file(vault):
 
 def test_new_creates_the_people_dir(vault):
     (vault.home / "people").rmdir()
-    r = people(vault, "new", "--name", "A", "--category", "personal")
+    r = vault.run("new", "--name", "A", "--category", "personal", cli="people")
     path = vault.home / "people" / "A.md"
     assert (r.returncode, r.stdout, r.stderr) == (0, f"created: {path}\n", "")
     assert path.read_text() == (f"---\nstatus: open\ncategory: personal\n"
@@ -104,45 +99,42 @@ def test_new_creates_the_people_dir(vault):
 
 
 def test_new_refuses_an_existing_person(people_vault):
-    r = people(people_vault, "new", "--name", "Riaz Arbi", "--category", "personal")
-    assert r.returncode == 1
-    assert r.stderr.startswith("people: error: already exists: ")
-
-
-def test_new_rejects_an_unknown_category(vault):
-    r = people(vault, "new", "--name", "A", "--category", "family")
-    assert r.returncode == 2
-    assert "invalid choice" in r.stderr
+    before = people_vault.snapshot()
+    r = people_vault.run("new", "--name", "Riaz Arbi", "--category", "personal", cli="people")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"people: error: already exists: {people_vault.home / 'people' / 'Riaz Arbi.md'}\n"
+    assert people_vault.snapshot() == before
 
 
 # ---------- delete ----------
 
 def test_delete_with_yes(people_vault):
     path = people_vault.home / "people" / "Old Contact.md"
-    r = people(people_vault, "delete", "people/Old Contact", "-y")
+    r = people_vault.run("delete", "people/Old Contact", "-y", cli="people")
     assert r.returncode == 0
     assert r.stdout == f"deleted: {path}\n"
     assert not path.exists()
 
 
 def test_delete_missing_person(people_vault):
-    r = people(people_vault, "delete", "Nobody", "-y")
-    assert r.returncode == 1
-    assert r.stderr.startswith("people: error: not found: ")
-
+    before = people_vault.snapshot()
+    r = people_vault.run("delete", "Nobody", "-y", cli="people")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'Nobody.md'}\n"
+    assert people_vault.snapshot() == before
 
 
 # ---------- no interactivity (fails against the pre-port script) ----------
 
 def test_new_without_name_fails_instead_of_prompting(vault):
-    r = people(vault, "new", "--category", "personal", input="Typed Name\n")
+    r = vault.run("new", "--category", "personal", input="Typed Name\n", cli="people")
     assert r.returncode == 2
     assert "--name" in r.stderr
     assert list((vault.home / "people").iterdir()) == []
 
 
 def test_new_without_category_fails_instead_of_prompting(vault):
-    r = people(vault, "new", "--name", "Typed Name", input="1\n")
+    r = vault.run("new", "--name", "Typed Name", input="1\n", cli="people")
     assert r.returncode == 2
     assert "--category" in r.stderr
     assert list((vault.home / "people").iterdir()) == []
@@ -150,7 +142,7 @@ def test_new_without_category_fails_instead_of_prompting(vault):
 
 def test_delete_without_yes_refuses_even_if_stdin_says_yes(people_vault):
     path = people_vault.home / "people" / "Old Contact.md"
-    r = people(people_vault, "delete", "Old Contact", input="y\n")
+    r = people_vault.run("delete", "Old Contact", input="y\n", cli="people")
     assert r.returncode == 1
     assert r.stderr == f"people: error: refusing to delete {path} without -y\n"
     assert path.exists()
@@ -161,11 +153,11 @@ def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     `--name "  "` created a file called `  .md`, and `--name ""` fell
     through to the prompt."""
     for blank in ("", "  "):
-        r = people(vault, "new", "--name", blank, "--category", "personal")
+        r = vault.run("new", "--name", blank, "--category", "personal", cli="people")
         assert r.returncode == 1
         assert r.stderr == "people: error: empty name\n"
         assert list((vault.home / "people").iterdir()) == []
-    r = people(vault, "new", "--name", " Igor Novak ", "--category", "personal")
+    r = vault.run("new", "--name", " Igor Novak ", "--category", "personal", cli="people")
     assert r.returncode == 0
     assert (vault.home / "people" / "Igor Novak.md").exists()
 
@@ -174,7 +166,7 @@ def test_new_strips_the_name_and_refuses_a_blank_one(vault):
 def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     """The name becomes people/<name>.md, so a `/` could write outside
     people/ (or crash), and a leading `.` would make a hidden file."""
-    r = people(vault, "new", "--name", name, "--category", "personal")
+    r = vault.run("new", "--name", name, "--category", "personal", cli="people")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"people: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []

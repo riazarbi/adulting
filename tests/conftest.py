@@ -149,10 +149,11 @@ class Vault:
 
     # ---- CLI helpers ----
 
-    def run(self, *argv: str, cli: str = "tasks", input: str | None = None,
+    def run(self, *argv: str, cli: str = "tasks", input: str = "",
             cwd: Path | None = None) -> subprocess.CompletedProcess:
         """Run a CLI from the repo against this vault. Returns the
-        CompletedProcess; stdout/stderr are text-decoded."""
+        CompletedProcess; stdout/stderr are text-decoded. stdin is closed
+        (input=""), so a prompt would hit EOF instead of hanging."""
         cmd = [command_path(cli, self.env), *argv]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=self.env, input=input, cwd=cwd)

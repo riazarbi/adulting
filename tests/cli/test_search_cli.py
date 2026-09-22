@@ -17,10 +17,6 @@ REPORT = "notes/2026-08-25-09-00-00.md"
 LOG = "logs/Processes/SGB/2026-08-28.md"
 
 
-def search(vault, *argv):
-    return vault.run(*argv, cli="search")
-
-
 def path(vault, rel):
     return str(vault.home / rel)
 
@@ -108,7 +104,7 @@ def _log_with(vault, kind, name, day, body):
 # ---------- notes and logs ----------
 
 def test_notes_table(search_vault):
-    r = search(search_vault, "notes")
+    r = search_vault.run("notes", cli="search")
     assert r.returncode == 0
     assert r.stdout == (
         f"{path(search_vault, AGENDA)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
@@ -116,7 +112,7 @@ def test_notes_table(search_vault):
 
 
 def test_notes_text_match_shows_a_trimmed_snippet(search_vault):
-    r = search(search_vault, "notes", "--text", "ASBESTOS")
+    r = search_vault.run("notes", "--text", "ASBESTOS", cli="search")
     assert r.stdout == (
         f"{path(search_vault, AGENDA)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
         "    …word word word word word word asbestos survey needed tail tail tail "
@@ -124,85 +120,84 @@ def test_notes_text_match_shows_a_trimmed_snippet(search_vault):
 
 
 def test_logs_table_counts_every_entry_kind(search_vault):
-    r = search(search_vault, "logs")
+    r = search_vault.run("logs", cli="search")
     assert r.stdout == f"{path(search_vault, LOG)}  2026-08-28  Processes/SGB  4 entries\n"
 
 
 def test_logs_text_match(search_vault):
-    r = search(search_vault, "logs", "--text", "asbestos")
+    r = search_vault.run("logs", "--text", "asbestos", cli="search")
     assert r.stdout.split("\n")[1] == (
         "    TEXT: Roof needs an asbestos survey. REF: [[hours/Processes/SGB]] "
         "1h 0m Spec (cccc3333) RE…")
 
 
 def test_thread_resolution_folds_case(search_vault):
-    assert search(search_vault, "notes", "--thread", "sgb").stdout == \
+    assert search_vault.run("notes", "--thread", "sgb", cli="search").stdout == \
         f"{path(search_vault, AGENDA)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
 
 
 def test_unresolvable_thread_fails(search_vault):
-    r = search(search_vault, "notes", "--thread", "Nope")
+    r = search_vault.run("notes", "--thread", "Nope", cli="search")
     assert r.returncode == 1
     assert r.stdout == ""
     assert r.stderr == "search: error: thread 'Nope' does not resolve to a thread file\n"
 
 
 def test_thread_and_type_filter_together(stocked):
-    r = search(stocked, "notes", "--thread", "Processes/SGB", "--type", "Meeting")
-    assert "2026-08-22-09-00-00" in r.stdout
-    assert "Interim report" not in r.stdout
-    assert "Alpha kickoff" not in r.stdout
+    r = stocked.run("notes", "--thread", "Processes/SGB", "--type", "Meeting", "--json", cli="search")
+    assert [x["path"] for x in json.loads(r.stdout)] == [path(stocked, "notes/2026-08-22-09-00-00.md")]
 
 
 def test_thread_accepts_bare_name(stocked):
     """`SGB` must resolve without a `threads list` round-trip first."""
-    bare = search(stocked, "notes", "--thread", "SGB")
-    full = search(stocked, "notes", "--thread", "Processes/SGB")
+    bare = stocked.run("notes", "--thread", "SGB", cli="search")
+    full = stocked.run("notes", "--thread", "Processes/SGB", cli="search")
     assert bare.returncode == 0
     assert bare.stdout == full.stdout
 
 
 def test_type_is_case_insensitive(stocked):
-    assert search(stocked, "notes", "--type", "meeting").stdout == \
-           search(stocked, "notes", "--type", "Meeting").stdout
+    assert stocked.run("notes", "--type", "meeting", cli="search").stdout == \
+           stocked.run("notes", "--type", "Meeting", cli="search").stdout
 
 
 def test_text_miss_reports_no_matches(stocked):
-    r = search(stocked, "logs", "--text", "nothingmatchesthis")
-    assert r.returncode == 0
-    assert "no matches" in r.stdout
+    r = stocked.run("logs", "--text", "nothingmatchesthis", cli="search")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "(no matches)\n", "")
 
 
 def test_limit_caps_results(stocked):
-    r = search(stocked, "notes", "--limit", "1", "--json")
+    r = stocked.run("notes", "--limit", "1", "--json", cli="search")
     assert len(json.loads(r.stdout)) == 1
 
 
 def test_date_range_filters(stocked):
-    r = search(stocked, "notes", "--since", "2026-08-27", "--json")
-    dates = [x["date"] for x in json.loads(r.stdout)]
-    assert dates and all(d >= "2026-08-27" for d in dates)
+    r = stocked.run("notes", "--since", "2026-08-27", "--json", cli="search")
+    assert [(x["path"], x["date"]) for x in json.loads(r.stdout)] == [
+        (path(stocked, "notes/2026-08-22-09-00-00.md"), "2026-08-27")]
 
 
 def test_unparseable_file_is_skipped_not_fatal(stocked):
     (stocked.home / "notes" / "2026-08-29-09-00-00.md").write_text(
         "no frontmatter at all\n", encoding="utf-8")
-    r = search(stocked, "notes")
-    assert r.returncode == 0
-    assert "2026-08-29" not in r.stdout
+    r = stocked.run("notes", "--json", cli="search")
+    assert (r.returncode, r.stderr) == (0, "")
+    assert [x["path"] for x in json.loads(r.stdout)] == [
+        path(stocked, f"notes/{stem}.md")
+        for stem in ("2026-08-22-09-00-00", "2026-08-26-09-00-00", "2026-08-25-09-00-00")]
 
 
 def test_empty_vault_everywhere(vault):
     for argv, out in ((["notes"], "(no matches)\n"), (["logs"], "(no matches)\n"),
                       (["activity"], "(no matches)\n")):
-        r = search(vault, *argv)
+        r = vault.run(*argv, cli="search")
         assert (r.returncode, r.stdout) == (0, out), argv
 
 
 # ---------- activity and overview ----------
 
 def test_activity_table(search_vault):
-    r = search(search_vault, "activity", "--since", "2026-01-01")
+    r = search_vault.run("activity", "--since", "2026-01-01", cli="search")
     assert r.stdout == (
         "THREAD               NOTES  LOGS  ENTRIES     HOURS  LAST\n"
         "Processes/SGB            1     1        4         -  2026-08-28\n"
@@ -216,7 +211,7 @@ def test_activity_defaults_to_the_last_seven_days(search_vault):
     search_vault.write("notes/2020-01-01-00-00-00.md",
           f'---\ntopic: Recent\ntype: Log\nthread: "[[Projects/Alpha]]"\n'
           f"timestamp: {(date.today() - timedelta(days=7)).isoformat()}-09-00-00\n---\n")
-    r = search(search_vault, "activity")
+    r = search_vault.run("activity", cli="search")
     since = (date.today() - timedelta(days=7)).isoformat()
     assert r.stdout.endswith(f"\nwindow: {since} to today\n")
     assert "Projects/Alpha" in r.stdout
@@ -224,7 +219,7 @@ def test_activity_defaults_to_the_last_seven_days(search_vault):
 
 
 def test_activity_counts_and_ranks(stocked):
-    r = search(stocked, "activity", "--since", "2026-01-01", "--json")
+    r = stocked.run("activity", "--since", "2026-01-01", "--json", cli="search")
     rows = {x["thread"]: x for x in json.loads(r.stdout)}
     assert rows["Processes/SGB"]["notes"] == 2
     assert rows["Processes/SGB"]["logs"] == 1
@@ -239,14 +234,14 @@ def test_activity_surfaces_threads_with_only_hours(vault):
         "name": "Work", "id": "bbbb2222", "rate": 1000, "currency": "ZAR",
         "startTime": "2026-08-26T09:00:00.000Z",
         "endTime": "2026-08-26T10:00:00.000Z"}])
-    r = search(vault, "activity", "--since", "2026-01-01", "--json")
+    r = vault.run("activity", "--since", "2026-01-01", "--json", cli="search")
     rows = {x["thread"]: x for x in json.loads(r.stdout)}
     assert rows["Projects/Quiet"]["minutes"] == 60
     assert rows["Projects/Quiet"]["notes"] == 0
 
 
 def test_overview_text(search_vault):
-    r = search(search_vault, "overview", "SGB")
+    r = search_vault.run("overview", "SGB", cli="search")
     assert r.stdout == (
         "Processes/SGB\n"
         "\n"
@@ -262,15 +257,15 @@ def test_overview_text(search_vault):
 
 
 def test_overview_with_a_window_and_limit(search_vault):
-    r = search(search_vault, "overview", "Processes/SGB", "--since", "2026-08-01",
-               "--until", "2026-08-31", "--limit", "1")
+    r = search_vault.run("overview", "Processes/SGB", "--since", "2026-08-01",
+               "--until", "2026-08-31", "--limit", "1", cli="search")
     lines = r.stdout.split("\n")
     assert lines[:2] == ["Processes/SGB", "window: 2026-08-01 to 2026-08-31"]
     assert lines[-3:] == ["  recent:", f"    {path(search_vault, LOG)}  2026-08-28  Log  4 entries", ""]
 
 
 def test_overview_hours_for_a_billed_thread(search_vault):
-    r = search(search_vault, "overview", "Alpha", "--json")
+    r = search_vault.run("overview", "Alpha", "--json", cli="search")
     assert json.loads(r.stdout) == {
         "thread": "Projects/Alpha", "notes": 1, "notes_by_type": {"Meeting": 1},
         "logs": 0, "entries": 0, "tasks_open": 1, "tasks_done": 0, "minutes": 150,
@@ -280,7 +275,7 @@ def test_overview_hours_for_a_billed_thread(search_vault):
 
 
 def test_overview_rolls_up_one_thread(stocked):
-    r = search(stocked, "overview", "SGB", "--json")
+    r = stocked.run("overview", "SGB", "--json", cli="search")
     d = json.loads(r.stdout)
     assert d["thread"] == "Processes/SGB"
     assert d["notes"] == 2
@@ -292,7 +287,7 @@ def test_overview_rolls_up_one_thread(stocked):
 # ---------- stream: one chronology, ordered by when things happened ----------
 
 def test_stream_text(search_vault):
-    r = search(search_vault, "stream", "--since", "2026-01-01")
+    r = search_vault.run("stream", "--since", "2026-01-01", cli="search")
     assert r.stdout == (
         "\n2026-08-30\n"
         "  pending  Processes/SGB                  TEXT: Pending thought  (10:05)\n"
@@ -326,8 +321,8 @@ def test_stream_thread_filter_matches_whole_thread_names(search_vault):
     """`--thread Processes/SGB` must not pick up `Processes/SGB Extra`.
     It used to: the filter tested whether the ref appeared inside the
     event's thread text. A multi-thread event still matches each thread."""
-    r = search(search_vault, "stream", "--since", "2026-01-01", "--thread", "Processes/SGB",
-               "--limit", "3")
+    r = search_vault.run("stream", "--since", "2026-01-01", "--thread", "Processes/SGB",
+               "--limit", "3", cli="search")
     assert r.stdout == (
         "\n2026-08-30\n"
         "  pending  Processes/SGB  TEXT: Pending thought  (10:05)\n"
@@ -336,16 +331,16 @@ def test_stream_thread_filter_matches_whole_thread_names(search_vault):
         "  log      Processes/SGB  [[notes/2026-08-22-09-00-00]] Agenda\n"
         "\n6 event(s); window 2026-01-01 to today\n"
         "3 more not shown — raise --limit\n")
-    rows = json.loads(search(search_vault, "stream", "--since", "2026-01-01", "--thread",
-                             "Processes/SGB", "--json").stdout)
+    rows = json.loads(search_vault.run("stream", "--since", "2026-01-01", "--thread",
+                             "Processes/SGB", "--json", cli="search").stdout)
     assert {e["thread"] for e in rows} == {"Processes/SGB", "Processes/SGB, Projects/Alpha"}
-    extra = json.loads(search(search_vault, "stream", "--since", "2026-01-01", "--thread",
-                              "SGB Extra", "--json").stdout)
+    extra = json.loads(search_vault.run("stream", "--since", "2026-01-01", "--thread",
+                              "SGB Extra", "--json", cli="search").stdout)
     assert {e["thread"] for e in extra} == {"Processes/SGB Extra"}
 
 
 def test_stream_text_filter_and_reverse(search_vault):
-    r = search(search_vault, "stream", "--since", "2026-01-01", "--text", "asbestos", "--reverse")
+    r = search_vault.run("stream", "--since", "2026-01-01", "--text", "asbestos", "--reverse", cli="search")
     assert r.stdout == (
         "\n2026-08-28\n"
         "  log  Processes/SGB  Roof needs an asbestos survey.\n"
@@ -353,20 +348,20 @@ def test_stream_text_filter_and_reverse(search_vault):
 
 
 def test_stream_until_bounds_the_window(search_vault):
-    r = search(search_vault, "stream", "--since", "2026-08-26", "--until", "2026-08-27",
-               "--kind", "hours,note", "--json")
+    r = search_vault.run("stream", "--since", "2026-08-26", "--until", "2026-08-27",
+               "--kind", "hours,note", "--json", cli="search")
     assert [(e["kind"], e["date"]) for e in json.loads(r.stdout)] == [
         ("note", "2026-08-27"), ("hours", "2026-08-26")]
 
 
 def test_stream_with_nothing_in_the_default_window(search_vault):
-    r = search(search_vault, "stream")
+    r = search_vault.run("stream", cli="search")
     since = (date.today() - timedelta(days=7)).isoformat()
     assert r.stdout == f"(no events)\n\nwindow: {since} to today\n"
 
 
 def test_stream_unknown_kind_message(search_vault):
-    r = search(search_vault, "stream", "--kind", "note,bogus,nope")
+    r = search_vault.run("stream", "--kind", "note,bogus,nope", cli="search")
     assert r.returncode == 1
     assert r.stderr == ("search: error: unknown kind(s) bogus, nope; choose from note, log, "
                         "task, done, hours, payment, thread, person, pending\n")
@@ -378,8 +373,8 @@ def test_one_anchor_yields_two_events_on_different_days(stocked):
     the file is filed under."""
     _log_with(stocked, "Processes", "SGB", "2026-06-02",
               "DONE: Sew the button <!--e845abea entry:2026-06-02 end:2026-09-10-->")
-    rows = json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                         "--kind", "task,done", "--json").stdout)
+    rows = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                         "--kind", "task,done", "--json", cli="search").stdout)
     by_kind = {r["kind"]: r["date"] for r in rows}
     assert by_kind == {"task": "2026-06-02", "done": "2026-09-10"}, rows
 
@@ -394,11 +389,11 @@ def test_hours_appear_once_before_and_after_flush(stocked):
     def marked(rows):
         return [r for r in rows if "Unmistakable marker" in r["summary"]]
 
-    before = marked(json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                                  "--kind", "hours,pending,log", "--json").stdout))
+    before = marked(json.loads(stocked.run("stream", "--since", "2026-01-01",
+                                  "--kind", "hours,pending,log", "--json", cli="search").stdout))
     stocked.run("flush", cli="buffer")
-    after = marked(json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                                 "--kind", "hours,pending,log", "--json").stdout))
+    after = marked(json.loads(stocked.run("stream", "--since", "2026-01-01",
+                                 "--kind", "hours,pending,log", "--json", cli="search").stdout))
     assert len(before) == 1, before
     assert len(after) == 1, after
     assert after[0]["kind"] == "hours"
@@ -407,8 +402,8 @@ def test_hours_appear_once_before_and_after_flush(stocked):
 def test_unflushed_buffer_entries_show_as_pending(stocked):
     stocked.run("add-text", "Processes/SGB", "Something worth keeping",
                 cli="buffer")
-    rows = json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                         "--kind", "pending", "--json").stdout)
+    rows = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                         "--kind", "pending", "--json", cli="search").stdout)
     assert rows and rows[0]["kind"] == "pending"
     assert "Something worth keeping" in rows[0]["summary"]
 
@@ -416,14 +411,14 @@ def test_unflushed_buffer_entries_show_as_pending(stocked):
 def test_today_shorthand_bounds_both_ends(stocked):
     today = date.today().isoformat()
     stocked.run("log", "Projects/Alpha", "Now", "-m", "30", cli="hours")
-    rows = json.loads(search(stocked, "stream", "--today", "--json").stdout)
+    rows = json.loads(stocked.run("stream", "--today", "--json", cli="search").stdout)
     assert rows, "expected today's entry"
     assert all(r["date"] == today for r in rows), rows
 
 
 def test_events_carry_a_time_only_when_the_record_does(stocked):
     stocked.run("log", "Projects/Alpha", "Timed", "-m", "30", cli="hours")
-    rows = json.loads(search(stocked, "stream", "--since", "2026-01-01", "--json").stdout)
+    rows = json.loads(stocked.run("stream", "--since", "2026-01-01", "--json", cli="search").stdout)
     hours = [r for r in rows if r["kind"] == "hours"]
     notes = [r for r in rows if r["kind"] == "log"]
     assert hours and hours[0]["time"], "an hours entry knows its clock time"
@@ -435,10 +430,10 @@ def test_reverse_flips_the_order(stocked):
               "TEXT: older thing")
     _log_with(stocked, "Processes", "SGB", "2026-08-30",
               "TEXT: newer thing")
-    fwd = json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                        "--kind", "log", "--json").stdout)
-    rev = json.loads(search(stocked, "stream", "--since", "2026-01-01",
-                        "--kind", "log", "--reverse", "--json").stdout)
+    fwd = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                        "--kind", "log", "--json", cli="search").stdout)
+    rev = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                        "--kind", "log", "--reverse", "--json", cli="search").stdout)
     assert fwd[0]["date"] > fwd[-1]["date"]
     assert rev[0]["date"] < rev[-1]["date"]
 
@@ -455,7 +450,7 @@ def test_reverse_flips_the_order(stocked):
 
 def test_paths_are_absolute(stocked):
     for argv in (["notes"], ["logs"]):
-        rows = json.loads(search(stocked, *argv, "--json").stdout)
+        rows = json.loads(stocked.run(*argv, "--json", cli="search").stdout)
         assert rows, argv
         for r in rows:
             assert r["path"].startswith("/"), f"{argv}: {r['path']} is not absolute"
@@ -466,7 +461,7 @@ def test_paths_resolve_from_an_unrelated_working_directory(stocked, tmp_path):
     in the vault is not a usable path."""
     elsewhere = tmp_path / "workspace"
     elsewhere.mkdir()
-    rows = json.loads(search(stocked, "notes", "--json").stdout)
+    rows = json.loads(stocked.run("notes", "--json", cli="search").stdout)
     cwd = os.getcwd()
     try:
         os.chdir(elsewhere)
@@ -478,7 +473,7 @@ def test_paths_resolve_from_an_unrelated_working_directory(stocked, tmp_path):
 
 
 def test_overview_recent_paths_are_absolute_too(stocked):
-    d = json.loads(search(stocked, "overview", "SGB", "--json").stdout)
+    d = json.loads(stocked.run("overview", "SGB", "--json", cli="search").stdout)
     assert d["recent"]
     for r in d["recent"]:
         assert r["path"].startswith("/"), r["path"]
@@ -486,10 +481,9 @@ def test_overview_recent_paths_are_absolute_too(stocked):
 
 # ---------- no prompts ----------
 
-def test_never_prompts_without_a_tty(stocked):
-    """Every subcommand must complete with stdin closed. `search` must not
-    repeat the `hours log` pattern of going interactive when an argument is
-    missing."""
-    for argv in (["notes"], ["logs"], ["activity"], ["overview", "SGB"]):
-        r = stocked.run(*argv, cli="search", input="")
-        assert r.returncode == 0, f"{argv} -> {r.stderr}"
+def test_overview_limit_zero_lists_every_recent_item(vault):
+    vault.write_thread("Projects", "SGB")
+    for day in range(1, 8):
+        vault.write_note(f"2026-09-0{day}-09-00-00", "body", threads=["Projects/SGB"])
+    d = json.loads(vault.run("overview", "SGB", "--limit", "0", "--json", cli="search").stdout)
+    assert [r["date"] for r in d["recent"]] == [f"2026-09-0{day}" for day in range(7, 0, -1)]

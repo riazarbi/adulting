@@ -2,6 +2,30 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review round 2, part R-D: the tests
+
+- **R-D1, tests that could not fail or hid a bug:**
+  - `new_id` takes a `draw` function, so a test can force a collision; deleting the avoid-existing guard now fails it.
+  - `test_pdf_markdown` carries `# DEFERRED BUG 10`.
+  - The deferred-bug-8 lint test asserts the exit code and all output.
+  - The static no-stdin test says plainly that the terminal tests are what protect the rule.
+  - The terminal refusal tests assert each exact message, and they now also cover `buffer rm` and `hours`/`payments edit`.
+- **R-D2, duplicates deleted,** each checked against its counterpart first: 18 across `search`, `buffer`, `notes`, `tasks`, `hours`, `payments`, `threads` and `notes render`.
+  - `test_thread_names.py` and `test_review_small_bugs.py` are gone. Their tests moved into the files for their commands and are named for the behaviour they check.
+  - `tests/cli/` is one file per command, plus `test_no_prompts.py`, `test_every_command.py` and the three notes files.
+- **R-D3, exact:**
+  - Ten `tasks` mutation tests fold into the exact, step-by-step one, which gains the replace-an-existing-due and replace-an-existing-priority cases.
+  - The `tasks list` filters, `search` notes/logs filters, `commit review` outputs and `buffer tend`'s report assert whole output.
+  - The 14 clean lint tests check exit code, stderr and summary.
+  - The argparse-only tests assert the exact message and an unchanged vault, or are deleted where argparse's `choices` is the whole behaviour.
+- **R-D4, behaviour not internals:**
+  - Cycles are tested through `cross_check_tasks`, `--as-of` through `payments statement`.
+  - The three statement tests that restated `S.check()` are gone.
+  - The pretty-printed JSON test spells out its expected lines.
+  - Every per-file run wrapper (`hours()`, `pay()`, `buf()`, …) is gone in favour of `vault.run(…, cli=…)`, which now closes stdin by default.
+- **Also:** the suggester's folder checks use `is_dir()`/`is_file()`. `threads new` and `people new` explain why they alone ask the filesystem whether a name is taken. The refactor story's status and "Duplication left in place" are current.
+- **737 passing, 97% coverage, `dev/ci` green.**
+
 ## 2026-09-22 - review round 2, part R-C: consistency
 
 - **Shared names used directly:**

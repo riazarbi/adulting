@@ -15,9 +15,10 @@ import pytest
 STEM = r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}"
 
 
-def notes(vault, *argv):
-    # Typed answers wait on stdin, so a prompt would find them and go ahead.
-    return vault.run(*argv, cli="notes", input="1\n1\n\nTyped topic\n")
+
+
+# Typed answers wait on stdin, so a prompt would find them and go ahead.
+TYPED = "1\n1\n\nTyped topic\n"
 
 
 @pytest.fixture
@@ -37,10 +38,10 @@ def created(vault, r):
 
 
 def test_meeting_with_every_field(new_note_vault):
-    r = notes(new_note_vault, "new", "--type", "Meeting", "--topic", 'Q3 "review": plan',
+    r = new_note_vault.run("new", "--type", "Meeting", "--topic", 'Q3 "review": plan',
               "--thread", "Projects/SGB", "--thread", "Zeta",
               "--person", "Riaz Arbi", "--person", ' Bern "B" Sellmeyer ',
-              "--counterparty", "ACME Corp", "--location", "Boardroom")
+              "--counterparty", "ACME Corp", "--location", "Boardroom", cli="notes", input=TYPED)
     assert (r.returncode, r.stderr) == (0, "")
     stem = created(new_note_vault, r)
     assert new_note_vault.read(f"notes/{stem}.md") == (
@@ -64,8 +65,8 @@ def test_meeting_with_every_field(new_note_vault):
 
 
 def test_each_thread_gets_a_buffer_ref_in_order(new_note_vault):
-    r = notes(new_note_vault, "new", "--type", "Meeting", "--topic", "Kickoff",
-              "--thread", "Projects/SGB", "--thread", "[[Topics/Zeta]]")
+    r = new_note_vault.run("new", "--type", "Meeting", "--topic", "Kickoff",
+              "--thread", "Projects/SGB", "--thread", "[[Topics/Zeta]]", cli="notes", input=TYPED)
     stem = created(new_note_vault, r)
     ts = r"<!--\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-->"
     lines = r.stdout.splitlines()
@@ -76,8 +77,8 @@ def test_each_thread_gets_a_buffer_ref_in_order(new_note_vault):
 
 
 def test_a_meeting_always_has_a_location_line(new_note_vault):
-    stem = created(new_note_vault, notes(new_note_vault, "new", "--type", "Meeting", "--topic", "No place",
-                            "--thread", "Processes/Admin"))
+    stem = created(new_note_vault, new_note_vault.run("new", "--type", "Meeting", "--topic", "No place",
+                            "--thread", "Processes/Admin", cli="notes", input=TYPED))
     text = new_note_vault.read(f"notes/{stem}.md")
     assert "\nlocation: \n---\n" in text
     assert "counterparty" not in text and "people" not in text
@@ -85,30 +86,30 @@ def test_a_meeting_always_has_a_location_line(new_note_vault):
 
 @pytest.mark.parametrize("type_", ["Correspondence", "Workshop", "Report", "Log", "Research", "Recipe"])
 def test_other_types_have_only_the_common_fields(new_note_vault, type_):
-    stem = created(new_note_vault, notes(new_note_vault, "new", "--type", type_, "--topic", "Daily log", "--thread", "Topics/Zeta"))
+    stem = created(new_note_vault, new_note_vault.run("new", "--type", type_, "--topic", "Daily log", "--thread", "Topics/Zeta", cli="notes", input=TYPED))
     assert new_note_vault.read(f"notes/{stem}.md") == (
         f'---\ntopic: Daily log\ntype: {type_}\nthreads:\n  - "[[Topics/Zeta]]"\n'
         f'timestamp: {stem}\naliases: ["Daily log"]\n---\n\n# Content\n\n')
 
 
 def test_correspondence_takes_people(new_note_vault):
-    stem = created(new_note_vault, notes(new_note_vault, "new", "--type", "Correspondence", "--topic", "Email",
-                            "--thread", "Topics/Zeta", "--person", "Riaz Arbi"))
+    stem = created(new_note_vault, new_note_vault.run("new", "--type", "Correspondence", "--topic", "Email",
+                            "--thread", "Topics/Zeta", "--person", "Riaz Arbi", cli="notes", input=TYPED))
     assert new_note_vault.read(f"notes/{stem}.md").endswith(
         'people:\n  - "[[people/Riaz Arbi]]"\n---\n\n# Content\n\n')
 
 
 def test_a_repeated_thread_is_written_once(new_note_vault):
-    r = notes(new_note_vault, "new", "--type", "Log", "--topic", "x", "--thread", "Topics/Zeta", "--thread", "Zeta")
+    r = new_note_vault.run("new", "--type", "Log", "--topic", "x", "--thread", "Topics/Zeta", "--thread", "Zeta", cli="notes", input=TYPED)
     stem = created(new_note_vault, r)
     assert new_note_vault.read(f"notes/{stem}.md").count("[[Topics/Zeta]]") == 1
     assert r.stdout.count("buffered:") == 1
 
 
 def test_the_new_note_passes_lint(new_note_vault):
-    stem = created(new_note_vault, notes(new_note_vault, "new", "--type", "Meeting", "--topic", "Linted",
+    stem = created(new_note_vault, new_note_vault.run("new", "--type", "Meeting", "--topic", "Linted",
                             "--thread", "Projects/SGB", "--person", "Riaz Arbi",
-                            "--person", "Someone Untracked", "--location", "Online"))
+                            "--person", "Someone Untracked", "--location", "Online", cli="notes", input=TYPED))
     r = new_note_vault.run(str(new_note_vault.home / "notes" / f"{stem}.md"), cli="lint")
     assert r.returncode == 0, r.stdout
 
@@ -125,7 +126,7 @@ def test_the_new_note_passes_lint(new_note_vault):
      "notes: error: --counterparty and --location are only for Meeting notes\n"),
 ])
 def test_errors_write_nothing(new_note_vault, argv, message):
-    r = notes(new_note_vault, "new", *argv)
+    r = new_note_vault.run("new", *argv, cli="notes", input=TYPED)
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message)
     assert list((new_note_vault.home / "notes").iterdir()) == []
     assert not (new_note_vault.home / "buffer.md").exists()
@@ -135,23 +136,16 @@ def test_errors_write_nothing(new_note_vault, argv, message):
 def test_required_flags_never_fall_back_to_prompts(new_note_vault, missing):
     given = {"--type": "Log", "--topic": "x", "--thread": "Topics/Zeta"}
     argv = [x for k, val in given.items() if k != missing for x in (k, val)]
-    r = notes(new_note_vault, "new", *argv)
+    r = new_note_vault.run("new", *argv, cli="notes", input=TYPED)
     assert r.returncode == 2
     assert missing in r.stderr
     assert list((new_note_vault.home / "notes").iterdir()) == []
 
 
-def test_unknown_type_is_rejected(new_note_vault):
-    r = notes(new_note_vault, "new", "--type", "Diary", "--topic", "x", "--thread", "Topics/Zeta")
-    assert r.returncode == 2 and "invalid choice: 'Diary'" in r.stderr
-
-
 def test_new_does_not_run_the_ingest_pre_pass(new_note_vault):
     new_note_vault.write_note("2026-09-10-14-30-00", "ACTION: leave me", threads=["Topics/Zeta"])
-    notes(new_note_vault, "new", "--type", "Log", "--topic", "x", "--thread", "Topics/Zeta")
+    new_note_vault.run("new", "--type", "Log", "--topic", "x", "--thread", "Topics/Zeta", cli="notes", input=TYPED)
     assert "ACTION: leave me" in new_note_vault.read("notes/2026-09-10-14-30-00.md")
-
-
 
 
 def test_a_buffer_it_cannot_write_does_not_stop_the_note(new_note_vault):
@@ -160,7 +154,7 @@ def test_a_buffer_it_cannot_write_does_not_stop_the_note(new_note_vault):
     buffer = new_note_vault.write("buffer.md", "")
     buffer.chmod(0o444)
     try:
-        r = notes(new_note_vault, "new", "--type", "Log", "--topic", "Quiet", "--thread", "Projects/SGB")
+        r = new_note_vault.run("new", "--type", "Log", "--topic", "Quiet", "--thread", "Projects/SGB", cli="notes", input=TYPED)
     finally:
         buffer.chmod(0o644)
     assert (r.returncode, r.stderr) == (0, "")

@@ -187,9 +187,10 @@ def test_header_for_each_kind():
 
 
 def test_pdf_markdown():
-    """Callouts (`!:`) fill the Summary up to its first rule, which takes the
-    `## Minuted Agreements` heading with it, as the bash always did. The
-    action table fills Action Items; everything from `# Timesheet` goes."""
+    """Callouts (`!:`) fill the Summary up to its first rule. The action
+    table fills Action Items; everything from `# Timesheet` goes."""
+    # DEFERRED BUG 10: filling the Summary drops the note's own
+    # `## Minuted Agreements` heading along with the rest of that section.
     body = R.pdf_markdown(KICKOFF, "Riaz Arbi").split(PREAMBLE, 1)[1]
     assert body == (
         f"\n# Summary\n\nBudget is tight\n\n{HR}\n\n## Resolutions\n\n{HR}\n\n"

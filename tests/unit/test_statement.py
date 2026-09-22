@@ -32,13 +32,6 @@ def test_charge_lands_on_whole_cents():
     assert S.charge_of(20, 2500) == Decimal("833.33")
 
 
-def test_lines_sum_to_charges():
-    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 20, 2500),
-                              entry(D(2026, 1, 2), 90, 2500)],
-                 [], D(2026, 1, 31))
-    summed = sum(ln["charge"] for ln in st["lines"] if ln["charge"] is not None)
-    assert summed == st["charges"]
-
 
 # ---- running balance ----
 
@@ -51,11 +44,6 @@ def test_charge_precedes_payment_on_the_same_day():
     assert st["lines"][0]["balance"] == Decimal("1000.00")
     assert st["lines"][1]["balance"] == Decimal("600.00")
 
-
-def test_closing_line_equals_balance():
-    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 60, 1000)],
-                 [payment(D(2026, 2, 1), 250)], D(2026, 3, 1))
-    assert st["lines"][-1]["balance"] == st["balance"] == Decimal("750.00")
 
 
 def test_payment_description_carries_the_account():
@@ -107,12 +95,6 @@ def test_aging_settles_oldest_charges_first():
     assert st["aging"]["90+"] == Decimal("0.00")     # oldest cleared
     assert st["aging"]["current"] == Decimal("100.00")
 
-
-def test_aging_always_sums_to_balance():
-    as_of = D(2026, 6, 30)
-    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 90, 2500)],
-                 [payment(D(2026, 2, 1), 1000)], as_of)
-    assert sum(st["aging"].values()) == st["balance"]
 
 
 def test_overpayment_shows_as_negative_current_not_an_aged_debt():

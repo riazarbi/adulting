@@ -34,6 +34,8 @@ def cmd_new(args):
 
     people_dir().mkdir(parents=True, exist_ok=True)
     path = people_dir() / f"{name}.md"
+    # Asking the filesystem is right here: on macOS `riaz arbi` would
+    # overwrite `Riaz Arbi`, so a name taken in any case is taken.
     if path.exists():
         V.die(f"already exists: {path}")
     path.write_text(

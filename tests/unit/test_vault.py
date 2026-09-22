@@ -4,7 +4,6 @@ These pin current behaviour, quirks included, so that deduplicating the
 several frontmatter parsers later can't change it unnoticed.
 """
 
-import json
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -123,7 +122,7 @@ def test_write_records_json_is_pretty_printed(tmp_path):
     V.write_records(path, [{"id": "1"}], FENCE, "Projects/SGB", "ZAR")
     lines = path.read_text(encoding="utf-8").split("\n")
     i, j = V.find_block(lines, FENCE)
-    assert lines[i + 1:j] == json.dumps({"entries": [{"id": "1"}]}, indent=2).split("\n")
+    assert lines[i + 1:j] == ["{", '  "entries": [', "    {", '      "id": "1"', "    }", "  ]", "}"]
 
 
 def test_write_records_sorts_when_asked(tmp_path):
@@ -142,6 +141,13 @@ def test_read_records_of_a_missing_file_is_empty(tmp_path):
 def test_new_id_is_eight_lowercase_hex_characters():
     for _ in range(50):
         assert re.fullmatch(r"[0-9a-f]{8}", V.new_id(set()))
+
+
+def test_new_id_draws_again_until_the_id_is_unused():
+    """8 hex digits almost never collide, so the draws are given here to
+    force one: the first two are taken, the third is free."""
+    draws = iter(["aaaa0001", "aaaa0002", "bbbb0003"])
+    assert V.new_id({"aaaa0001", "aaaa0002"}, draw=lambda: next(draws)) == "bbbb0003"
 
 
 def test_note_threads_reads_either_key_and_unwraps_wikilinks():

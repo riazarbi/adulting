@@ -35,6 +35,8 @@ def cmd_new(args):
     target_dir = threads_dir() / V.KIND_DIRS[kind]
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{name}.md"
+    # Asking the filesystem is right here: on macOS `sgb` would overwrite
+    # `SGB`, so a name taken in any case is taken.
     if path.exists():
         V.die(f"already exists: {path}")
     billing = ''

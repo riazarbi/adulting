@@ -1,16 +1,13 @@
 """The `tasks` command: ingest ACTION lines into TASK anchors, list, next,
 show, the anchor mutations, and add."""
 
+import json
 import re
 from datetime import date
 
 import pytest
 
 UUID = r"[0-9a-f]{8}"
-
-
-def tasks(vault, *argv):
-    return vault.run(*argv, cli="tasks", input="")
 
 
 def setup_vault(vault, threads=(("Projects", "SGB"),), people=("Riaz Arbi",)):
@@ -182,7 +179,7 @@ def test_ingest_generates_unique_uuids(vault):
 
 def test_dry_run_shows_the_anchors_and_writes_nothing(inbox):
     before = inbox.read("notes/2026-09-10-14-30-00.md")
-    r = tasks(inbox, "--dry-run")
+    r = inbox.run("--dry-run", cli="tasks")
     assert r.returncode == 1
     day = r"\d{4}-\d{2}-\d{2}"
     lines = r.stdout.splitlines()
@@ -197,12 +194,12 @@ def test_dry_run_shows_the_anchors_and_writes_nothing(inbox):
 
 
 def test_dry_run_quiet_prints_only_failures(inbox):
-    r = tasks(inbox, "--dry-run", "--quiet")
+    r = inbox.run("--dry-run", "--quiet", cli="tasks")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", failures(inbox))
 
 
 def test_ingest_rewrites_good_actions_in_place_and_leaves_the_rest(inbox):
-    r = tasks(inbox)
+    r = inbox.run(cli="tasks")
     kick = inbox.home / "notes" / "2026-09-10-14-30-00.md"
     assert r.returncode == 1
     out = r.stdout.splitlines()
@@ -224,9 +221,9 @@ def test_ingest_rewrites_good_actions_in_place_and_leaves_the_rest(inbox):
 
 
 def test_ingest_with_nothing_to_do(base):
-    r = tasks(base)
+    r = base.run(cli="tasks")
     assert (r.returncode, r.stdout, r.stderr) == (0, "Ingested: 0.  Failed: 0.\n", "")
-    assert tasks(base, "--quiet").stdout == ""
+    assert base.run("--quiet", cli="tasks").stdout == ""
 
 
 # ---------- list, next, show ----------
@@ -246,7 +243,7 @@ def board(base):
 
 
 def test_list_table(board):
-    assert tasks(board, "list").stdout == (
+    assert board.run("list", cli="tasks").stdout == (
         "dddd0001  [#H]  Projects/SGB +1  (Riaz Arbi)  Draft the scope note  due:2026-09-20\n"
         "aaaa0001  [#L]  Projects/SGB +1  (Charlie)    Existing              due:2026-09-05\n"
         "aaaa0003  [#M]  Topics/zeta                   second log task\n"
@@ -255,11 +252,11 @@ def test_list_table(board):
 
 
 def test_list_filters(board):
-    assert tasks(board, "list", "--thread", "Projects/Alpha").stdout.count("\n") == 2
-    assert tasks(board, "list", "--priority", "M").stdout == \
+    assert board.run("list", "--thread", "Projects/Alpha", cli="tasks").stdout.count("\n") == 2
+    assert board.run("list", "--priority", "M", cli="tasks").stdout == \
         "aaaa0003  [#M]  Topics/zeta    second log task\n"
-    assert tasks(board, "list", "--assignee", "Charlie").stdout.startswith("aaaa0001")
-    assert tasks(board, "list", "--thread", "Projects/Nope").stdout == "(no tasks)\n"
+    assert board.run("list", "--assignee", "Charlie", cli="tasks").stdout.startswith("aaaa0001")
+    assert board.run("list", "--thread", "Projects/Nope", cli="tasks").stdout == "(no tasks)\n"
 
 
 def test_list_shows_only_pending(vault):
@@ -268,9 +265,8 @@ def test_list_shows_only_pending(vault):
         "TASK: pending one <!--abcd1234 entry:2026-05-20-->\n"
         "DONE: completed one <!--ef567890 entry:2026-05-20 end:2026-05-25-->")
     r = vault.run("list", cli="tasks")
-    assert r.returncode == 0
-    assert "pending one" in r.stdout
-    assert "completed one" not in r.stdout
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "abcd1234        Projects/SGB    pending one\n"), "")
 
 
 def test_list_priority_filter(vault):
@@ -279,8 +275,8 @@ def test_list_priority_filter(vault):
         "TASK: [#H] high prio <!--abcd1234 entry:2026-05-20-->\n"
         "TASK: [#L] low prio <!--ef567890 entry:2026-05-20-->")
     r = vault.run("list", "--priority", "H", cli="tasks")
-    assert "high prio" in r.stdout
-    assert "low prio" not in r.stdout
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "abcd1234  [#H]  Projects/SGB    high prio\n"), "")
 
 
 def test_list_assignee_filter(vault):
@@ -289,8 +285,8 @@ def test_list_assignee_filter(vault):
         "TASK: (Riaz Arbi) mine <!--abcd1234 entry:2026-05-20-->\n"
         "TASK: (Charlie) theirs <!--ef567890 entry:2026-05-20-->")
     r = vault.run("list", "--assignee", "Charlie", cli="tasks")
-    assert "theirs" in r.stdout
-    assert "mine" not in r.stdout
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "ef567890        Projects/SGB  (Charlie)  theirs\n"), "")
 
 
 def test_list_overdue_filter(vault):
@@ -300,9 +296,8 @@ def test_list_overdue_filter(vault):
         "TASK: future <!--ef567890 entry:2026-05-20 due:2099-01-01-->\n"
         "TASK: no-due <!--beef0000 entry:2026-05-20-->")
     r = vault.run("list", "--overdue", cli="tasks")
-    assert "overdue" in r.stdout
-    assert "future" not in r.stdout
-    assert "no-due" not in r.stdout
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "abcd1234        Projects/SGB    overdue  due:2000-01-01\n"), "")
 
 
 def test_list_thread_filter(vault):
@@ -314,8 +309,8 @@ def test_list_thread_filter(vault):
         "TASK: in Other <!--ef567890 entry:2026-05-20-->",
         threads=["Projects/Other"])
     r = vault.run("list", "--thread", "Projects/SGB", cli="tasks")
-    assert "in SGB" in r.stdout
-    assert "in Other" not in r.stdout
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "abcd1234        Projects/SGB    in SGB\n"), "")
 
 
 def test_list_sorts_by_thread_alphabetically(vault):
@@ -329,14 +324,14 @@ def test_list_sorts_by_thread_alphabetically(vault):
         "TASK: [#L] alpha-low <!--ef567891 entry:2026-05-20-->",
         threads=["Projects/Alpha"])
     r = vault.run("list", cli="tasks")
-    pos_low = r.stdout.find("alpha-low")
-    pos_none = r.stdout.find("alpha-none")
-    pos_zed = r.stdout.find("zed-high")
-    assert 0 <= pos_low < pos_none < pos_zed
+    assert (r.returncode, r.stdout, r.stderr) == (0, (
+        "ef567891  [#L]  Projects/Alpha    alpha-low\n"
+        "ef567890        Projects/Alpha    alpha-none\n"
+        "abcd1234  [#H]  Projects/Zed      zed-high\n"), "")
 
 
 def test_next_orders_by_priority_due_entry(board):
-    assert tasks(board, "next").stdout == (
+    assert board.run("next", cli="tasks").stdout == (
         "dddd0001  [#H]  Projects/SGB +1  (Riaz Arbi)  Draft the scope note  due:2026-09-20\n"
         "aaaa0003  [#M]  Topics/zeta                   second log task\n"
         "aaaa0001  [#L]  Projects/SGB +1  (Charlie)    Existing              due:2026-09-05\n"
@@ -355,24 +350,8 @@ def test_next_shows_the_first_5(vault):
     assert shown == [f"abc1{i:04x}" for i in range(5)]
 
 
-def test_next_sort_priority_first(vault):
-    """H sorts before M sorts before L sorts before none."""
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: none <!--abc10000 entry:2026-05-20-->\n"
-        "TASK: [#L] low <!--abc10001 entry:2026-05-20-->\n"
-        "TASK: [#H] high <!--abc10002 entry:2026-05-20-->\n"
-        "TASK: [#M] mid <!--abc10003 entry:2026-05-20-->")
-    r = vault.run("next", cli="tasks")
-    pos_high = r.stdout.find("high")
-    pos_mid = r.stdout.find("mid")
-    pos_low = r.stdout.find("low")
-    pos_none = r.stdout.find("none")
-    assert 0 <= pos_high < pos_mid < pos_low < pos_none
-
-
 def test_show(board):
-    assert tasks(board, "show", "aaaa0001").stdout == (
+    assert board.run("show", "aaaa0001", cli="tasks").stdout == (
         "uuid:        aaaa0001\n"
         "kind:        TASK\n"
         "priority:    L\n"
@@ -385,19 +364,19 @@ def test_show(board):
         "due:         2026-09-05\n"
         "scheduled:   -\n"
         "depends:     -\n")
-    assert tasks(board, "show", "dddd").stdout.splitlines()[-1] == "depends:     aaaa0001"
-    assert tasks(board, "show", "cccc0001").stdout.splitlines()[4] == "threads:     -"
+    assert board.run("show", "dddd", cli="tasks").stdout.splitlines()[-1] == "depends:     aaaa0001"
+    assert board.run("show", "cccc0001", cli="tasks").stdout.splitlines()[4] == "threads:     -"
 
 
 def test_uuid_prefix_errors(board):
     # DEFERRED BUG 7: the ambiguous-prefix error names files by basename,
     # not by vault path.
-    r = tasks(board, "show", "aaaa")
+    r = board.run("show", "aaaa", cli="tasks")
     assert (r.returncode, r.stderr) == (1, "tasks: error: uuid prefix 'aaaa' is ambiguous: "
                                            "aaaa0001 (2026-09-10-14-30-00.md:9), "
                                            "aaaa0002 (2026-09-10-14-30-00.md:10), "
                                            "aaaa0003 (2026-09-13.md:7)\n")
-    r = tasks(board, "show", "ffff")
+    r = board.run("show", "ffff", cli="tasks")
     assert (r.returncode, r.stderr) == (1, "tasks: error: no task found with uuid prefix 'ffff'\n")
 
 
@@ -417,17 +396,20 @@ def test_mutations_print_and_rewrite_the_line(board):
         (["add-depends", "aaaa0003", "dddd0001"], 0, "aaaa0003 now depends on dddd0001\n"),
         (["rm-depends", "aaaa0003", "bbbb0001"], 0, "aaaa0003 did not depend on bbbb0001\n"),
         (["rm-depends", "aaaa0003", "cccc0001"], 0, "aaaa0003 no longer depends on cccc0001\n"),
+        # Replacing a value already there, not adding a second one.
+        (["set-priority", "aaaa0003", "H"], 0, "updated: aaaa0003  priority=H\n"),
+        (["set-due", "aaaa0001", "2026-10-10"], 0, "updated: aaaa0001  due=2026-10-10\n"),
     ]
     for argv, rc, out in steps:
-        r = tasks(board, *argv)
+        r = board.run(*argv, cli="tasks")
         assert (r.returncode, r.stdout, r.stderr) == (rc, out, ""), argv
-    text = board.read("logs/Topics/zeta/2026-09-13.md")
-    today = re.search(r"end:(\S+)", text).group(1)
-    assert text == (
+    assert board.read("logs/Topics/zeta/2026-09-13.md") == (
         '---\nthread: "[[Topics/zeta]]"\ndate: 2026-09-13\n---\n\n'
-        f"DONE: [#L] (Charlie) renamed log task <!--bbbb0001 entry:2026-09-13 end:{today} "
+        f"DONE: [#L] (Charlie) renamed log task <!--bbbb0001 entry:2026-09-13 end:{date.today().isoformat()} "
         "due:2026-10-01 scheduled:2026-09-25-->  \n"
-        "TASK: [#M] second log task <!--aaaa0003 entry:2026-09-13 depends:dddd0001-->  \n")
+        "TASK: [#H] second log task <!--aaaa0003 entry:2026-09-13 depends:dddd0001-->  \n")
+    assert board.lines("notes/2026-09-10-14-30-00.md")[8] == (
+        "TASK: [#L] (Charlie) Existing <!--aaaa0001 entry:2026-09-01 due:2026-10-10-->  ")
 
 
 @pytest.mark.parametrize("argv, message", [
@@ -441,7 +423,7 @@ def test_mutations_print_and_rewrite_the_line(board):
 ])
 def test_mutation_errors_leave_the_file_alone(board, argv, message):
     before = board.read("logs/Topics/zeta/2026-09-13.md")
-    r = tasks(board, *argv)
+    r = board.run(*argv, cli="tasks")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message + "\n")
     assert board.read("logs/Topics/zeta/2026-09-13.md") == before
 
@@ -455,112 +437,6 @@ def test_done_flips_kind_and_stamps_end(vault):
     assert r.stdout == "done: abcd1234  Send report\n"
     assert first_anchor(vault, "notes/2026-05-27-09-15-22.md") == (
         f"DONE: Send report <!--abcd1234 entry:2026-05-20 end:{date.today().isoformat()}-->  ")
-
-
-def test_done_is_idempotent(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "DONE: Already <!--abcd1234 entry:2026-05-20 end:2026-05-25-->")
-    r = vault.run("done", "abcd1234", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "end:2026-05-25" in line  # untouched
-
-
-def test_set_description_rewrites_body(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: old text <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-description", "abcd1234", "new text", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "TASK: new text <!--abcd1234" in line
-
-
-def test_set_assignee_writes_prefix(vault):
-    setup_vault(vault, people=("Riaz Arbi", "Charlie"))
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: shared task <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-assignee", "abcd1234", "Charlie", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "TASK: (Charlie) shared task <!--abcd1234" in line
-
-
-def test_set_due_inserts_attr(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: t <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-due", "abcd1234", "2026-06-01", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "due:2026-06-01" in line
-
-
-def test_set_due_replaces_existing(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: t <!--abcd1234 entry:2026-05-20 due:2026-05-25-->")
-    r = vault.run("set-due", "abcd1234", "2026-06-01", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "due:2026-06-01" in line
-    assert "due:2026-05-25" not in line
-
-
-def test_set_scheduled_inserts_attr(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: t <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-scheduled", "abcd1234", "2026-06-05", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "scheduled:2026-06-05" in line
-
-
-def test_set_priority_writes_visible_token(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: t <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-priority", "abcd1234", "H", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert line.startswith("TASK: [#H] t <!--abcd1234")
-    # Priority must NOT leak into attrs blob:
-    assert "priority:H" not in line
-
-
-def test_set_priority_replaces_existing(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: [#H] t <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("set-priority", "abcd1234", "M", cli="tasks")
-    assert r.returncode == 0
-    line = first_anchor(vault, "notes/2026-05-27-09-15-22.md")
-    assert "[#M]" in line and "[#H]" not in line
-
-
-def test_add_depends_appends(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: dep target <!--beef0000 entry:2026-05-20-->\n"
-        "TASK: dependent <!--abcd1234 entry:2026-05-20-->")
-    r = vault.run("add-depends", "abcd1234", "beef0000", cli="tasks")
-    assert r.returncode == 0
-    # The dependent is the second TASK line; index 1.
-    line = anchor_lines(vault, "notes/2026-05-27-09-15-22.md")[1]
-    assert "depends:beef0000" in line
-
-
-def test_rm_depends_removes(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: dep <!--beef0000 entry:2026-05-20-->\n"
-        "TASK: dependent <!--abcd1234 entry:2026-05-20 depends:beef0000-->")
-    r = vault.run("rm-depends", "abcd1234", "beef0000", cli="tasks")
-    assert r.returncode == 0
-    line = anchor_lines(vault, "notes/2026-05-27-09-15-22.md")[1]
-    assert "depends:" not in line
 
 
 def test_rm_depends_unknown_target_fails(vault):
@@ -578,7 +454,7 @@ def test_rm_depends_unknown_target_fails(vault):
 
 def test_set_priority_takes_only_h_m_or_l(board):
     before = board.snapshot()
-    r = tasks(board, "set-priority", "bbbb0001", "Z")
+    r = board.run("set-priority", "bbbb0001", "Z", cli="tasks")
     assert (r.returncode, r.stdout) == (2, "")
     assert r.stderr.splitlines()[-1] == (
         "tasks set-priority: error: argument priority: invalid choice: 'Z' (choose from 'H', 'M', 'L')")
@@ -588,9 +464,9 @@ def test_set_priority_takes_only_h_m_or_l(board):
 # ---------- add ----------
 
 def test_add_passes_every_flag_to_the_buffer(base):
-    r = tasks(base, "add", "Projects/SGB", "(Charlie) via tasks add", "--due", "2026-10-02",
+    r = base.run("add", "Projects/SGB", "(Charlie) via tasks add", "--due", "2026-10-02",
               "--scheduled", "2026-10-01", "--priority", "M", "--depends", "bbbb0001",
-              "--depends", "aaaa0001")
+              "--depends", "aaaa0001", cli="tasks")
     assert r.returncode == 0
     line = (r"- \[\[Projects/SGB\]\] ACTION: \(Charlie\) via tasks add "
             r"<!--\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d depends:aaaa0001 depends:bbbb0001 "
@@ -600,7 +476,7 @@ def test_add_passes_every_flag_to_the_buffer(base):
 
 
 def test_add_passes_the_buffer_exit_code_through(base):
-    r = tasks(base, "add", "Projects/Nope", "x")
+    r = base.run("add", "Projects/Nope", "x", cli="tasks")
     assert r.returncode == 1
     assert r.stderr == "tasks: error: thread 'Projects/Nope' does not resolve to a thread file\n"
 
@@ -642,19 +518,63 @@ def test_full_lifecycle(vault):
 def test_an_empty_uuid_prefix_is_refused(board, argv):
     """An empty prefix matches everything: `rm-depends X ""` silently removed
     the task's only dependency."""
-    tasks(board, "add-depends", "aaaa0003", "dddd0001")
+    board.run("add-depends", "aaaa0003", "dddd0001", cli="tasks")
     before = board.snapshot()
-    r = tasks(board, *argv)
+    r = board.run(*argv, cli="tasks")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "tasks: error: give a uuid prefix; got an empty one\n"
     assert board.snapshot() == before
 
 
 def test_rm_depends_refuses_a_prefix_matching_two_dependencies(board):
-    tasks(board, "add-depends", "aaaa0003", "aaaa0001")
-    tasks(board, "add-depends", "aaaa0003", "aaaa0002")
+    board.run("add-depends", "aaaa0003", "aaaa0001", cli="tasks")
+    board.run("add-depends", "aaaa0003", "aaaa0002", cli="tasks")
     before = board.snapshot()
-    r = tasks(board, "rm-depends", "aaaa0003", "aaaa")
+    r = board.run("rm-depends", "aaaa0003", "aaaa", cli="tasks")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "tasks: error: uuid prefix 'aaaa' is ambiguous: aaaa0001, aaaa0002\n"
     assert board.snapshot() == before
+
+
+def test_ingest_leaves_an_action_under_a_wrongly_cased_thread(vault):
+    vault.write_thread("Projects", "SGB")
+    note = vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/sgb"])
+    before = note.read_text(encoding="utf-8")
+    r = vault.run(cli="tasks")
+    assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
+    assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
+                        f"  {note}:9: thread 'Projects/sgb' does not resolve\n\n")
+    assert note.read_text(encoding="utf-8") == before
+
+
+def test_rm_depends_removes_a_dependency_whose_task_is_gone(vault):
+    """Looking the depended-on task up would fail, so the dependency is
+    matched against the task's own list first."""
+    vault.write_thread("Projects", "SGB")
+    note = vault.write_note("2026-09-10-14-30-00",
+                            "TASK: needs gone <!--bbbb0001 entry:2026-09-01 depends:dead0001-->",
+                            threads=["Projects/SGB"])
+    r = vault.run("rm-depends", "bbbb0001", "dead", cli="tasks")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "bbbb0001 no longer depends on dead0001\n", "")
+    assert note.read_text(encoding="utf-8").split("\n")[8] == "TASK: needs gone <!--bbbb0001 entry:2026-09-01-->  "
+
+
+def test_ingest_reports_a_file_that_is_not_utf8_and_carries_on(vault):
+    vault.write_thread("Projects", "SGB")
+    bad = vault.home / "logs" / "Projects" / "SGB" / "2026-09-12.md"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"---\nthread: x\n---\n\xff\xfe bad bytes\nACTION: unreachable\n")
+    good = vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/SGB"])
+    r = vault.run(cli="tasks")
+    assert r.returncode == 1
+    assert re.fullmatch(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(good))}:9  do it\nIngested: 1.  Failed: 1.\n", r.stdout)
+    assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
+                        f"  {bad}: file is not valid UTF-8; skipped\n\n")
+    assert vault.run("list", cli="tasks").returncode == 0
+
+
+def test_depends_help_says_a_whole_uuid(vault):
+    manifest = json.loads(vault.run("--help-json", cli="tasks").stdout)
+    [sub] = [s for s in manifest["subcommands"] if s["name"] == "add"]
+    [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
+    assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."

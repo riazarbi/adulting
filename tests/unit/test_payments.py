@@ -31,12 +31,6 @@ def test_build_payment_omits_blank_optional_fields():
     assert "account" not in bare and "note" not in bare
 
 
-def test_as_of():
-    assert P._as_of(None) == date.today()
-    assert P._as_of("2026-06-30") == date(2026, 6, 30)
-    with pytest.raises(SystemExit):
-        P._as_of("30 June")
-
 
 @pytest.fixture
 def vault_with_records():

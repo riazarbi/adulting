@@ -526,9 +526,15 @@ def all_ids():
     return ids
 
 
-def new_id(existing):
+def random_id():
+    return _uuid.uuid4().hex[:8]
+
+
+def new_id(existing, draw=random_id):
+    """An 8-hex-digit id not in `existing`, drawing again until one is free.
+    `draw` makes the ids; a test gives its own to force a collision."""
     while True:
-        u = _uuid.uuid4().hex[:8]
+        u = draw()
         if u not in existing:
             return u
 

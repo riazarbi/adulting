@@ -168,9 +168,17 @@ def registry_with(edges):
 
 
 
-def test_find_cycles():
-    graph = {"a": ["b"], "b": ["c"], "c": ["a"], "d": ["d"], "e": ["zzz"]}
-    assert list(L._find_cycles(graph)) == [["a", "b", "c"], ["d"]]
+def test_each_cycle_is_reported_once_from_its_first_task():
+    """A three-task cycle and a task that depends on itself; the dangling
+    dependency is reported as such, not as part of a cycle."""
+    reg = registry_with([("aaaa0001", ["aaaa0002"]), ("aaaa0002", ["aaaa0003"]),
+                         ("aaaa0003", ["aaaa0001"]), ("aaaa0004", ["aaaa0004"]),
+                         ("aaaa0005", ["aaaa9999"])])
+    assert list(L.cross_check_tasks(reg)) == [
+        (Path("n.md"), 5, "task_anchor.depends: 'aaaa9999' does not resolve to any anchor"),
+        (Path("n.md"), 1, "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0003 -> aaaa0001"),
+        (Path("n.md"), 4, "task_anchor.depends: cycle: aaaa0004 -> aaaa0004"),
+    ]
 
 
 def test_cross_check_tasks():

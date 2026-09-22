@@ -14,11 +14,6 @@ import pytest
 FLAGS = ("--kind", "project", "--category", "professional")
 
 
-def threads(vault, *argv, input=""):
-    # input="" closes stdin, so any prompt would hit EOF instead of hanging.
-    return vault.run(*argv, cli="threads", input=input)
-
-
 @pytest.fixture
 def threads_vault(vault):
     vault.write_thread("Projects", "SGB", started="2026-01-05")
@@ -30,7 +25,7 @@ def threads_vault(vault):
 # ---------- list ----------
 
 def test_list_shows_open_threads_by_kind_then_name(threads_vault):
-    r = threads(threads_vault, "list")
+    r = threads_vault.run("list", cli="threads")
     assert r.returncode == 0
     assert r.stdout == (
         "THREAD                      STATUS    CATEGORY\n"
@@ -40,11 +35,11 @@ def test_list_shows_open_threads_by_kind_then_name(threads_vault):
 
 def test_list_all_includes_closed(threads_vault):
     assert "Topics/Old Idea             closed    professional" in \
-        threads(threads_vault, "list", "--all").stdout
+        threads_vault.run("list", "--all", cli="threads").stdout
 
 
 def test_list_json_fields(threads_vault):
-    rows = json.loads(threads(threads_vault, "list", "--json").stdout)
+    rows = json.loads(threads_vault.run("list", "--json", cli="threads").stdout)
     assert rows[0] == {
         "kind": "project", "name": "SGB", "thread": "Projects/SGB",
         "path": "threads/Projects/SGB.md", "status": "open",
@@ -52,28 +47,28 @@ def test_list_json_fields(threads_vault):
 
 
 def test_list_query_ranks_by_similarity(threads_vault):
-    rows = json.loads(threads(threads_vault, "list", "--json", "--all", "pf").stdout)
+    rows = json.loads(threads_vault.run("list", "--json", "--all", "pf", cli="threads").stdout)
     assert [r["name"] for r in rows][0] == "Personal Finance"
-    rows = json.loads(threads(threads_vault, "list", "--json", "processes/per").stdout)
+    rows = json.loads(threads_vault.run("list", "--json", "processes/per", cli="threads").stdout)
     assert [r["name"] for r in rows] == ["Personal Finance"]
 
 
 def test_list_empty_messages(threads_vault):
-    assert threads(threads_vault, "list", "zzzzzz").stdout == "(no matches)\n"
+    assert threads_vault.run("list", "zzzzzz", cli="threads").stdout == "(no matches)\n"
     for f in (threads_vault.home / "threads").rglob("*.md"):
         f.unlink()
-    assert threads(threads_vault, "list").stdout == "(no threads)\n"
+    assert threads_vault.run("list", cli="threads").stdout == "(no threads)\n"
 
 
 # ---------- show and resolution ----------
 
 def test_show_prints_the_file(threads_vault):
-    assert threads(threads_vault, "show", "Projects/SGB").stdout == threads_vault.read("threads/Projects/SGB.md")
+    assert threads_vault.run("show", "Projects/SGB", cli="threads").stdout == threads_vault.read("threads/Projects/SGB.md")
 
 
 @pytest.mark.parametrize("ref", ["SGB", "Projects/SGB", "[[Projects/SGB]]", "  SGB  "])
 def test_show_json_resolves_every_reference_form(threads_vault, ref):
-    r = threads(threads_vault, "show", ref, "--json")
+    r = threads_vault.run("show", ref, "--json", cli="threads")
     assert json.loads(r.stdout) == {
         "kind": "project", "name": "SGB", "path": "threads/Projects/SGB.md",
         "status": "open", "category": "professional", "started": "2026-01-05"}
@@ -81,23 +76,23 @@ def test_show_json_resolves_every_reference_form(threads_vault, ref):
 
 @pytest.mark.parametrize("ref", ["Nope", "Projects/Nope", "People/SGB", "sgb"])
 def test_show_not_found(threads_vault, ref):
-    r = threads(threads_vault, "show", ref)
+    r = threads_vault.run("show", ref, cli="threads")
     assert r.returncode == 1
     assert r.stderr == f"threads: error: thread {ref!r} does not resolve to a thread file\n"
 
 
 def test_bare_name_in_two_kinds_is_ambiguous(threads_vault):
     threads_vault.write_thread("Topics", "SGB")
-    r = threads(threads_vault, "show", "SGB")
+    r = threads_vault.run("show", "SGB", cli="threads")
     assert r.returncode == 1
     assert r.stderr == "threads: error: ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB\n"
-    assert threads(threads_vault, "show", "Topics/SGB").returncode == 0
+    assert threads_vault.run("show", "Topics/SGB", cli="threads").returncode == 0
 
 
 # ---------- new ----------
 
 def test_new_writes_the_file(vault):
-    r = threads(vault, "new", *FLAGS, "--name", "AXA DORA")
+    r = vault.run("new", *FLAGS, "--name", "AXA DORA", cli="threads")
     path = vault.home / "threads" / "Projects" / "AXA DORA.md"
     assert r.returncode == 0
     assert r.stdout == f"created: {path}\n"
@@ -107,8 +102,8 @@ def test_new_writes_the_file(vault):
 
 
 def test_new_with_billing_orders_currency_then_rate(vault):
-    threads(vault, "new", "--kind", "process", "--category", "voluntary",
-            "--name", "Trust", "--currency", "bwp", "--rate", "0")
+    vault.run("new", "--kind", "process", "--category", "voluntary",
+            "--name", "Trust", "--currency", "bwp", "--rate", "0", cli="threads")
     assert vault.read("threads/Processes/Trust.md") == (
         f"---\nstatus: open\nkind: process\ncategory: voluntary\n"
         f"started: {date.today().isoformat()}\ncurrency: BWP\nrate: 0\n---\n\n# Trust\n")
@@ -117,7 +112,7 @@ def test_new_with_billing_orders_currency_then_rate(vault):
 def test_new_without_a_rate_writes_none(vault):
     """`hours` then falls back to the vault config, then 2500. The old
     interactive path wrote `rate: 2500` when the prompt was left blank."""
-    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar")
+    vault.run("new", *FLAGS, "--name", "Acme Corp", "--currency", "zar", cli="threads")
     assert vault.read("threads/Projects/Acme Corp.md") == (
         f"---\nstatus: open\nkind: project\ncategory: professional\n"
         f"started: {date.today().isoformat()}\ncurrency: ZAR\n---\n\n# Acme Corp\n")
@@ -125,7 +120,7 @@ def test_new_without_a_rate_writes_none(vault):
 
 def test_a_new_billed_thread_can_be_logged_against_at_once(vault):
     """No hand-edit is needed before `hours log` works."""
-    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar")
+    vault.run("new", *FLAGS, "--name", "Acme Corp", "--currency", "zar", cli="threads")
     r = vault.run("log", "Acme Corp", "kickoff", cli="hours")
     assert r.returncode == 0, r.stderr
     assert re.fullmatch(r"logged [0-9a-f]{8}  Projects/Acme Corp  \d{4}-\d\d-\d\d \d\d:\d\d  "
@@ -133,7 +128,7 @@ def test_a_new_billed_thread_can_be_logged_against_at_once(vault):
 
 
 def test_a_new_thread_passes_lint(vault):
-    threads(vault, "new", *FLAGS, "--name", "Acme Corp", "--currency", "zar", "--rate", "900")
+    vault.run("new", *FLAGS, "--name", "Acme Corp", "--currency", "zar", "--rate", "900", cli="threads")
     r = vault.run(str(vault.home / "threads" / "Projects" / "Acme Corp.md"), cli="lint")
     assert (r.returncode, r.stdout) == (0, "\n1 file(s) checked. 0 violation(s).\n")
 
@@ -141,19 +136,19 @@ def test_a_new_thread_passes_lint(vault):
 def test_new_refuses_an_existing_thread(threads_vault):
     path = threads_vault.home / "threads" / "Projects" / "SGB.md"
     before = path.read_text()
-    r = threads(threads_vault, "new", *FLAGS, "--name", "SGB")
+    r = threads_vault.run("new", *FLAGS, "--name", "SGB", cli="threads")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"threads: error: already exists: {path}\n"
     assert path.read_text() == before
 
 
 def test_new_error_messages(vault):
-    r = threads(vault, "new", *FLAGS, "--name", "X", "--currency", "rands")
+    r = vault.run("new", *FLAGS, "--name", "X", "--currency", "rands", cli="threads")
     assert (r.returncode, r.stderr) == (1, "threads: error: currency 'RANDS' is not a 3-letter ISO code\n")
-    r = threads(vault, "new", *FLAGS, "--name", "X", "--rate", "900")
+    r = vault.run("new", *FLAGS, "--name", "X", "--rate", "900", cli="threads")
     assert (r.returncode, r.stderr) == (1, "threads: error: --rate needs a --currency\n")
     assert not (vault.home / "threads" / "Projects" / "X.md").exists()
-    r = threads(vault, "new", "--kind", "people", "--category", "personal", "--name", "X")
+    r = vault.run("new", "--kind", "people", "--category", "personal", "--name", "X", cli="threads")
     assert r.returncode == 2 and "invalid choice" in r.stderr
 
 
@@ -161,19 +156,19 @@ def test_new_error_messages(vault):
 
 def test_delete_with_yes(threads_vault):
     path = threads_vault.home / "threads" / "Topics" / "Old Idea.md"
-    r = threads(threads_vault, "delete", "[[Topics/Old Idea]]", "-y")
+    r = threads_vault.run("delete", "[[Topics/Old Idea]]", "-y", cli="threads")
     assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")
     assert not path.exists()
 
 
 def test_delete_not_found_and_ambiguous(threads_vault):
-    assert threads(threads_vault, "delete", "Nope", "-y").stderr == "threads: error: thread 'Nope' does not resolve to a thread file\n"
     threads_vault.write_thread("Topics", "SGB")
-    r = threads(threads_vault, "delete", "SGB", "-y")
-    assert r.returncode == 1
-    assert "ambiguous" in r.stderr
-    assert (threads_vault.home / "threads" / "Projects" / "SGB.md").exists()
-
+    before = threads_vault.snapshot()
+    for ref, message in (("Nope", "thread 'Nope' does not resolve to a thread file"),
+                         ("SGB", "ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB")):
+        r = threads_vault.run("delete", ref, "-y", cli="threads")
+        assert (r.returncode, r.stdout, r.stderr) == (1, "", f"threads: error: {message}\n")
+    assert threads_vault.snapshot() == before
 
 
 # ---------- no interactivity (fails against the pre-port script) ----------
@@ -182,7 +177,7 @@ def test_delete_not_found_and_ambiguous(threads_vault):
 def test_new_fails_instead_of_prompting_for_a_missing_field(vault, missing):
     given = {"--kind": "project", "--category": "professional", "--name": "Typed"}
     argv = [x for k, val in given.items() if k != missing for x in (k, val)]
-    r = threads(vault, "new", *argv, input="1\n1\nTyped\n\n")
+    r = vault.run("new", *argv, input="1\n1\nTyped\n\n", cli="threads")
     assert r.returncode == 2
     assert missing in r.stderr
     assert not (vault.home / "threads" / "Projects" / "Typed.md").exists()
@@ -190,16 +185,16 @@ def test_new_fails_instead_of_prompting_for_a_missing_field(vault, missing):
 
 def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     for blank in ("", "  "):
-        r = threads(vault, "new", *FLAGS, "--name", blank)
+        r = vault.run("new", *FLAGS, "--name", blank, cli="threads")
         assert (r.returncode, r.stderr) == (1, "threads: error: empty name\n")
     assert list((vault.home / "threads").rglob("*.md")) == []
-    assert threads(vault, "new", *FLAGS, "--name", " Acme ").returncode == 0
+    assert vault.run("new", *FLAGS, "--name", " Acme ", cli="threads").returncode == 0
     assert (vault.home / "threads" / "Projects" / "Acme.md").exists()
 
 
 def test_delete_without_yes_refuses_even_if_stdin_says_yes(threads_vault):
     path = threads_vault.home / "threads" / "Projects" / "SGB.md"
-    r = threads(threads_vault, "delete", "SGB", input="y\n")
+    r = threads_vault.run("delete", "SGB", input="y\n", cli="threads")
     assert r.returncode == 1
     assert r.stderr == f"threads: error: refusing to delete {path} without -y\n"
     assert path.exists()
@@ -209,7 +204,7 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(threads_vault):
 def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     """The name becomes threads/<Kind>/<name>.md, so a `/` could write
     outside threads/ (or crash), and a leading `.` would make a hidden file."""
-    r = threads(vault, "new", *FLAGS, "--name", name)
+    r = vault.run("new", *FLAGS, "--name", name, cli="threads")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"threads: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []

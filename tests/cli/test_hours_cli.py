@@ -12,11 +12,6 @@ from datetime import datetime, timedelta
 import pytest
 
 
-def hours(vault, *argv, input=""):
-    # input="" closes stdin, so any prompt would hit EOF instead of hanging.
-    return vault.run(*argv, cli="hours", input=input)
-
-
 @pytest.fixture
 def hours_vault(vault):
     """ZAR thread with a rate, BWP thread without one, an unbilled topic, and
@@ -34,9 +29,9 @@ def hours_vault(vault):
 def logged(hours_vault):
     """Three entries on consecutive days; returns their ids in date order."""
     outputs = [
-        hours(hours_vault, "log", "SANA", "Finance pack review", "-m", "90", "-d", "2026-08-04", "-t", "09:15"),
-        hours(hours_vault, "log", "Trust", "Board prep", "-d", "2026-08-05", "-t", "14:00"),
-        hours(hours_vault, "log", "Wellness", "5k", "run", "-m", "30", "-d", "2026-08-06", "-t", "06:30"),
+        hours_vault.run("log", "SANA", "Finance pack review", "-m", "90", "-d", "2026-08-04", "-t", "09:15", cli="hours"),
+        hours_vault.run("log", "Trust", "Board prep", "-d", "2026-08-05", "-t", "14:00", cli="hours"),
+        hours_vault.run("log", "Wellness", "5k", "run", "-m", "30", "-d", "2026-08-06", "-t", "06:30", cli="hours"),
     ]
     return [re.match(r"logged ([0-9a-f]{8})", r.stdout).group(1) for r in outputs]
 
@@ -45,9 +40,9 @@ def logged(hours_vault):
 
 def test_log_lines(hours_vault):
     lines = [
-        hours(hours_vault, "log", "SANA", "Finance pack review", "-m", "90", "-d", "2026-08-04", "-t", "09:15").stdout,
-        hours(hours_vault, "log", "Trust", "Board prep", "-d", "2026-08-05", "-t", "14:00").stdout,
-        hours(hours_vault, "log", "Wellness", "5k", "run", "-m", "30", "-d", "2026-08-06", "-t", "06:30").stdout,
+        hours_vault.run("log", "SANA", "Finance pack review", "-m", "90", "-d", "2026-08-04", "-t", "09:15", cli="hours").stdout,
+        hours_vault.run("log", "Trust", "Board prep", "-d", "2026-08-05", "-t", "14:00", cli="hours").stdout,
+        hours_vault.run("log", "Wellness", "5k", "run", "-m", "30", "-d", "2026-08-06", "-t", "06:30", cli="hours").stdout,
     ]
     shapes = [re.sub(r"^logged [0-9a-f]{8}", "logged ID", l) for l in lines]
     assert shapes == [
@@ -66,52 +61,36 @@ def test_log_lines(hours_vault):
     (["SANA", "x", "-c", "RANDS"], "hours: error: currency 'RANDS' is not a 3-letter ISO code\n"),
 ])
 def test_log_errors_write_nothing(hours_vault, argv, message):
-    r = hours(hours_vault, "log", *argv)
+    r = hours_vault.run("log", *argv, cli="hours")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message)
     assert list((hours_vault.home / "hours").rglob("*.md")) == []
 
 
-def test_log_writes_entry_and_prints_id(vault):
-    vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    r = hours(vault, "log", "SANA Partners", "test", "-m", "90", "-r", "2500")
-    assert r.returncode == 0, r.stderr
-    entries = vault.entries("Projects", "SANA Partners")
-    assert len(entries) == 1
-    e = entries[0]
-    assert e["name"] == "test"
-    assert e["rate"] == 2500
-    assert e["currency"] == "ZAR"
-    assert len(e["id"]) == 8
-    assert e["id"] in r.stdout
-    # 90 minutes must be expressed as a start/end interval
-    assert e["startTime"].endswith("Z") and e["endTime"].endswith("Z")
-
-
 def test_log_defaults_are_60_minutes_and_2500(vault):
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    hours(vault, "log", "SANA Partners", "default sized")
+    vault.run("log", "SANA Partners", "default sized", cli="hours")
     e = vault.entries("Projects", "SANA Partners")[0]
     assert e["rate"] == 2500
-    r = hours(vault, "show", e["id"], "--json")
+    r = vault.run("show", e["id"], "--json", cli="hours")
     assert json.loads(r.stdout)["minutes"] == 60
 
 
 def test_log_uses_thread_rate_over_vault_default(vault):
     vault.write_thread("Projects", "Cheap", currency="ZAR", rate=800)
-    hours(vault, "log", "Cheap", "discounted")
+    vault.run("log", "Cheap", "discounted", cli="hours")
     assert vault.entries("Projects", "Cheap")[0]["rate"] == 800
 
 
 def test_flag_rate_beats_thread_rate(vault):
     vault.write_thread("Projects", "Cheap", currency="ZAR", rate=800)
-    hours(vault, "log", "Cheap", "override", "-r", "4000")
+    vault.run("log", "Cheap", "override", "-r", "4000", cli="hours")
     assert vault.entries("Projects", "Cheap")[0]["rate"] == 4000
 
 
 def test_ambiguous_thread_fails(vault):
     vault.write_thread("Projects", "Dup", currency="ZAR")
     vault.write_thread("Processes", "Dup", currency="ZAR")
-    r = hours(vault, "log", "Dup", "x")
+    r = vault.run("log", "Dup", "x", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "hours: error: ambiguous thread 'Dup'; matches: Projects/Dup, Processes/Dup\n"
     assert list((vault.home / "hours").rglob("*.md")) == []
@@ -120,7 +99,7 @@ def test_ambiguous_thread_fails(vault):
 def test_qualified_path_disambiguates(vault):
     vault.write_thread("Projects", "Dup", currency="ZAR")
     vault.write_thread("Processes", "Dup", currency="ZAR")
-    r = hours(vault, "log", "Processes/Dup", "x")
+    r = vault.run("log", "Processes/Dup", "x", cli="hours")
     assert r.returncode == 0, r.stderr
     assert len(vault.entries("Processes", "Dup")) == 1
 
@@ -128,7 +107,7 @@ def test_qualified_path_disambiguates(vault):
 def test_thread_resolution_is_case_sensitive(vault):
     """The Arbi family trust bug: case folding must not come from the FS."""
     vault.write_thread("Processes", "Arbi Family Trust", currency="BWP")
-    r = hours(vault, "log", "Arbi family trust", "x")
+    r = vault.run("log", "Arbi family trust", "x", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "hours: error: thread 'Arbi family trust' does not resolve to a thread file\n"
     assert list((vault.home / "hours").rglob("*.md")) == []
@@ -136,7 +115,7 @@ def test_thread_resolution_is_case_sensitive(vault):
 
 def test_currency_flag_satisfies_missing_thread_currency(vault):
     vault.write_thread("Projects", "NoCcy")
-    r = hours(vault, "log", "NoCcy", "x", "-c", "gbp")
+    r = vault.run("log", "NoCcy", "x", "-c", "gbp", cli="hours")
     assert r.returncode == 0, r.stderr
     assert vault.entries("Projects", "NoCcy")[0]["currency"] == "GBP"
 
@@ -144,23 +123,23 @@ def test_currency_flag_satisfies_missing_thread_currency(vault):
 def test_punctuation_heavy_description_roundtrips(vault):
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
     desc = 'Further decomposition; code review, with "Nick" and [[people/Nick]]'
-    r = hours(vault, "log", "SANA Partners", desc)
+    r = vault.run("log", "SANA Partners", desc, cli="hours")
     assert r.returncode == 0, r.stderr
     eid = vault.entries("Projects", "SANA Partners")[0]["id"]
-    shown = json.loads(hours(vault, "show", eid, "--json").stdout)
+    shown = json.loads(vault.run("show", eid, "--json", cli="hours").stdout)
     assert shown["description"] == desc
 
 
 def test_entries_stay_sorted_by_start(vault):
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    hours(vault, "log", "SANA Partners", "later", "-d", "2026-06-01", "-t", "09:00")
-    hours(vault, "log", "SANA Partners", "earlier", "-d", "2026-01-01", "-t", "09:00")
+    vault.run("log", "SANA Partners", "later", "-d", "2026-06-01", "-t", "09:00", cli="hours")
+    vault.run("log", "SANA Partners", "earlier", "-d", "2026-01-01", "-t", "09:00", cli="hours")
     names = [e["name"] for e in vault.entries("Projects", "SANA Partners")]
     assert names == ["earlier", "later"]
 
 
 def test_log_without_a_thread_fails_instead_of_prompting(hours_vault):
-    r = hours(hours_vault, "log", input="1\nTyped description\n60\n\n")
+    r = hours_vault.run("log", input="1\nTyped description\n60\n\n", cli="hours")
     assert r.returncode == 2
     assert "thread" in r.stderr
     assert list((hours_vault.home / "hours").rglob("*.md")) == []
@@ -228,7 +207,7 @@ def test_statement_ignores_unbilled_time(vault):
 
 def test_list_table(hours_vault, logged):
     a, b, c = logged
-    assert hours(hours_vault, "list").stdout == (
+    assert hours_vault.run("list", cli="hours").stdout == (
         "ID        DATE        THREAD               DUR          AMOUNT  DESCRIPTION\n"
         f"{a}  2026-08-04  Projects/SANA     1h 30m        3750 ZAR  Finance pack review\n"
         f"{b}  2026-08-05  Processes/Trust   0h 45m        1350 BWP  Board prep\n"
@@ -236,23 +215,23 @@ def test_list_table(hours_vault, logged):
 
 
 def test_list_filters_and_empty(hours_vault, logged):
-    assert hours(hours_vault, "list", "SANA", "--since", "2026-08-05").stdout == "(no entries)\n"
-    rows = json.loads(hours(hours_vault, "list", "--since", "2026-08-05", "--until", "2026-08-05",
-                           "--json").stdout)
+    assert hours_vault.run("list", "SANA", "--since", "2026-08-05", cli="hours").stdout == "(no entries)\n"
+    rows = json.loads(hours_vault.run("list", "--since", "2026-08-05", "--until", "2026-08-05",
+                           "--json", cli="hours").stdout)
     assert [r["description"] for r in rows] == ["Board prep"]
-    r = hours(hours_vault, "list", "Nope")
+    r = hours_vault.run("list", "Nope", cli="hours")
     assert (r.returncode, r.stderr) == (1, "hours: error: thread 'Nope' does not resolve to a thread file\n")
 
 
 def test_list_json_row(hours_vault, logged):
-    rows = json.loads(hours(hours_vault, "list", "--json").stdout)
+    rows = json.loads(hours_vault.run("list", "--json", cli="hours").stdout)
     assert rows[2] == {"id": logged[2], "thread": "Topics/Wellness", "date": "2026-08-06",
                        "time": "06:30", "minutes": 30, "rate": 0, "currency": "",
                        "amount": 0.0, "description": "5k run"}
 
 
 def test_report_totals_per_currency_with_unbilled_first(hours_vault, logged):
-    assert hours(hours_vault, "report").stdout == (
+    assert hours_vault.run("report", cli="hours").stdout == (
         "THREAD           ENTRIES    DURATION            AMOUNT\n"
         "Processes/Trust        1      0h 45m          1350 BWP\n"
         "Projects/SANA          1      1h 30m          3750 ZAR\n"
@@ -264,45 +243,25 @@ def test_report_totals_per_currency_with_unbilled_first(hours_vault, logged):
 
 
 def test_report_filters_and_empty(hours_vault, logged):
-    assert hours(hours_vault, "report", "--thread", "Trust", "--until", "2026-08-05").stdout == (
+    assert hours_vault.run("report", "--thread", "Trust", "--until", "2026-08-05", cli="hours").stdout == (
         "THREAD           ENTRIES    DURATION            AMOUNT\n"
         "Processes/Trust        1      0h 45m          1350 BWP\n"
         "\n"
         "TOTAL BWP                     0h 45m          1350 BWP\n")
-    assert hours(hours_vault, "report", "--since", "2030-01-01").stdout == "(no entries)\n"
-
-
-def test_report_groups_by_currency(vault):
-    vault.write_thread("Projects", "ZA", currency="ZAR")
-    vault.write_thread("Processes", "BW", currency="BWP")
-    hours(vault, "log", "ZA", "a", "-m", "60", "-r", "100")
-    hours(vault, "log", "BW", "b", "-m", "60", "-r", "100")
-    out = json.loads(hours(vault, "report", "--json").stdout)
-    assert {b["currency"] for b in out} == {"ZAR", "BWP"}
-    assert all(b["amount"] == 100 for b in out)
-    text = hours(vault, "report").stdout
-    assert "TOTAL ZAR" in text and "TOTAL BWP" in text
+    assert hours_vault.run("report", "--since", "2030-01-01", cli="hours").stdout == "(no entries)\n"
 
 
 def test_rate_zero_counts_hours_but_no_money(vault):
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    hours(vault, "log", "SANA Partners", "unbillable", "-m", "120", "-r", "0")
-    b = json.loads(hours(vault, "report", "--json").stdout)[0]
+    vault.run("log", "SANA Partners", "unbillable", "-m", "120", "-r", "0", cli="hours")
+    b = json.loads(vault.run("report", "--json", cli="hours").stdout)[0]
     assert b["minutes"] == 120
     assert b["hours"] == 2.0
     assert b["amount"] == 0
 
 
-def test_report_date_window(vault):
-    vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    hours(vault, "log", "SANA Partners", "old", "-d", "2026-01-01", "-t", "09:00")
-    hours(vault, "log", "SANA Partners", "new", "-d", "2026-06-01", "-t", "09:00")
-    out = json.loads(hours(vault, "report", "--since", "2026-05-01", "--json").stdout)
-    assert out[0]["entries"] == 1
-
-
 def test_show_text_and_missing(hours_vault, logged):
-    assert hours(hours_vault, "show", logged[0]).stdout == (
+    assert hours_vault.run("show", logged[0], cli="hours").stdout == (
         f"id           {logged[0]}\n"
         "thread       Projects/SANA\n"
         "date         2026-08-04\n"
@@ -312,7 +271,7 @@ def test_show_text_and_missing(hours_vault, logged):
         "currency     ZAR\n"
         "amount       3750.0\n"
         "description  Finance pack review\n")
-    r = hours(hours_vault, "show", "deadbeef")
+    r = hours_vault.run("show", "deadbeef", cli="hours")
     assert (r.returncode, r.stderr) == (1, "hours: error: no entry with id 'deadbeef'\n")
 
 
@@ -329,16 +288,16 @@ def stored(vault, entry_id):
 
 def test_edit_minutes_and_description(vault):
     vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    hours(vault, "log", "SANA Partners", "before", "-m", "60")
+    vault.run("log", "SANA Partners", "before", "-m", "60", cli="hours")
     eid = vault.entries("Projects", "SANA Partners")[0]["id"]
-    hours(vault, "edit", eid, "-m", "30", "--description", "after", "words")
-    shown = json.loads(hours(vault, "show", eid, "--json").stdout)
+    vault.run("edit", eid, "-m", "30", "--description", "after", "words", cli="hours")
+    shown = json.loads(vault.run("show", eid, "--json", cli="hours").stdout)
     assert shown["minutes"] == 30
     assert shown["description"] == "after words"
 
 
 def test_edit_moves_the_entry_and_keeps_its_duration(hours_vault, logged):
-    r = hours(hours_vault, "edit", logged[0], "-d", "2026-08-07", "-t", "10:00", "-r", "3000", "-c", "usd")
+    r = hours_vault.run("edit", logged[0], "-d", "2026-08-07", "-t", "10:00", "-r", "3000", "-c", "usd", cli="hours")
     assert r.stdout == f"logged {logged[0]}  Projects/SANA  2026-08-07 10:00  1h 30m @ 3000 USD = 4500 USD\n"
     e = stored(hours_vault, logged[0])
     # 10:00 in Johannesburg is 08:00 UTC; the 90 minutes are kept.
@@ -349,20 +308,20 @@ def test_edit_moves_the_entry_and_keeps_its_duration(hours_vault, logged):
 
 
 def test_edit_errors(hours_vault, logged):
-    r = hours(hours_vault, "edit", logged[0], "-c", "rands")
+    r = hours_vault.run("edit", logged[0], "-c", "rands", cli="hours")
     assert (r.returncode, r.stderr) == (1, "hours: error: currency 'RANDS' is not a 3-letter ISO code\n")
-    r = hours(hours_vault, "edit", logged[0], "-m", "-5")
+    r = hours_vault.run("edit", logged[0], "-m", "-5", cli="hours")
     assert (r.returncode, r.stderr) == (1, "hours: error: --minutes must be positive\n")
 
 
 def test_edit_refuses_a_rate_on_unbilled_time_as_log_does(hours_vault, logged):
     unbilled = logged[2]
     before = stored(hours_vault, unbilled)
-    r = hours(hours_vault, "edit", unbilled, "--rate", "900")
+    r = hours_vault.run("edit", unbilled, "--rate", "900", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "hours: error: --rate needs a currency; pass --currency as well\n"
     assert stored(hours_vault, unbilled) == before
-    r = hours(hours_vault, "edit", unbilled, "--rate", "900", "-c", "usd")
+    r = hours_vault.run("edit", unbilled, "--rate", "900", "-c", "usd", cli="hours")
     assert r.returncode == 0, r.stderr
     assert (stored(hours_vault, unbilled)["rate"], stored(hours_vault, unbilled)["currency"]) == (900, "USD")
 
@@ -370,19 +329,19 @@ def test_edit_refuses_a_rate_on_unbilled_time_as_log_does(hours_vault, logged):
 @pytest.mark.parametrize("words", [[], ["  "]])
 def test_edit_refuses_an_empty_description_as_log_does(hours_vault, logged, words):
     before = stored(hours_vault, logged[0])
-    r = hours(hours_vault, "edit", logged[0], "--description", *words)
+    r = hours_vault.run("edit", logged[0], "--description", *words, cli="hours")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", "hours: error: empty description\n")
     assert stored(hours_vault, logged[0]) == before
 
 
 def test_rm_with_yes(hours_vault, logged):
-    r = hours(hours_vault, "rm", logged[2], "-y")
+    r = hours_vault.run("rm", logged[2], "-y", cli="hours")
     assert (r.returncode, r.stdout) == (0, f"deleted {logged[2]}\n")
     assert hours_vault.entries("Topics", "Wellness") == []
 
 
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(hours_vault, logged):
-    r = hours(hours_vault, "rm", logged[0], input="y\n")
+    r = hours_vault.run("rm", logged[0], input="y\n", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"hours: error: refusing to delete {logged[0]} without -y\n"
     assert len(hours_vault.entries("Projects", "SANA")) == 1
@@ -406,17 +365,6 @@ def test_log_writes_a_buffer_ref(vault):
                         vault.read("buffer.md"))
 
 
-def test_buffer_ref_uses_the_directory_form_of_the_kind(vault):
-    """`kind` is the frontmatter value (`project`); the path needs the
-    directory (`Projects`). Getting this wrong made the REF unresolvable,
-    and the silent swallow hid it completely."""
-    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
-    vault.run("log", "Projects/SANA", "x", "-m", "10", cli="hours")
-    buf = vault.read("buffer.md")
-    assert "hours/project/" not in buf
-    assert "hours/Projects/SANA" in buf
-
-
 def test_the_ref_survives_a_flush_into_the_log(vault):
     vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
     vault.run("log", "Projects/SANA", "Reviewed the finance pack", "-m", "90",
@@ -425,12 +373,6 @@ def test_the_ref_survives_a_flush_into_the_log(vault):
     logs = list((vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
     assert logs, "no log file was written"
     assert "REF: [[hours/Projects/SANA]]" in logs[0].read_text()
-
-
-def test_an_unbilled_entry_also_refs(vault):
-    vault.write_thread("Topics", "Wellness")
-    vault.run("log", "Topics/Wellness", "5k run", "-m", "30", cli="hours")
-    assert "REF: [[hours/Topics/Wellness]]" in vault.read("buffer.md")
 
 
 def test_a_failing_buffer_never_breaks_the_hours_write(vault, monkeypatch):
@@ -473,8 +415,6 @@ def test_entries_on_different_days_split_across_log_files(vault):
     assert days == ["2026-08-01", "2026-08-09"], days
 
 
-
-
 @pytest.fixture
 def broken(hours_vault):
     """A hand-edited entry with a rate but no currency."""
@@ -486,7 +426,7 @@ def broken(hours_vault):
 
 def test_edit_names_what_is_wrong_with_an_entry_it_cannot_keep(broken):
     before = broken.snapshot()
-    r = hours(broken, "edit", "bbbb0001", "-m", "45")
+    r = broken.run("edit", "bbbb0001", "-m", "45", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == ("hours: error: entry bbbb0001 has a rate but no currency; "
                         "pass --currency, or --rate 0 to leave it unbilled\n")
@@ -495,7 +435,7 @@ def test_edit_names_what_is_wrong_with_an_entry_it_cannot_keep(broken):
 
 @pytest.mark.parametrize("fix, rate, currency", [(["-c", "zar"], 900, "ZAR"), (["--rate", "0"], 0, None)])
 def test_edit_can_repair_an_entry_with_a_rate_but_no_currency(broken, fix, rate, currency):
-    r = hours(broken, "edit", "bbbb0001", "-m", "45", *fix)
+    r = broken.run("edit", "bbbb0001", "-m", "45", *fix, cli="hours")
     assert (r.returncode, r.stderr) == (0, "")
     e = stored(broken, "bbbb0001")
     assert (e["rate"], e.get("currency"), e["endTime"]) == (rate, currency, "2026-08-06T05:15:00.000Z")

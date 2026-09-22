@@ -2,13 +2,13 @@
 
 Branch: `refactor2`. Merges to `main` only if the whole refactor succeeds.
 
-**Status (2026-09-22): units 0-13 are done, and so is the review.** Every
-command is a module of the `adulting` package, installed with pipx. No bash
-remains. The review (`2026-09-22-refactor-review-findings.md`) is worked
-through, parts A-E: 705 tests, 96% coverage, `dev/ci` green. CHANGELOG.md
-records each part. Still outstanding: regenerate MANUAL.md and dev/tools/
-(needs `claude`), the deferred bugs at the end of this file, and the merge
-to `main`.
+**Status (2026-09-22): units 0-13 are done, and so are both rounds of the
+review.** Every command is a module of the `adulting` package, installed with
+pipx. No bash remains. The review (`2026-09-22-refactor-review-findings.md`)
+is worked through, round 1 parts A-E and round 2 parts R-A to R-D: 737 tests,
+97% coverage, `dev/ci` green. CHANGELOG.md records each part. Still
+outstanding: regenerate MANUAL.md and dev/tools/ (needs `claude`), the
+deferred bugs at the end of this file, and the merge to `main`.
 
 ## Goal
 
@@ -218,19 +218,21 @@ used to appear with no way to tell them from open ones.
 
 ## Duplication left in place
 
-Review part B moved the shared code into `vault.py`: the vault path, errors,
-record fences and minutes, date windows, currency codes, ACTION attributes,
-person and thread checks, frontmatter thread lists and the config reader.
-What survives is deliberate:
+Both rounds of the review moved the shared code into `vault.py`: the vault
+path, errors and the parser each command's name comes from, record fences,
+minutes and lookups, date windows and date flags, currency checks, ACTION
+attributes, case-exact thread and person checks, one frontmatter and config
+parser, and what `threads` and `people` list and show. What survives is
+deliberate:
 
-- `search` has its own task-anchor regex, matching anchors as events rather
-  than parsing them for mutation as `tasks` does.
-- `lint`'s frontmatter parser understands the schema DSL's lists of mappings,
-  which no other reader needs; `render`'s `extract_meta` reproduces the old
-  scripts' unescaping byte for byte. Both are deliberately separate from
-  `vault.parse_frontmatter`.
-- `vault.parse_frontmatter` (thread files) and `vault.parse_frontmatter_doc`
-  (notes and logs) read differently; merging them risks changing
-  `threads show --json`.
+- `lint`'s frontmatter parser understands the schema DSL, which no other
+  reader needs; `render`'s `extract_meta` keeps the old scripts' unescaping
+  byte for byte, which the render fixtures pin. Both stay separate from
+  `vault.parse_block`.
 - Each command keeps the text of its own error messages; only their shape,
   `<command>: error: <message>`, and the code that prints them are shared.
+- `threads new` and `people new` ask the filesystem whether a name is taken,
+  where every other name check is case-exact: on macOS `sgb` would overwrite
+  `SGB`, so a name taken in any case is taken.
+- `search.hours_in_window` keeps one `except`: a hand-edited `startTime` that
+  is not ISO reaches it, and without it `search activity` would crash.

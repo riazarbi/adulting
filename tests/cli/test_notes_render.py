@@ -16,7 +16,6 @@ Old bugs these files still carry are marked DEFERRED BUG in the tests below
 and listed in stories/2026-09-17-python-package-refactor.md.
 """
 
-import json
 import shutil
 from pathlib import Path
 
@@ -28,10 +27,6 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "render"
 KINDS = ("pdf", "minutes", "agenda")
 NOTES = sorted(p for p in FIXTURES.glob("*.md") if ".expected." not in p.name)
 HAS_PANDOC = shutil.which("pandoc") is not None and shutil.which("xelatex") is not None
-
-
-def notes(vault, *argv, cwd=None):
-    return vault.run(*argv, cli="notes", input="", cwd=cwd)
 
 
 @pytest.fixture
@@ -46,7 +41,7 @@ def render_vault(vault):
 @pytest.mark.parametrize("kind", KINDS)
 def test_markdown_matches_the_old_renderer(render_vault, kind, note, tmp_path):
     out = tmp_path / "out"
-    r = notes(render_vault, kind, note.stem, "--out", str(out))
+    r = render_vault.run(kind, note.stem, "--out", str(out), cli="notes")
     written = out / note.name
     expected = (FIXTURES / f"{note.stem}.{kind}.expected.md").read_text(encoding="utf-8")
     assert written.read_text(encoding="utf-8") == expected
@@ -56,7 +51,7 @@ def test_markdown_matches_the_old_renderer(render_vault, kind, note, tmp_path):
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
 def test_a_render_writes_a_pdf_and_prints_both_paths(render_vault, tmp_path):
     out = tmp_path / "out"
-    r = notes(render_vault, "minutes", "with_summary", "--out", str(out))
+    r = render_vault.run("minutes", "with_summary", "--out", str(out), cli="notes")
     assert r.returncode == 0, r.stderr
     assert r.stdout == f"{out / 'with_summary.md'}\n{out / 'with_summary.md.pdf'}\n"
     assert (out / "with_summary.md.pdf").stat().st_size > 1000
@@ -69,7 +64,7 @@ def test_a_topic_with_quotes_still_breaks_the_pdf(render_vault, tmp_path):
     containing quotes and a colon is invalid YAML and pandoc refuses it. The
     markdown is still written."""
     out = tmp_path / "out"
-    r = notes(render_vault, "pdf", "meeting_full", "--out", str(out))
+    r = render_vault.run("pdf", "meeting_full", "--out", str(out), cli="notes")
     assert r.returncode == 1
     assert r.stdout == f"{out / 'meeting_full.md'}\n"
     assert r.stderr.startswith("notes: error: PDF render failed:")
@@ -87,7 +82,7 @@ def test_a_failed_render_leaves_no_stale_pdf(render_vault, tmp_path):
     stale = out / "with_summary.md.pdf"
     stale.write_text("not a pdf")
     render_vault.env = without_program(render_vault.env, "xelatex")
-    r = notes(render_vault, "pdf", "with_summary", "--out", str(out))
+    r = render_vault.run("pdf", "with_summary", "--out", str(out), cli="notes")
     assert r.returncode == 1
     assert r.stdout == f"{out / 'with_summary.md'}\n"
     assert r.stderr.startswith("notes: error: PDF render failed:")
@@ -96,24 +91,16 @@ def test_a_failed_render_leaves_no_stale_pdf(render_vault, tmp_path):
 
 
 def test_renders_default_to_downloads(render_vault):
-    r = notes(render_vault, "agenda", "correspondence")
+    r = render_vault.run("agenda", "correspondence", cli="notes")
     downloads = Path(render_vault.env["HOME"]) / "Downloads"
     assert r.stdout.splitlines()[0] == str(downloads / "correspondence.md")
     assert (downloads / "correspondence.md").exists()
 
 
 def test_render_of_a_missing_note(render_vault):
-    r = notes(render_vault, "minutes", "nope")
+    r = render_vault.run("minutes", "nope", cli="notes")
     assert r.returncode == 1
     assert r.stderr == f"notes: error: no note 'nope' in {render_vault.home / 'notes'}\n"
-
-
-def test_help_json_lists_the_renderers(vault):
-    manifest = json.loads(notes(vault, "--help-json").stdout)
-    names = [s["name"] for s in manifest["subcommands"]]
-    assert names[-3:] == ["pdf", "minutes", "agenda"]
-    flags = {f["name"] for s in manifest["subcommands"] if s["name"] == "pdf" for f in s["flags"]}
-    assert flags == {"--out"}
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
@@ -122,7 +109,7 @@ def test_a_relative_out_dir_is_relative_to_where_you_run_it(render_vault, tmp_pa
     it at a file that wasn't there, and the PDF was never written."""
     cwd = tmp_path / "work"
     cwd.mkdir()
-    r = notes(render_vault, "minutes", "with_summary", "--out", "rel", cwd=cwd)
+    r = render_vault.run("minutes", "with_summary", "--out", "rel", cwd=cwd, cli="notes")
     assert r.returncode == 0, r.stderr
     assert r.stdout == f"{cwd / 'rel' / 'with_summary.md'}\n{cwd / 'rel' / 'with_summary.md.pdf'}\n"
     assert (cwd / "rel" / "with_summary.md.pdf").stat().st_size > 1000

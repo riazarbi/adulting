@@ -16,15 +16,6 @@ needs_pdf = pytest.mark.skipif(
     reason="pandoc + xelatex required to render a PDF")
 
 
-def pay(vault, *argv, input=""):
-    # input="" closes stdin, so any prompt would hit EOF instead of hanging.
-    return vault.run(*argv, cli="payments", input=input)
-
-
-def hrs(vault, *argv):
-    return vault.run(*argv, cli="hours")
-
-
 @pytest.fixture
 def payments_vault(vault):
     """SANA (ZAR, 10 hours at 2500) and Trust (BWP, 90 minutes at 1000)
@@ -33,25 +24,25 @@ def payments_vault(vault):
     vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
     vault.write_thread("Processes", "Trust", currency="BWP", rate=1000)
     vault.write_thread("Topics", "Wellness")
-    hrs(vault, "log", "SANA", "Work", "-m", "600", "-d", "2026-07-01", "-t", "09:00")
-    hrs(vault, "log", "Trust", "Board", "-m", "90", "-d", "2026-07-02", "-t", "09:00")
+    vault.run("log", "SANA", "Work", "-m", "600", "-d", "2026-07-01", "-t", "09:00", cli="hours")
+    vault.run("log", "Trust", "Board", "-m", "90", "-d", "2026-07-02", "-t", "09:00", cli="hours")
     return vault
 
 
 @pytest.fixture
 def paid(payments_vault):
     """Two receipts; returns their ids in date order."""
-    outs = [pay(payments_vault, "log", "SANA", "47,300.50", "-d", "2026-07-10", "-t", "08:00",
-                "-a", "FNB Business", "-n", "Invoice", "2026-014"),
-            pay(payments_vault, "log", "Trust", "500", "-d", "2026-07-11")]
+    outs = [payments_vault.run("log", "SANA", "47,300.50", "-d", "2026-07-10", "-t", "08:00",
+                "-a", "FNB Business", "-n", "Invoice", "2026-014", cli="payments"),
+            payments_vault.run("log", "Trust", "500", "-d", "2026-07-11", cli="payments")]
     return [re.match(r"received ([0-9a-f]{8})", r.stdout).group(1) for r in outs]
 
 
 # ---------- log ----------
 
 def test_log_lines(payments_vault):
-    a = pay(payments_vault, "log", "SANA", "47,300.50", "-d", "2026-07-10", "-a", "FNB Business").stdout
-    b = pay(payments_vault, "log", "Trust", "500", "-d", "2026-07-11").stdout
+    a = payments_vault.run("log", "SANA", "47,300.50", "-d", "2026-07-10", "-a", "FNB Business", cli="payments").stdout
+    b = payments_vault.run("log", "Trust", "500", "-d", "2026-07-11", cli="payments").stdout
     assert re.sub(r"[0-9a-f]{8}", "ID", a) == "received ID  Projects/SANA  2026-07-10  47300.5 ZAR  FNB Business\n"
     assert re.sub(r"[0-9a-f]{8}", "ID", b) == "received ID  Processes/Trust  2026-07-11  500 BWP\n"
 
@@ -67,7 +58,7 @@ def test_log_lines(payments_vault):
     (["Nope", "10"], "payments: error: thread 'Nope' does not resolve to a thread file\n"),
 ])
 def test_log_errors_write_nothing(payments_vault, argv, message):
-    r = pay(payments_vault, "log", *argv)
+    r = payments_vault.run("log", *argv, cli="payments")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message)
     assert list((payments_vault.home / "payments").rglob("*.md")) == []
 
@@ -75,8 +66,8 @@ def test_log_errors_write_nothing(payments_vault, argv, message):
 def test_log_records_a_payment(vault):
     vault.env["TZ"] = "Africa/Gaborone"
     vault.write_thread("Processes", "Arbi Family Trust", currency="BWP")
-    r = pay(vault, "log", "Arbi Family Trust", "47300", "-d", "2023-04-05", "-t", "09:30",
-            "-a", "FNB Botswana")
+    r = vault.run("log", "Arbi Family Trust", "47300", "-d", "2023-04-05", "-t", "09:30",
+            "-a", "FNB Botswana", cli="payments")
     assert r.returncode == 0, r.stderr
     [p] = vault.payments("Processes", "Arbi Family Trust")
     assert re.fullmatch(r"[0-9a-f]{8}", p.pop("id"))
@@ -87,23 +78,16 @@ def test_log_records_a_payment(vault):
 
 def test_decimal_amount_is_exact(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "0.10")
-    pay(vault, "log", "X", "0.20")
-    out = json.loads(pay(vault, "statement", "--json").stdout)[0]
+    vault.run("log", "X", "0.10", cli="payments")
+    vault.run("log", "X", "0.20", cli="payments")
+    out = json.loads(vault.run("statement", "--json", cli="payments").stdout)[0]
     assert out["received"] == 0.30      # not 0.30000000000000004
-
-
-def test_optional_fields_omitted_when_blank(vault):
-    vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "100")
-    p = vault.payments("Projects", "X")[0]
-    assert "account" not in p and "note" not in p
 
 
 def test_payments_sorted_by_received(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "1", "-d", "2026-06-01")
-    pay(vault, "log", "X", "2", "-d", "2026-01-01")
+    vault.run("log", "X", "1", "-d", "2026-06-01", cli="payments")
+    vault.run("log", "X", "2", "-d", "2026-01-01", cli="payments")
     amounts = [p["amount"] for p in vault.payments("Projects", "X")]
     assert amounts == [2, 1]
 
@@ -122,7 +106,7 @@ def test_payment_writes_a_buffer_ref(vault):
 
 
 def test_log_without_a_thread_fails_instead_of_prompting(payments_vault):
-    r = pay(payments_vault, "log", input="1\n1500\n2026-03-01\nFNB\nInvoice 3\n")
+    r = payments_vault.run("log", input="1\n1500\n2026-03-01\nFNB\nInvoice 3\n", cli="payments")
     assert r.returncode == 2
     assert "thread" in r.stderr
     assert list((payments_vault.home / "payments").rglob("*.md")) == []
@@ -132,28 +116,28 @@ def test_log_without_a_thread_fails_instead_of_prompting(payments_vault):
 
 def test_list_table(payments_vault, paid):
     a, b = paid
-    assert pay(payments_vault, "list").stdout == (
+    assert payments_vault.run("list", cli="payments").stdout == (
         "ID        RECEIVED    THREAD                     AMOUNT  ACCOUNT       NOTE\n"
         f"{a}  2026-07-10  Projects/SANA         47300.5 ZAR  FNB Business  Invoice 2026-014\n"
         f"{b}  2026-07-11  Processes/Trust           500 BWP                \n")
 
 
 def test_list_filters_and_empty(payments_vault, paid):
-    assert pay(payments_vault, "list", "Trust", "--since", "2026-07-11").stdout == (
+    assert payments_vault.run("list", "Trust", "--since", "2026-07-11", cli="payments").stdout == (
         "ID        RECEIVED    THREAD                     AMOUNT  ACCOUNT  NOTE\n"
         f"{paid[1]}  2026-07-11  Processes/Trust           500 BWP     \n")
-    assert pay(payments_vault, "list", "--until", "2026-01-01").stdout == "(no payments)\n"
+    assert payments_vault.run("list", "--until", "2026-01-01", cli="payments").stdout == "(no payments)\n"
 
 
 def test_list_json_row(payments_vault, paid):
-    assert json.loads(pay(payments_vault, "list", "--json").stdout)[0] == {
+    assert json.loads(payments_vault.run("list", "--json", cli="payments").stdout)[0] == {
         "id": paid[0], "thread": "Projects/SANA", "received": "2026-07-10",
         "amount": 47300.5, "currency": "ZAR", "account": "FNB Business",
         "note": "Invoice 2026-014"}
 
 
 def test_show_text_and_missing(payments_vault, paid):
-    assert pay(payments_vault, "show", paid[0]).stdout == (
+    assert payments_vault.run("show", paid[0], cli="payments").stdout == (
         f"id         {paid[0]}\n"
         "thread     Projects/SANA\n"
         "received   2026-07-10\n"
@@ -161,62 +145,52 @@ def test_show_text_and_missing(payments_vault, paid):
         "currency   ZAR\n"
         "account    FNB Business\n"
         "note       Invoice 2026-014\n")
-    r = pay(payments_vault, "show", "deadbeef")
+    r = payments_vault.run("show", "deadbeef", cli="payments")
     assert (r.returncode, r.stderr) == (1, "payments: error: no payment with id 'deadbeef'\n")
 
 
 # ---------- edit, rm ----------
 
 def test_edit_several_fields(payments_vault, paid):
-    r = pay(payments_vault, "edit", paid[1], "--amount", "600", "-a", "Capitec", "-n", "top", "up",
-            "-d", "2026-07-12", "-t", "10:30")
+    r = payments_vault.run("edit", paid[1], "--amount", "600", "-a", "Capitec", "-n", "top", "up",
+            "-d", "2026-07-12", "-t", "10:30", cli="payments")
     assert r.stdout == f"received {paid[1]}  Processes/Trust  2026-07-12  600 BWP  Capitec\n"
-    assert json.loads(pay(payments_vault, "show", paid[1], "--json").stdout)["note"] == "top up"
-
-
-def test_edit_amount_and_note(vault):
-    vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "100")
-    pid = vault.payments("Projects", "X")[0]["id"]
-    pay(vault, "edit", pid, "--amount", "250.75", "-n", "corrected", "figure")
-    shown = json.loads(pay(vault, "show", pid, "--json").stdout)
-    assert shown["amount"] == 250.75
-    assert shown["note"] == "corrected figure"
+    assert json.loads(payments_vault.run("show", paid[1], "--json", cli="payments").stdout)["note"] == "top up"
 
 
 def received(payments_vault, pid):
     """The stored `received` timestamp, rendered in the test's local zone."""
-    return json.loads(pay(payments_vault, "show", pid, "--json").stdout)["received"], \
+    return json.loads(payments_vault.run("show", pid, "--json", cli="payments").stdout)["received"], \
         next(p["received"] for p in payments_vault.payments("Projects", "SANA") if p["id"] == pid)
 
 
 def test_edit_time_alone_keeps_the_date(payments_vault, paid):
     """-t used to be ignored unless -d came with it."""
-    r = pay(payments_vault, "edit", paid[0], "-t", "23:59")
+    r = payments_vault.run("edit", paid[0], "-t", "23:59", cli="payments")
     assert r.stdout == f"received {paid[0]}  Projects/SANA  2026-07-10  47300.5 ZAR  FNB Business\n"
     assert received(payments_vault, paid[0]) == ("2026-07-10", "2026-07-10T21:59:00.000Z")
 
 
 def test_edit_date_alone_keeps_the_time(payments_vault, paid):
     """-d used to reset the time to the moment of the edit."""
-    pay(payments_vault, "edit", paid[0], "-d", "2026-07-15")
+    payments_vault.run("edit", paid[0], "-d", "2026-07-15", cli="payments")
     assert received(payments_vault, paid[0]) == ("2026-07-15", "2026-07-15T06:00:00.000Z")
 
 
 def test_edit_errors(payments_vault, paid):
-    r = pay(payments_vault, "edit", paid[1], "-c", "pula")
+    r = payments_vault.run("edit", paid[1], "-c", "pula", cli="payments")
     assert (r.returncode, r.stderr) == (1, "payments: error: currency 'PULA' is not a 3-letter ISO code\n")
-    r = pay(payments_vault, "edit", paid[1], "--amount", "0")
+    r = payments_vault.run("edit", paid[1], "--amount", "0", cli="payments")
     assert (r.returncode, r.stderr) == (1, "payments: error: amount must be positive (got 0)\n")
 
 
 def test_rm_with_yes(payments_vault, paid):
-    assert pay(payments_vault, "rm", paid[1], "-y").stdout == f"deleted {paid[1]}\n"
+    assert payments_vault.run("rm", paid[1], "-y", cli="payments").stdout == f"deleted {paid[1]}\n"
     assert payments_vault.payments("Processes", "Trust") == []
 
 
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(payments_vault, paid):
-    r = pay(payments_vault, "rm", paid[0], input="y\n")
+    r = payments_vault.run("rm", paid[0], input="y\n", cli="payments")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"payments: error: refusing to delete {paid[0]} without -y\n"
     assert len(payments_vault.payments("Projects", "SANA")) == 1
@@ -234,11 +208,11 @@ STATEMENT = (
 
 
 def test_statement_table(payments_vault, paid):
-    assert pay(payments_vault, "statement").stdout == STATEMENT
+    assert payments_vault.run("statement", cli="payments").stdout == STATEMENT
 
 
 def test_statement_as_of_bounds_the_text_view(payments_vault, paid):
-    assert pay(payments_vault, "statement", "--thread", "SANA", "--as-of", "2026-07-05").stdout == (
+    assert payments_vault.run("statement", "--thread", "SANA", "--as-of", "2026-07-05", cli="payments").stdout == (
         "THREAD                   BILLED          RECEIVED       OUTSTANDING\n"
         "Projects/SANA         25000 ZAR             0 ZAR         25000 ZAR\n"
         "\n"
@@ -248,38 +222,29 @@ def test_statement_as_of_bounds_the_text_view(payments_vault, paid):
 def test_statement_rejects_a_malformed_as_of(payments_vault, paid):
     """The text view used to compare a bad --as-of as a string, bound
     nothing, and print the whole statement. It now fails like --pdf does."""
-    r = pay(payments_vault, "statement", "--as-of", "5 July")
+    r = payments_vault.run("statement", "--as-of", "5 July", cli="payments")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "payments: error: bad --as-of '5 July'; expected YYYY-MM-DD\n"
 
 
 def test_statement_empty(payments_vault):
-    assert pay(payments_vault, "statement", "--since", "2030-01-01").stdout == "(nothing to report)\n"
+    assert payments_vault.run("statement", "--since", "2030-01-01", cli="payments").stdout == "(nothing to report)\n"
 
 
 def test_statement_billed_minus_received(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
-    hrs(vault, "log", "X", "work", "-m", "120", "-r", "1000")   # 2000 billed
-    pay(vault, "log", "X", "750")
-    row = json.loads(pay(vault, "statement", "--json").stdout)[0]
+    vault.run("log", "X", "work", "-m", "120", "-r", "1000", cli="hours")   # 2000 billed
+    vault.run("log", "X", "750", cli="payments")
+    row = json.loads(vault.run("statement", "--json", cli="payments").stdout)[0]
     assert row["billed"] == 2000
     assert row["received"] == 750
     assert row["outstanding"] == 1250
 
 
-def test_statement_agrees_with_hours_report(vault):
-    vault.write_thread("Projects", "X", currency="ZAR")
-    hrs(vault, "log", "X", "a", "-m", "20", "-r", "2500")
-    hrs(vault, "log", "X", "b", "-m", "90", "-r", "2500")
-    billed_report = json.loads(hrs(vault, "report", "--json").stdout)[0]["amount"]
-    billed_stmt = json.loads(pay(vault, "statement", "--json").stdout)[0]["billed"]
-    assert billed_report == billed_stmt
-
-
 def test_statement_shows_billed_thread_with_no_payments(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
-    hrs(vault, "log", "X", "work", "-m", "60", "-r", "500")
-    row = json.loads(pay(vault, "statement", "--json").stdout)[0]
+    vault.run("log", "X", "work", "-m", "60", "-r", "500", cli="hours")
+    row = json.loads(vault.run("statement", "--json", cli="payments").stdout)[0]
     assert row["billed"] == 500 and row["received"] == 0
     assert row["outstanding"] == 500
 
@@ -287,18 +252,18 @@ def test_statement_shows_billed_thread_with_no_payments(vault):
 def test_statement_shows_payment_with_no_billed_hours(vault):
     """An advance payment must not vanish from the statement."""
     vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "1000")
-    row = json.loads(pay(vault, "statement", "--json").stdout)[0]
+    vault.run("log", "X", "1000", cli="payments")
+    row = json.loads(vault.run("statement", "--json", cli="payments").stdout)[0]
     assert row["billed"] == 0 and row["received"] == 1000
     assert row["outstanding"] == -1000
 
 
 def test_statement_date_window(vault):
     vault.write_thread("Projects", "X", currency="ZAR")
-    pay(vault, "log", "X", "100", "-d", "2026-01-01")
-    pay(vault, "log", "X", "200", "-d", "2026-06-01")
-    row = json.loads(pay(vault, "statement", "--since", "2026-05-01",
-                         "--json").stdout)[0]
+    vault.run("log", "X", "100", "-d", "2026-01-01", cli="payments")
+    vault.run("log", "X", "200", "-d", "2026-06-01", cli="payments")
+    row = json.loads(vault.run("statement", "--since", "2026-05-01",
+                         "--json", cli="payments").stdout)[0]
     assert row["received"] == 200
 
 
@@ -309,8 +274,8 @@ def test_list_and_statement_round_the_same_amount_the_same_way(payments_vault):
     payments_vault.write_payments_file("Projects", "SANA", payments=[{
         "id": "cccc0001", "received": "2026-07-20T08:00:00.000Z",
         "amount": 2.675, "currency": "ZAR"}])
-    assert "  2.68 ZAR  " in pay(payments_vault, "list").stdout
-    assert "  2.68 ZAR  " in pay(payments_vault, "statement", "--thread", "SANA").stdout
+    assert "  2.68 ZAR  " in payments_vault.run("list", cli="payments").stdout
+    assert "  2.68 ZAR  " in payments_vault.run("statement", "--thread", "SANA", cli="payments").stdout
 
 
 def test_hours_report_text_statement_and_pdf_statement_agree_to_the_cent(vault):
@@ -322,7 +287,7 @@ def test_hours_report_text_statement_and_pdf_statement_agree_to_the_cent(vault):
         vault.run("log", "SANA", f"work {day}", "-m", "20", "-d", f"2026-07-{day}",
                   "-t", "09:00", cli="hours")
     report = json.loads(vault.run("report", "--json", cli="hours").stdout)
-    statement = json.loads(pay(vault, "statement", "--json").stdout)
+    statement = json.loads(vault.run("statement", "--json", cli="payments").stdout)
     assert [r["amount"] for r in report] == [2499.99]
     assert [r["billed"] for r in statement] == [2499.99]
     code = ("from datetime import date; from adulting import payments as P; "
@@ -432,12 +397,11 @@ def test_a_pdf_folder_that_cannot_be_made_is_an_error_not_a_traceback(vault):
     assert r.stderr == f"payments: error: cannot create {blocker / 'out'}: Not a directory\n"
 
 
-
 def test_a_backdated_payment_refs_into_that_days_log(vault):
     """As for hours: the REF is filed under the day the money arrived, not
     the day the buffer was flushed."""
     vault.write_thread("Projects", "SANA", currency="ZAR")
-    pay(vault, "log", "Projects/SANA", "15000", "-d", "2026-08-04")
+    vault.run("log", "Projects/SANA", "15000", "-d", "2026-08-04", cli="payments")
     vault.run("flush", cli="buffer")
     logs = sorted(p.name for p in (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
     assert logs == ["2026-08-04.md"]
@@ -450,10 +414,10 @@ def test_receipts_are_rounded_to_the_cent_before_they_are_summed(vault):
     shows. Two hand-edited receipts of 1.005 list as 1 ZAR each, and used to
     total 2.01 on the statement."""
     vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
-    hrs(vault, "log", "SANA", "Work", "-m", "60", "-d", "2026-07-01", "-t", "09:00")
+    vault.run("log", "SANA", "Work", "-m", "60", "-d", "2026-07-01", "-t", "09:00", cli="hours")
     vault.write_payments_file("Projects", "SANA", payments=[
         {"id": "cccc0001", "received": "2026-07-20T08:00:00.000Z", "amount": 1.005, "currency": "ZAR"},
         {"id": "cccc0002", "received": "2026-07-21T08:00:00.000Z", "amount": 1.005, "currency": "ZAR"}])
-    assert [line.split()[3] for line in pay(vault, "list").stdout.splitlines()[1:]] == ["1", "1"]
-    assert pay(vault, "statement").stdout.splitlines()[1].split() == [
+    assert [line.split()[3] for line in vault.run("list", cli="payments").stdout.splitlines()[1:]] == ["1", "1"]
+    assert vault.run("statement", cli="payments").stdout.splitlines()[1].split() == [
         "Projects/SANA", "2500", "ZAR", "2", "ZAR", "2498", "ZAR"]

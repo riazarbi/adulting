@@ -595,10 +595,6 @@ def format_suggestion(proposal):
         return f"buffer add {_shquote(proposal['body'])}"
     if sub == 'add-text':
         return f"buffer add-text {_shquote(proposal['thread'])} {_shquote(proposal['body'])}"
-    if sub == 'add-ref':
-        target = proposal.get('ref_target') or ''
-        summary = proposal.get('ref_summary') or ''
-        return f"buffer add-ref {_shquote(proposal['thread'])} {_shquote(target)} {_shquote(summary)}"
     if sub == 'add-action':
         parts = ['buffer', 'add-action', _shquote(proposal['thread']), _shquote(proposal['body'])]
         if proposal.get('due'):
@@ -618,9 +614,6 @@ def dispatch_proposal(proposal, raw_text):
         return buffer_unknown(raw_text)
     if sub == 'add-text':
         return buffer_text(proposal['thread'], proposal['body'])
-    if sub == 'add-ref':
-        return buffer_ref(proposal['thread'], proposal.get('ref_target') or '',
-                          proposal.get('ref_summary') or '')
     if sub == 'add-action':
         return buffer_action(proposal['thread'], proposal['body'],
                              proposal.get('due'), proposal.get('scheduled'),

@@ -316,7 +316,7 @@ def detect_priority(text):
 # ---------- intent classification ----------
 
 def classify_intent(text):
-    """Returns one of: 'add' (UNKNOWN), 'add-text', 'add-ref', 'add-action'.
+    """Returns one of: 'add' (UNKNOWN), 'add-text', 'add-action'.
 
     Strategy: out-of-scope patterns first (questions, create-person, etc.).
     Then scan the first ~4 words: if a past-tense verb appears, classify as
@@ -333,7 +333,9 @@ def classify_intent(text):
         return 'add'
     head = [w.lower() for w in words[:4]]
     if head[0] in REF_MARKERS:
-        return 'add-ref'
+        # A REF needs a target the text cannot be trusted to name, so it is
+        # left as UNKNOWN for the user to convert with `buffer add-ref`.
+        return 'add'
     # Past-tense anywhere in the first few words wins over a later imperative
     # ("Bern called about the fund" → TEXT, not ACTION).
     if any(w in PAST_TENSE_MARKERS for w in head):
@@ -524,8 +526,6 @@ def suggest(raw_text, today=None, threads=None, people=None, thread_index=None, 
         'due': None,
         'scheduled': None,
         'priority': None,
-        'ref_target': None,
-        'ref_summary': None,
     }
 
     intent = classify_intent(raw_text)
@@ -577,11 +577,6 @@ def suggest(raw_text, today=None, threads=None, people=None, thread_index=None, 
             return result
 
     body = build_body(body_text, person_matches, dates['spans'], priority_spans, assignee)
-    if intent == 'add-ref':
-        # REF target resolution is not implemented in v1 — without a target
-        # the suggestion can't be a valid `buffer add-ref` call. Demote to
-        # UNKNOWN so the user can convert it manually later.
-        return result
 
     result.update({
         'subcmd': intent,

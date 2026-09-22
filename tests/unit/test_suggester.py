@@ -42,7 +42,7 @@ def test_detect_priority():
 @pytest.mark.parametrize("text, intent", [
     ("what is the balance", "add"),
     ("create a new person for Igor", "add"),
-    ("see-also the lease note", "add-ref"),
+    ("see-also the lease note", "add"),            # a REF target cannot be guessed
     ("Bern called about the fund", "add-text"),
     ("Send the report", "add-action"),
     ("Please send the report", "add-action"),
@@ -124,7 +124,7 @@ def test_suggest_end_to_end(small_vault):
     assert got == {"subcmd": "add-action", "thread": "Processes/SGB",
                    "body": "Forward [[people/Bern Sellmeyer]] email on Symonds lease",
                    "assignee": None, "due": "2026-06-01", "scheduled": None,
-                   "priority": None, "ref_target": None, "ref_summary": None}
+                   "priority": None}
 
 
 def test_suggest_bails_to_unknown(small_vault):

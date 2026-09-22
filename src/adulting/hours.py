@@ -71,7 +71,7 @@ def resolve_rate(tpath, flag):
     return V.config_default('hours', 'rate', DEFAULT_RATE)
 
 
-def resolve_billing(tpath, ref, currency_flag, rate_flag):
+def resolve_billing(tpath, currency_flag, rate_flag):
     """Return (currency, rate). A thread with no currency is not billable.
 
     `hours` records time; money is an overlay. Where no currency is available
@@ -113,22 +113,16 @@ def save(path, entries, ref, currency):
                     sort_key=BY_START, heading=HEADING)
 
 
-def buffer_ref(ref, target, summary, date=None):
-    """Drop a REF into the buffer so this record shows up in the thread's
-    daily log on the next `buffer flush`. Best-effort and silent: see
-    buffer.add_ref. The date files the pointer under the day the thing
-    happened, so a backdated entry lands in the right day's log."""
-    B.add_ref(ref, target, summary, date)
-
-
 def append_entry(kind, name, entry):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
     save(path, V.read_records(path, FENCE) + [entry], ref,
          entry.get('currency'))
-    # `ref` is already the directory form (Processes/SGB); `kind` is the
-    # frontmatter form (process) and would not resolve as a path.
-    buffer_ref(ref, f"hours/{ref}",
+    # A REF in the buffer puts this entry in the thread's daily log on the
+    # next flush, filed under the day the work happened. Best-effort and
+    # silent: see buffer.add_ref. `ref` is already the directory form
+    # (Processes/SGB); `kind` is the frontmatter form and is not a path.
+    B.add_ref(ref, f"hours/{ref}",
                f"{V.fmt_duration(V.minutes_of(entry))} {entry['name']} "
                f"({entry['id']})",
                date=V.local(entry['startTime']).strftime('%Y-%m-%d'))
@@ -155,7 +149,7 @@ def cmd_log(args):
 
     kind, name, tpath = V.resolve_target(args.thread)
     ref = V.thread_ref(kind, name)
-    currency, rate = resolve_billing(tpath, ref, args.currency, args.rate)
+    currency, rate = resolve_billing(tpath, args.currency, args.rate)
     minutes = args.minutes if args.minutes is not None else V.config_default(
         'hours', 'minutes', DEFAULT_MINUTES)
     if minutes <= 0:
@@ -313,18 +307,16 @@ def cmd_edit(args):
         target['endTime'] = V.to_iso(
             V.from_iso(target['startTime']) + timedelta(minutes=args.minutes))
 
-    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
-    save(path, entries, ref, fm.get('currency') or target.get('currency'))
+    save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
 
 
 def cmd_rm(args):
-    path, ref, entry = find_entry(args.id)
+    path, ref, _ = find_entry(args.id)
     if not args.yes:
         V.die(f"refusing to delete {args.id} without -y")
     entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
-    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
-    save(path, entries, ref, fm.get('currency', ''))
+    save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
 
 

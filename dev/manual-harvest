@@ -36,11 +36,10 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-
-# The operator surface. agent-build, and everything under dev/, are developer
-# tools and are deliberately absent — they must not appear in the manual.
-TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
-         'payments', 'buffer', 'lint', 'commit']
+sys.path.insert(0, str(REPO / 'dev'))
+# The operator surface. Everything under dev/ is a developer tool and is
+# deliberately absent: none of it may appear in the manual.
+from commands import COMMANDS as TOOLS  # noqa: E402
 
 # README sections worth carrying as background. Everything else in the README
 # is either install boilerplate or restates the command surface.
@@ -49,21 +48,13 @@ README_SECTIONS = ['Conceptual model', 'Dependencies', 'Data store',
 
 
 def tool_source(tool):
-    """The file holding a tool's code: a root script, or a ported module."""
-    script = REPO / tool
-    return script if script.exists() else REPO / 'src' / 'adulting' / f'{tool}.py'
+    """The module holding a tool's code."""
+    return REPO / 'src' / 'adulting' / f'{tool}.py'
 
 
 def tool_exe(tool):
-    """The runnable tool: a root script, or a console script in the venv."""
-    script = REPO / tool
-    return script if script.exists() else REPO / '.venv' / 'bin' / tool
-
-
-def is_python(tool):
-    path = tool_source(tool)
-    return path.suffix == '.py' or path.read_text(
-        encoding='utf-8').startswith('#!/usr/bin/env python')
+    """The tool's console script in the venv."""
+    return REPO / '.venv' / 'bin' / tool
 
 
 def run(binary, args):
@@ -98,66 +89,49 @@ def help_text(tool, subcommand=None):
 
 
 def docstring(tool):
-    """Module docstring for a python tool; leading comment block for bash."""
+    """The tool module's docstring."""
     src = tool_source(tool).read_text(encoding='utf-8')
-    if is_python(tool):
-        try:
-            return (ast.get_docstring(ast.parse(src)) or '').strip() or None
-        except SyntaxError:
-            return None
-    lines = src.splitlines()[1:]
-    block = []
-    for line in lines:
-        if line.startswith('#'):
-            block.append(line.lstrip('#').strip())
-        elif block:
-            break
-        elif line.strip():
-            break
-    return '\n'.join(block).strip() or None
+    try:
+        return (ast.get_docstring(ast.parse(src)) or '').strip() or None
+    except SyntaxError:
+        return None
 
 
 def exit_codes(tool):
     """Distinct non-zero exit codes, each with the source line that raises it.
 
-    Python tools are parsed with ast; bash tools are grepped. Only literal
-    integer codes are reported — anything computed is left out rather than
-    guessed at.
+    Found by parsing the module: every call to `exit` or `die`. Only literal
+    integer codes are reported; anything computed is left out rather than
+    guessed at. `die` exits 1 unless given another code.
     """
     src = tool_source(tool).read_text(encoding='utf-8')
     lines = src.splitlines()
     found = {}
-    if is_python(tool):
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            return []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            name = (fn.attr if isinstance(fn, ast.Attribute) else
-                    fn.id if isinstance(fn, ast.Name) else None)
-            if name not in ('exit', 'die'):
-                continue
-            code = None
-            for arg in node.args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, int):
-                    code = arg.value
-            for kw in node.keywords:
-                if kw.arg == 'code' and isinstance(kw.value, ast.Constant):
-                    code = kw.value.value
-            if code is None and name == 'die':
-                code = 1  # die()'s documented default across these tools
-            if not isinstance(code, int) or code == 0:
-                continue
-            found.setdefault(code, set()).add(
-                lines[node.lineno - 1].strip()[:120])
-    else:
-        for line in lines:
-            m = re.search(r'\bexit\s+([1-9][0-9]*)\b', line)
-            if m:
-                found.setdefault(int(m.group(1)), set()).add(line.strip()[:120])
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = (fn.attr if isinstance(fn, ast.Attribute) else
+                fn.id if isinstance(fn, ast.Name) else None)
+        if name not in ('exit', 'die'):
+            continue
+        code = None
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, int):
+                code = arg.value
+        for kw in node.keywords:
+            if kw.arg == 'code' and isinstance(kw.value, ast.Constant):
+                code = kw.value.value
+        if code is None and name == 'die':
+            code = 1
+        if not isinstance(code, int) or code == 0:
+            continue
+        found.setdefault(code, set()).add(
+            lines[node.lineno - 1].strip()[:120])
     return [{'code': c, 'raised_at': sorted(found[c])[:6]}
             for c in sorted(found)]
 
@@ -166,6 +140,7 @@ def vault_paths(tool):
     """Vault subdirectories the tool reads or writes, from its constants."""
     src = tool_source(tool).read_text(encoding='utf-8')
     hits = set(re.findall(r"(?:HOME|vault_home\(\))\s*/\s*'([^']+)'", src))
+    # Paths written out in docstrings, e.g. `$ADULTING_HOME/hours/...`.
     hits |= set(re.findall(r'\$ADULTING_HOME/([A-Za-z0-9_./-]+)', src))
     return sorted(hits)
 
@@ -173,7 +148,6 @@ def vault_paths(tool):
 def env_vars(tool):
     src = tool_source(tool).read_text(encoding='utf-8')
     hits = set(re.findall(r"environ(?:\.get)?[\(\[]\s*'([A-Z][A-Z0-9_]*)'", src))
-    hits |= set(re.findall(r'\$\{([A-Z][A-Z0-9_]*):-', src))
     return sorted(hits)
 
 
@@ -183,14 +157,9 @@ def subcommand_names(manifest):
 
 def harvest_tool(tool):
     manifest = help_json(tool)
-    python = is_python(tool)
-    # Only argparse tools get their subcommands probed. Bash dispatchers have
-    # no per-subcommand --help and several subcommands are interactive, so
-    # invoking them would block; their manifest is hand-maintained instead.
-    subs = subcommand_names(manifest) if python else []
+    subs = subcommand_names(manifest)
     return {
         'name': tool,
-        'interpreter': 'python3' if python else 'bash',
         'docstring': docstring(tool),
         'help_json': manifest,
         'help_text': help_text(tool),
@@ -255,7 +224,6 @@ def render_md(data):
     for t in data['tools']:
         w(f"## Tool: `{t['name']}`")
         w("")
-        w(f"- interpreter: {t['interpreter']}")
         w(f"- vault paths: {', '.join(t['vault_paths']) or '(none detected)'}")
         w(f"- environment: {', '.join(t['env_vars']) or '(none detected)'}")
         w("")

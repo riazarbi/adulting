@@ -51,14 +51,14 @@ def test_resolve_rate_cascade(threads):
 
 
 def test_resolve_billing(threads):
-    assert H.resolve_billing(threads / "Projects/SANA.md", "Projects/SANA", None, None) == ("ZAR", 2500)
-    assert H.resolve_billing(threads / "Topics/Wellness.md", "Topics/Wellness", None, None) == (None, 0)
-    assert H.resolve_billing(threads / "Topics/Wellness.md", "Topics/Wellness", None, 0) == (None, 0)
-    assert H.resolve_billing(threads / "Topics/Wellness.md", "Topics/Wellness", "gbp", 10) == ("GBP", 10)
+    assert H.resolve_billing(threads / "Projects/SANA.md", None, None) == ("ZAR", 2500)
+    assert H.resolve_billing(threads / "Topics/Wellness.md", None, None) == (None, 0)
+    assert H.resolve_billing(threads / "Topics/Wellness.md", None, 0) == (None, 0)
+    assert H.resolve_billing(threads / "Topics/Wellness.md", "gbp", 10) == ("GBP", 10)
     with pytest.raises(SystemExit):
-        H.resolve_billing(threads / "Topics/Wellness.md", "Topics/Wellness", None, 900)
+        H.resolve_billing(threads / "Topics/Wellness.md", None, 900)
     with pytest.raises(SystemExit):
-        H.resolve_billing(threads / "Topics/Wellness.md", "Topics/Wellness", "rands", None)
+        H.resolve_billing(threads / "Topics/Wellness.md", "rands", None)
 
 
 def test_append_collect_and_find(threads, monkeypatch):

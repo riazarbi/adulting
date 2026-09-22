@@ -2,6 +2,17 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part C5: dead code
+
+- **The `add-ref` suggestion that could never be made.** The suggester recognised REF wording ("see-also …", "link …"), then always gave up because it cannot name a REF target. `buffer` still had code to format and run the suggestion. The wording now goes straight to UNKNOWN, the outcome it always had, and the dead paths are gone: the `add-ref` branches in `buffer.format_suggestion` and `dispatch_proposal`, and the `ref_target`/`ref_summary` fields of a suggestion.
+- **Unused names:** `lint.TASK_RE`; the `ref` parameter of `hours.resolve_billing`; the unused record in `hours rm` and `payments rm`.
+- **Frontmatter reads that did nothing.** `hours` and `payments` edit and rm read the file's currency to pass to `write_records`, which only uses it when it creates a new file. They act on a file that already exists, so the read is gone.
+- **`hours.buffer_ref` and `payments.buffer_ref`** were one-line wrappers; both call `buffer.add_ref` directly.
+- **`helpjson`:** the subcommand-alias bookkeeping (no command has aliases) and a no-op expression are gone; every `--help-json` manifest is byte-identical.
+- **`search`:** `resolve_thread_arg` lost a catch-all that `resolve_target` already covers; `notes` and `logs` share one function; `stream` uses `window_default` instead of its own copy.
+- **`dev/`:** `manual-harvest` loses every branch for bash scripts, none of which remain. The command list, kept in `dev/ci`, `dev/manual-harvest` and `dev/manual-diff`, now lives once in `dev/commands.py`, and a test checks it against the console scripts in `pyproject.toml`. The harvested corpus is unchanged except that it drops the `interpreter` line, now always python3.
+- **Verified on the vault copy:** `hours` log/edit/show/rm, `payments` log/edit/rm, `buffer suggest` with and without `-y`, and `search` notes/logs/stream give identical output and identical vault changes before and after. **680 passing.**
+
 ## 2026-09-22 - review fixes, part C4: no type hints
 
 - `tasks.py` was the only module with type hints; its functions no longer have them, to match the rest of the code. The `Anchor` dataclass keeps its field annotations, because a dataclass cannot declare fields without them; a comment says so. No behaviour change.

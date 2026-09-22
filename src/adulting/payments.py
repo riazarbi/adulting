@@ -82,20 +82,14 @@ def save(path, records, ref, currency):
                     sort_key=BY_RECEIVED, heading=HEADING)
 
 
-def buffer_ref(ref, target, summary, date=None):
-    """Drop a REF into the buffer so this record shows up in the thread's
-    daily log on the next `buffer flush`. Best-effort and silent: see
-    buffer.add_ref. The date files the pointer under the day the thing
-    happened, so a backdated entry lands in the right day's log."""
-    B.add_ref(ref, target, summary, date)
-
-
 def append_payment(kind, name, payment):
     ref = V.thread_ref(kind, name)
     path = V.record_path(SUBDIR, kind, name)
     save(path, V.read_records(path, FENCE, KEY) + [payment], ref, payment['currency'])
-    # `ref` is already the directory form; `kind` is the frontmatter form.
-    buffer_ref(ref, f"payments/{ref}",
+    # A REF in the buffer puts this payment in the thread's daily log on the
+    # next flush, filed under the day it was received. Best-effort and
+    # silent: see buffer.add_ref. `ref` is already the directory form.
+    B.add_ref(ref, f"payments/{ref}",
                f"{V.fmt_money(V.dec(payment['amount']), payment['currency'])} "
                f"received ({payment['id']})",
                date=V.local(payment['received']).strftime('%Y-%m-%d'))
@@ -224,18 +218,16 @@ def cmd_edit(args):
             args.date or was.strftime('%Y-%m-%d'),
             args.time or was.strftime('%H:%M')))
 
-    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
-    save(path, records, ref, fm.get('currency', target['currency']))
+    save(path, records, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
 
 
 def cmd_rm(args):
-    path, ref, p = find_payment(args.id)
+    path, ref, _ = find_payment(args.id)
     if not args.yes:
         V.die(f"refusing to delete {args.id} without -y")
     records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
-    fm, _ = V.parse_frontmatter(path.read_text(encoding='utf-8'))
-    save(path, records, ref, fm.get('currency', ''))
+    save(path, records, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
 
 

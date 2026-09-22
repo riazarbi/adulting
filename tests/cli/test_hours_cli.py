@@ -268,7 +268,7 @@ def test_statement_ignores_unbilled_time(vault):
 # ---- is a complete chronology. `notes new` has always done this; hours and
 # ---- payments simply predated the convention.
 #
-# These matter because buffer_ref is best-effort and silent by design: the
+# These matter because the buffer REF is best-effort and silent by design: the
 # harness discards a tool's stdout whenever stderr is non-empty, so it cannot
 # warn without breaking `hours log` for the agent. A silent failure is only
 # catchable here.

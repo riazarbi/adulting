@@ -26,7 +26,6 @@ SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
 
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
 ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')
-TASK_RE = re.compile(r'^TASK:\s*(\([^)]+\)\s*)?(.*?)\s*$')
 
 
 # ---------- helpers ----------

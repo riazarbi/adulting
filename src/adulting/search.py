@@ -267,13 +267,8 @@ def resolve_thread_arg(arg):
     """Accept 'SGB', 'Processes/SGB' or a wikilink. Returns the canonical ref."""
     if not arg:
         return None
-    try:
-        kind, name, _ = V.resolve_target(arg, fold_case=True)
-        return V.thread_ref(kind, name)
-    except SystemExit:
-        raise
-    except Exception:  # noqa: BLE001
-        V.die(f"could not resolve thread {arg!r}")
+    kind, name, _ = V.resolve_target(arg, fold_case=True)
+    return V.thread_ref(kind, name)
 
 
 def apply_filters(records, thread=None, type_=None, since=None, until=None,
@@ -372,18 +367,17 @@ def render_docs(rows):
 
 
 def cmd_notes(args):
-    rows = apply_filters(note_records(), resolve_thread_arg(args.thread),
-                         args.type, args.since, args.until, args.text)
-    rows = rows[:args.limit] if args.limit else rows
-    for r in rows:
-        r['snippet'] = snippet(r['body'], args.text) if args.text else ''
-        r.pop('body', None)
-    emit(rows, args.json, render_docs)
+    show_docs(note_records(), args, args.type)
 
 
 def cmd_logs(args):
-    rows = apply_filters(log_records(), resolve_thread_arg(args.thread),
-                         None, args.since, args.until, args.text)
+    show_docs(log_records(), args, None)
+
+
+def show_docs(records, args, type_):
+    """`notes` and `logs`: filter, cap, add a snippet around the text match."""
+    rows = apply_filters(records, resolve_thread_arg(args.thread),
+                         type_, args.since, args.until, args.text)
     rows = rows[:args.limit] if args.limit else rows
     for r in rows:
         r['snippet'] = snippet(r['body'], args.text) if args.text else ''
@@ -488,8 +482,7 @@ def cmd_overview(args):
 def cmd_stream(args):
     if args.today:
         args.since = args.until = date.today().isoformat()
-    since = args.since if args.since is not None else (
-        date.today() - timedelta(days=DEFAULT_WINDOW_DAYS)).isoformat()
+    since, until = window_default(args.since, args.until)
 
     kinds = STREAM_KINDS
     if args.kind:
@@ -514,7 +507,7 @@ def cmd_stream(args):
             continue
         if not e['date'] or e['date'] < since:
             continue
-        if args.until and e['date'] > args.until:
+        if until and e['date'] > until:
             continue
         if needle and needle not in f"{e['thread']} {e['summary']}".lower():
             continue

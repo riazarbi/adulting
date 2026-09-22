@@ -40,8 +40,8 @@ PY = REPO / '.venv' / 'bin' / 'python'
 # Commands the operator uses. Every one must answer --help-json: the
 # harvester, the manual and the agent tool definitions all depend on it, so a
 # tool that loses it silently breaks the manual.
-TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours', 'payments',
-         'buffer', 'lint', 'commit']
+sys.path.insert(0, str(REPO / 'dev'))
+from commands import COMMANDS as TOOLS  # noqa: E402
 DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-diff', 'tools-build',
              'tools-check', 'testbed', 'ci']
 

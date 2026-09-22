@@ -1,5 +1,7 @@
 """Unit tests for adulting.tasks. conftest points ADULTING_HOME at tmp_path/vault."""
 
+import re
+
 import pytest
 
 from adulting import tasks as T
@@ -68,8 +70,8 @@ def test_validators_and_uuid_generation():
         T.validate_date("27 May")
     with pytest.raises(ValueError):
         T.validate_priority("Z")
-    u = T.gen_uuid8(set())
-    assert T.UUID8_RE.match(u) and T.gen_uuid8({u}) != u
+    for _ in range(50):
+        assert re.fullmatch(r"[0-9a-f]{8}", T.gen_uuid8(set()))
 
 
 @pytest.fixture

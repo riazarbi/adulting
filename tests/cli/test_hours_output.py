@@ -176,22 +176,11 @@ def test_log_without_a_thread_fails_instead_of_prompting(v):
     assert list((v.home / "hours").rglob("*.md")) == []
 
 
-def test_log_all_flag_is_gone(v):
-    r = hours(v, "log", "SANA", "x", "--all")
-    assert r.returncode == 2
-    assert "unrecognized arguments: --all" in r.stderr
-
-
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, logged):
     r = hours(v, "rm", logged[0], input="y\n")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"hours: refusing to delete {logged[0]} without -y\n"
     assert len(v.entries("Projects", "SANA")) == 1
-
-
-def test_help_no_longer_mentions_interactive_mode(vault):
-    for argv in (["--help"], ["log", "--help"]):
-        assert "interactive" not in hours(vault, *argv).stdout.lower()
 
 
 def stored(vault, entry_id):

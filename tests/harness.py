@@ -42,11 +42,11 @@ PRODUCTION_VAULT = Path(
 
 
 def own_bin_dirs(repo_root: Path = REPO_ROOT) -> list[Path]:
-    """Where this checkout's commands live, most preferred first.
+    """Where a checkout's commands live, most preferred first.
 
-    Ported commands are console scripts in .venv/bin. Commands not yet
-    ported are still scripts at the repo root. Once a command is ported its
-    root script is deleted, so the two never both provide the same name.
+    This checkout's commands are console scripts in .venv/bin. The root is
+    kept for dev/testbed, whose old implementation is a directory of root
+    scripts; this checkout has none (tests/unit/test_harness.py checks).
     """
     return [repo_root / ".venv" / "bin", repo_root]
 
@@ -84,6 +84,14 @@ def isolated_env(home: Path, vault: Path, repo_root: Path = REPO_ROOT,
     env["GIT_AUTHOR_EMAIL"] = env["GIT_COMMITTER_EMAIL"] = "test@adulting.local"
     env.pop("EXPORT_DIR", None)
     return env
+
+
+def without_program(env: dict, program: str) -> dict:
+    """A copy of `env` whose PATH has no directory holding `program`. Used to
+    make a real tool fail for real, e.g. pandoc with no xelatex to call."""
+    kept = [d for d in env["PATH"].split(os.pathsep)
+            if d and not (Path(d) / program).exists()]
+    return {**env, "PATH": os.pathsep.join(kept)}
 
 
 def command_path(name: str, env: dict | None = None) -> str:

@@ -32,7 +32,7 @@ def test_parse_dates(text, due, scheduled):
 def test_detect_priority():
     assert G.detect_priority("fix it ASAP") == "H"
     assert G.detect_priority("fix it urgent") == "H"
-    # Bug, pinned: the pattern wraps `!!+` in \b word boundaries, and there
+    # DEFERRED BUG 3: the pattern wraps `!!+` in \b word boundaries, and there
     # is no word boundary around punctuation, so `!!` never marks priority.
     assert G.detect_priority("fix it !!") is None
     assert G.detect_priority("whenever you can") == "L"

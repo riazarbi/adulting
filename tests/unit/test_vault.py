@@ -5,6 +5,7 @@ several frontmatter parsers later can't change it unnoticed.
 """
 
 import json
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -145,10 +146,9 @@ def test_read_records_of_a_missing_file_is_empty(tmp_path):
 
 # ---------- ids ----------
 
-def test_new_id_is_eight_hex_and_avoids_existing():
-    first = V.new_id(set())
-    assert len(first) == 8 and int(first, 16) >= 0
-    assert V.new_id({first}) != first
+def test_new_id_is_eight_lowercase_hex_characters():
+    for _ in range(50):
+        assert re.fullmatch(r"[0-9a-f]{8}", V.new_id(set()))
 
 
 # ---------- time ----------

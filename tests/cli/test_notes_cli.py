@@ -125,7 +125,9 @@ def test_last_with_no_notes(vault):
 
 # ---------- copy, delete ----------
 
-def test_copy_keeps_everything_but_marks_topic_lines(v):
+def test_copy_marks_every_topic_line_and_keeps_the_timestamp(v):
+    # DEFERRED BUG 4: every line starting with `topic:` gets ` COPY`, body
+    # lines included, and the copy keeps the original `timestamp:`.
     r = notes(v, "copy", "2026-09-10-14-30-00")
     m = re.fullmatch(r"Copied 2026-09-10-14-30-00\.md to (\d{4}(?:-\d{2}){5})\.md\n", r.stdout)
     assert m, r.stdout

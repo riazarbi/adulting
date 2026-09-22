@@ -190,14 +190,6 @@ def test_entries_stay_sorted_by_start(vault):
     assert names == ["earlier", "later"]
 
 
-def test_ids_are_unique_across_many_logs(vault):
-    vault.write_thread("Projects", "SANA Partners", currency="ZAR")
-    for i in range(15):
-        run(vault, "log", "SANA Partners", f"entry {i}")
-    ids = [e["id"] for e in vault.entries("Projects", "SANA Partners")]
-    assert len(set(ids)) == 15
-
-
 # ---- unbilled time: currency is optional because hours records time,
 # ---- and money is an overlay on it.
 

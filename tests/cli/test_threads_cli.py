@@ -181,11 +181,6 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(v):
     assert path.exists()
 
 
-def test_help_no_longer_mentions_prompts(vault):
-    r = threads(vault, "new", "--help")
-    assert "prompt" not in r.stdout.lower()
-
-
 @pytest.mark.parametrize("name", ["../escaped", "a/b", ".hidden"])
 def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     """The name becomes threads/<Kind>/<name>.md, so a `/` could write

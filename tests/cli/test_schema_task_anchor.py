@@ -19,17 +19,31 @@ def _note_with_lines(vault, *anchor_lines):
         threads=["Projects/SGB"])
 
 
-def _lint_violations(vault, path):
+def _lint(vault, path):
+    """(exit code, every violation line) for linting one file. The summary
+    line is dropped; everything else lint prints is kept, so a crash or an
+    unexpected violation cannot hide."""
     r = vault.run(str(path), cli="lint")
-    return [l for l in r.stdout.split("\n")
-            if "task_anchor" in l or ": missing" in l or "does not conform" in l]
+    lines = [l for l in r.stdout.split("\n") if l and "file(s) checked" not in l]
+    return r.returncode, lines + ([r.stderr] if r.stderr else [])
+
+
+def _shape_violation(path):
+    return f"{path}:9: line does not conform to task_anchor shape /{SHAPE}/"
+
+
+SHAPE = (r"^(?P<kind>TASK|DONE):\s+(?:\[#(?P<priority>[^\]]+)\]\s+)?(?:\((?P<assignee>[^)]+)\)\s+)?"
+         r"(?P<body>.+?)\s+<!--\s*(?P<uuid>[a-f0-9]{8})\s+entry:(?P<entry>\d{4}-\d{2}-\d{2})"
+         r"(?:\s+end:(?P<end>\d{4}-\d{2}-\d{2}))?(?:\s+due:(?P<due>\d{4}-\d{2}-\d{2}))?"
+         r"(?:\s+scheduled:(?P<scheduled>\d{4}-\d{2}-\d{2}))?(?:\s+depends:(?P<depends>[a-f0-9,]+))?"
+         r"\s*-->\s*$")
 
 
 def test_minimal_task_anchor_validates(vault):
     _setup(vault)
     p = _note_with_lines(vault,
         "TASK: Pick up dry cleaning <!--ef567890 entry:2026-05-27-->")
-    assert _lint_violations(vault, p) == []
+    assert _lint(vault, p) == (0, [])
 
 
 def test_full_task_anchor_validates(vault):
@@ -49,39 +63,34 @@ def test_done_with_end_validates(vault):
     p = _note_with_lines(vault,
         "DONE: [#M] (Riaz Arbi) Review the contract "
         "<!--abc12340 entry:2026-05-24 end:2026-05-27-->")
-    assert _lint_violations(vault, p) == []
+    assert _lint(vault, p) == (0, [])
 
 
 def test_priority_must_be_HML(vault):
     _setup(vault)
     p = _note_with_lines(vault,
         "TASK: [#Q] (Riaz Arbi) Bad priority <!--abcd1234 entry:2026-05-27-->")
-    violations = _lint_violations(vault, p)
-    assert any("priority" in v and ("'Q'" in v or "Q" in v) for v in violations), violations
+    assert _lint(vault, p) == (1, [f"{p}:9: task_anchor.priority: value 'Q' not in ['H', 'M', 'L']"])
 
 
 def test_uuid_must_be_8_hex(vault):
     _setup(vault)
     p = _note_with_lines(vault,
         "TASK: Bad uuid <!--ZZZZZZZZ entry:2026-05-27-->")
-    violations = _lint_violations(vault, p)
-    # Either the shape regex fails or the uuid field rejects it.
-    assert violations, "expected at least one violation for bad uuid"
+    assert _lint(vault, p) == (1, [_shape_violation(p)])
 
 
 def test_entry_must_be_iso_date(vault):
     _setup(vault)
     p = _note_with_lines(vault,
         "TASK: Bad entry <!--abcd1234 entry:May-27-2026-->")
-    violations = _lint_violations(vault, p)
-    assert violations, "expected violation for non-ISO entry"
+    assert _lint(vault, p) == (1, [_shape_violation(p)])
 
 
-def test_kind_must_be_TASK_or_DONE(vault):
+def test_a_line_that_is_not_a_task_anchor_is_not_checked_as_one(vault):
+    """`WIP:` does not match the schema's applies_when, so the line is not
+    validated as an anchor at all, and the note is clean."""
     _setup(vault)
     p = _note_with_lines(vault,
         "WIP: Some line <!--abcd1234 entry:2026-05-27-->")
-    # Doesn't match applies_when at all -> not validated as task_anchor,
-    # so no task_anchor violation expected. Tests that the schema
-    # doesn't false-fire on unrelated lines.
-    assert _lint_violations(vault, p) == []
+    assert _lint(vault, p) == (0, [])

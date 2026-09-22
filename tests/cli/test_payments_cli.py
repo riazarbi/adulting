@@ -158,17 +158,6 @@ def test_payments_sorted_by_received(vault):
 
 # ---- ids are unique across both tools ----
 
-def test_ids_do_not_collide_with_hours(vault):
-    vault.write_thread("Projects", "X", currency="ZAR")
-    for i in range(10):
-        hrs(vault, "log", "X", f"h{i}")
-        pay(vault, "log", "X", str(100 + i))
-    ids = ([e["id"] for e in vault.entries("Projects", "X")] +
-           [p["id"] for p in vault.payments("Projects", "X")])
-    assert len(ids) == 20
-    assert len(set(ids)) == 20
-
-
 # ---- lint ----
 
 def test_valid_payments_file_lints_clean(vault):

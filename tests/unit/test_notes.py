@@ -1,5 +1,7 @@
 """Unit tests for adulting.notes. conftest points ADULTING_HOME at tmp_path/vault."""
 
+import re
+
 import pytest
 
 from adulting import notes as N
@@ -49,16 +51,24 @@ def test_all_notes_skips_dot_files_and_handles_a_missing_dir(notes_dir, tmp_path
     assert N.all_notes() == []
 
 
-def test_ingest_actions_is_silent_when_everything_ingests(notes_dir, capsys):
+def test_ingest_actions_turns_an_action_into_a_task_anchor_quietly(notes_dir, capsys):
+    threads = N.V.vault_home() / "threads" / "Projects"
+    threads.mkdir(parents=True)
+    (threads / "SGB.md").write_text("---\nstatus: open\n---\n")
+    note = notes_dir / "2026-09-10-14-30-00.md"
+    note.write_text('---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: do it\n')
     N.ingest_actions()
+    assert re.search(r"^TASK: do it <!--[0-9a-f]{8} entry:", note.read_text(), re.M)
     assert capsys.readouterr() == ("", "")
 
 
-def test_ingest_actions_is_silent_on_failure_unless_stderr_is_a_terminal(notes_dir, capsys):
+def test_ingest_actions_leaves_a_failing_action_and_stays_silent_without_a_terminal(notes_dir, capsys):
     """capsys stands in for a pipe: not a terminal. The terminal case is in
     tests/cli/test_notes_cli.py, on a real pseudo-terminal."""
-    (notes_dir / "2026-09-10-14-30-00.md").write_text("---\ntopic: x\n---\n\nACTION: no threads\n")
+    note = notes_dir / "2026-09-10-14-30-00.md"
+    note.write_text("---\ntopic: x\n---\n\nACTION: no threads\n")
     N.ingest_actions()
+    assert note.read_text() == "---\ntopic: x\n---\n\nACTION: no threads\n"
     assert capsys.readouterr() == ("", "")
 
 

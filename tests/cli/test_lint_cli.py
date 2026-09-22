@@ -146,7 +146,8 @@ def test_cadence_rules(vault):
     ]
 
 
-def test_only_bullets_that_look_dated_are_checked_as_thread_entries(vault):
+def test_a_badly_dated_thread_entry_is_not_checked(vault):
+    # DEFERRED BUG 8
     p = vault.write_thread("Projects", "SGB")
     with p.open("a", encoding="utf-8") as f:
         f.write("\n- 2026-01-02 — Kicked off\n  - detail is free-form\n"

@@ -7,23 +7,27 @@ from pathlib import Path
 
 import pytest
 
-from harness import (COMMANDS, PRODUCTION_VAULT, REPO_ROOT, clean_path,
+from harness import (PRODUCTION_VAULT, REPO_ROOT, clean_path,
                      command_path, isolated_env)
 
 
-def test_every_command_resolves_inside_this_repo():
-    for name in ["tasks", "buffer", "notes", "search", "threads", "people",
-                 "hours", "payments", "lint", "commit"]:
-        assert Path(command_path(name)).resolve().is_relative_to(REPO_ROOT)
+TOOLS = ["tasks", "buffer", "notes", "search", "threads", "people",
+         "hours", "payments", "lint", "commit"]
+
+
+def test_every_command_is_this_checkouts_console_script():
+    for name in TOOLS:
+        assert command_path(name) == str(REPO_ROOT / ".venv" / "bin" / name)
 
 
 def test_a_child_process_finds_this_repos_commands_too():
-    """Commands call each other by name, so the child's PATH matters."""
+    """A child process inherits the isolated PATH, so a command that looks
+    another up by name finds this checkout's copy."""
     code = "import shutil; print(shutil.which('buffer')); print(shutil.which('tasks'))"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, env=dict(os.environ)).stdout.split()
-    for found in out:
-        assert Path(found).resolve().is_relative_to(REPO_ROOT), found
+    assert out == [str(REPO_ROOT / ".venv" / "bin" / "buffer"),
+                   str(REPO_ROOT / ".venv" / "bin" / "tasks")]
 
 
 def test_environment_points_away_from_production(tmp_path):
@@ -70,8 +74,11 @@ def test_a_cross_command_write_lands_in_the_test_vault(vault):
     assert "Draft the scope note" in vault.read("buffer.md")
 
 
-def test_command_list_covers_every_executable_at_the_repo_root():
-    """A new root script must be added to COMMANDS or PATH scrubbing misses it."""
-    for f in REPO_ROOT.iterdir():
-        if f.is_file() and os.access(f, os.X_OK) and not f.suffix and f.name != "LICENSE":
-            assert f.name in COMMANDS, f"{f.name} missing from harness.COMMANDS"
+def test_the_repo_root_holds_no_commands():
+    """Every command is a console script now. A script at the root would sit
+    on the isolated PATH ahead of anything else, so none may creep back.
+    (own_bin_dirs keeps the root for dev/testbed, whose old implementation
+    is a directory of root scripts.)"""
+    stray = [f.name for f in REPO_ROOT.iterdir()
+             if f.is_file() and os.access(f, os.X_OK)]
+    assert stray == []

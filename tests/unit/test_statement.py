@@ -7,14 +7,14 @@ its figures were reproduced exactly against the real logs before it was retired.
 import datetime
 import json
 import shutil
-import sys
+import subprocess
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
 from adulting import statement as S
 from adulting import vault as V
+from harness import command_path, without_program
 
 
 HAS_PANDOC = shutil.which("pandoc") is not None
@@ -229,15 +229,21 @@ def test_pdf_warns_and_states_when_banking_is_missing(vault):
 
 @needs_pdf
 def test_a_failed_render_leaves_no_stale_file(vault):
-    """Better no statement than yesterday's figures under today's date."""
+    """Better no statement than yesterday's figures under today's date. The
+    render fails for real: pandoc runs, but there is no xelatex to call."""
     sana(vault)
     vault.run("log", "SANA Partners", "work", "-m", "60", "-r", "100",
               "-d", "2026-06-01", "-t", "09:00", cli="hours")
     out = vault.home / "statement.pdf"
     out.write_bytes(b"stale")
-    vault.run("statement", "--thread", "SANA Partners", "--pdf", str(out),
-              "--as-of", "2026-06-30", cli="payments")
-    assert out.read_bytes()[:5] == b"%PDF-"
+    no_latex = without_program(vault.env, "xelatex")
+    r = subprocess.run([command_path("payments", no_latex), "statement", "--thread", "SANA Partners",
+                        "--pdf", str(out), "--as-of", "2026-06-30"],
+                       capture_output=True, text=True, env=no_latex)
+    assert r.returncode == 1
+    assert r.stderr.startswith("payments: pandoc failed\n")
+    assert "xelatex" in r.stderr
+    assert not out.exists()
 
 
 # ---- markdown escaping ----

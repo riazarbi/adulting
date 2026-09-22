@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import command_path
+from harness import command_path, without_program
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "render"
 KINDS = ("pdf", "minutes", "agenda")
@@ -66,7 +66,8 @@ def test_a_render_writes_a_pdf_and_prints_both_paths(v, tmp_path):
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
 def test_a_topic_with_quotes_still_breaks_the_pdf(v, tmp_path):
-    """Old bug, pinned: the topic goes into the metadata unquoted, so a topic
+    # DEFERRED BUG 1
+    """The topic goes into the metadata unquoted, so a topic
     containing quotes and a colon is invalid YAML and pandoc refuses it. The
     markdown is still written."""
     out = tmp_path / "out"
@@ -79,14 +80,22 @@ def test_a_topic_with_quotes_still_breaks_the_pdf(v, tmp_path):
     assert not (out / "meeting_full.md.pdf").exists()
 
 
-@pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
-def test_a_stale_pdf_is_removed_before_rendering(v, tmp_path):
+@pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc")
+def test_a_failed_render_leaves_no_stale_pdf(v, tmp_path):
+    """A PDF left from an earlier render must not pass for this one. The
+    render fails for real: pandoc runs, but there is no xelatex to call."""
     out = tmp_path / "out"
     out.mkdir()
-    stale = out / "meeting_full.md.pdf"
+    stale = out / "with_summary.md.pdf"
     stale.write_text("not a pdf")
-    notes(v, "pdf", "meeting_full", "--out", str(out))
+    no_latex = without_program(v.env, "xelatex")
+    r = subprocess.run([command_path("notes", no_latex), "pdf", "with_summary", "--out", str(out)],
+                       capture_output=True, text=True, env=no_latex)
+    assert r.returncode == 1
+    assert r.stdout == f"{out / 'with_summary.md'}\n"
+    assert r.stderr.startswith("notes: PDF render failed:")
     assert not stale.exists()
+    assert (out / "with_summary.md").exists()
 
 
 def test_renders_default_to_downloads(v):

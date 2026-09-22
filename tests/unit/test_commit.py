@@ -4,7 +4,6 @@ The parsing helpers are pure. The git-facing functions run against a real
 throwaway repo: conftest has already pointed ADULTING_HOME at tmp_path/vault.
 """
 
-import os
 import subprocess
 
 import pytest
@@ -84,12 +83,24 @@ def test_status_entries_parses_every_kind_of_change(repo):
     ]
 
 
-def test_has_head(repo):
+def test_has_head_is_true_only_once_there_is_a_commit(repo, tmp_path, monkeypatch):
     assert C.has_head() is True
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    subprocess.run(["git", "-C", str(fresh), "init", "-q"], check=True)
+    monkeypatch.setenv("ADULTING_HOME", str(fresh))
+    assert C.has_head() is False
 
 
-def test_require_repo_accepts_the_repo_root(repo):
+def test_require_repo_accepts_the_root_and_refuses_a_plain_directory(repo, tmp_path, monkeypatch, capsys):
     C.require_repo()  # returns without exiting
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("ADULTING_HOME", str(plain))
+    with pytest.raises(SystemExit) as exc:
+        C.require_repo()
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"error: not a git repository: {plain}\n"
 
 
 def test_require_repo_refuses_a_subdirectory(repo, monkeypatch):

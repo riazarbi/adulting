@@ -194,22 +194,11 @@ def test_log_without_a_thread_fails_instead_of_prompting(v):
     assert list((v.home / "payments").rglob("*.md")) == []
 
 
-def test_log_all_flag_is_gone(v):
-    r = pay(v, "log", "SANA", "10", "--all")
-    assert r.returncode == 2
-    assert "unrecognized arguments: --all" in r.stderr
-
-
 def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, paid):
     r = pay(v, "rm", paid[0], input="y\n")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"payments: refusing to delete {paid[0]} without -y\n"
     assert len(v.payments("Projects", "SANA")) == 1
-
-
-def test_help_no_longer_mentions_interactive_mode(vault):
-    for argv in (["--help"], ["log", "--help"]):
-        assert "interactive" not in pay(vault, *argv).stdout.lower()
 
 
 def test_list_and_statement_round_the_same_amount_the_same_way(v):

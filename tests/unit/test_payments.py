@@ -71,6 +71,8 @@ def test_collect_and_find_payment(vault_with_records):
     assert (ref, p["id"]) == ("Projects/SANA", "bbbb0001")
     assert list(P.collect(since="2026-07-11")) == []
     assert P.as_row(ref, p)["amount"] == 500.5
+    path, ref, found = P.find_payment("bbbb0001")
+    assert (path.name, ref, found["amount"]) == ("SANA.md", "Projects/SANA", 500.5)
     with pytest.raises(SystemExit):
         P.find_payment("deadbeef")
 
@@ -78,7 +80,9 @@ def test_collect_and_find_payment(vault_with_records):
 def test_one_thread_statement(vault_with_records):
     st = P.one_thread_statement("SANA", date(2026, 7, 31))
     assert st["currency"] == "ZAR"
-    assert st["payments"] == Decimal("500.50")
+    assert (st["charges"], st["payments"], st["balance"]) == (
+        Decimal("833.33"), Decimal("500.50"), Decimal("332.83"))
+    assert [line["description"] for line in st["lines"]] == ["Work", "Payment received — FNB"]
     assert st["thread_path"].name == "SANA.md"
 
 

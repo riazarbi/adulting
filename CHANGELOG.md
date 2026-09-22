@@ -2,6 +2,23 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, parts D1 and D6: tests that can fail, and labelled deferred bugs
+
+The review found tests that pass whatever the code does, and deferred bugs whose tests either were not labelled or presented the bug as intended. This fixes both.
+
+- **Rewritten so they can fail.** Each was checked by breaking the code it covers and watching it fail, then restoring the code.
+  - The `notes` ingest unit tests assert that an ACTION became a TASK anchor, and that a failing one was left alone. They used to assert only silence.
+  - `commit.has_head` is tested false on a repo with no commits, and `require_repo` refuses a plain directory.
+  - `one_thread_statement` asserts exact charges, payments, balance and lines, and `find_payment` has a hit case.
+  - The lint cycle and task cross-check tests assert exact lists. A new test covers the one case the cycle de-duplication exists for: a task listing the same dependency twice.
+  - Both "a failed render leaves no stale file" tests, for the statement and for notes, now make the render fail for real: pandoc runs with no xelatex on PATH, via a new `harness.without_program`. The statement test used to pass a successful render, and the notes one only failed because of deferred bug 1.
+  - The harness tests assert the exact `.venv/bin/<name>` path. A missing command used to resolve `Path("None")` inside the repo and pass. The vacuous root-scripts loop became a check that no executable sits at the repo root.
+  - The id tests match `[0-9a-f]{8}` exactly instead of `int(x, 16) >= 0`.
+  - The task-anchor schema tests assert lint's exit code and every violation line.
+- **Deleted, as tests that could not usefully fail:** `test_smoke.py` (each test duplicated another), the two random-id collision tests, the five "help no longer mentions X" tests, and the five "removed flag is rejected" tests.
+- **Every deferred bug is now pinned by a test carrying `# DEFERRED BUG n`:** 1-8, 10 and 11, one grep away. The pins for bugs 4 (`notes copy`) and 8 (badly dated thread entries) were named as if the behaviour were intended; they are renamed.
+- Unused imports removed across the tests; `harness.own_bin_dirs` explains why it keeps the repo root (dev/testbed's old implementation). **669 passing.**
+
 ## 2026-09-22 - action tables say whether each action is open or done
 
 Minutes and PDF action tables listed completed actions (`DONE:`, `- [x]`) alongside open ones with nothing to tell them apart. That was deferred bug 9 until it was decided: list every action, open and done, and say which.

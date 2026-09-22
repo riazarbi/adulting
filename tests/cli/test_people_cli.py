@@ -170,11 +170,6 @@ def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     assert (vault.home / "people" / "Igor Novak.md").exists()
 
 
-def test_help_no_longer_mentions_prompts(vault):
-    r = people(vault, "new", "--help")
-    assert "prompt" not in r.stdout.lower()
-
-
 @pytest.mark.parametrize("name", ["../escaped", "a/b", ".hidden"])
 def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     """The name becomes people/<name>.md, so a `/` could write outside

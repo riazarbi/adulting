@@ -165,19 +165,28 @@ def test_rotate_to_min():
     assert L._rotate_to_min([]) == []
 
 
-def test_find_cycles_reports_each_cycle_once():
+def test_find_cycles():
     graph = {"a": ["b"], "b": ["c"], "c": ["a"], "d": ["d"], "e": ["zzz"]}
-    cycles = {tuple(L._rotate_to_min(c)) for c in L._find_cycles(graph)}
-    assert cycles == {("a", "b", "c"), ("d",)}
+    assert list(L._find_cycles(graph)) == [["a", "b", "c"], ["d"]]
 
 
 def test_cross_check_tasks():
     reg = registry_with([("aaaa0001", ["aaaa0002"]), ("aaaa0002", ["aaaa0001"]),
                          ("aaaa0003", ["deadbeef"]), ("aaaa0003", None)])
-    messages = [msg for _, _, msg in L.cross_check_tasks(reg)]
-    assert "task_anchor.uuid: 'aaaa0003' duplicated at n.md:4" in messages
-    assert "task_anchor.depends: 'deadbeef' does not resolve to any anchor" in messages
-    assert "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0001" in messages
+    assert list(L.cross_check_tasks(reg)) == [
+        (Path("n.md"), 3, "task_anchor.uuid: 'aaaa0003' duplicated at n.md:4"),
+        (Path("n.md"), 4, "task_anchor.uuid: 'aaaa0003' duplicated at n.md:3"),
+        (Path("n.md"), 3, "task_anchor.depends: 'deadbeef' does not resolve to any anchor"),
+        (Path("n.md"), 1, "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0001"),
+    ]
+
+
+def test_a_cycle_reached_twice_is_reported_once():
+    """A task listing the same dependency twice (`depends:x,x`) makes the
+    search meet the cycle twice; it is still one cycle."""
+    reg = registry_with([("aaaa0001", ["aaaa0002"]), ("aaaa0002", ["aaaa0001", "aaaa0001"])])
+    assert [msg for _, _, msg in L.cross_check_tasks(reg)] == [
+        "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0001"]
 
 
 def test_cross_check_hours_points_each_duplicate_at_the_others():

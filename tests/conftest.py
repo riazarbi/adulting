@@ -24,13 +24,12 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from harness import (PRODUCTION_VAULT, REPO_ROOT, command_path,
+from harness import (PRODUCTION_VAULT, command_path,
                      isolated_env)
 
 

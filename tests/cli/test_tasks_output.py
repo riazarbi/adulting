@@ -182,6 +182,8 @@ def test_show(board):
 
 
 def test_uuid_prefix_errors(board):
+    # DEFERRED BUG 7: the ambiguous-prefix error names files by basename,
+    # not by vault path.
     r = tasks(board, "show", "aaaa")
     assert (r.returncode, r.stderr) == (1, "error: uuid prefix 'aaaa' is ambiguous: "
                                            "aaaa0001 (2026-09-10-14-30-00.md:9), "
@@ -223,6 +225,8 @@ def test_mutations_print_and_rewrite_the_line(board):
 @pytest.mark.parametrize("argv, message", [
     (["set-description", "bbbb0001", "  "], "error: description is empty"),
     (["set-assignee", "bbbb0001", "Ghost"], "error: person 'Ghost' does not resolve to people/Ghost.md"),
+    # DEFERRED BUG 7: the date errors use a comma where every other error
+    # uses a semicolon.
     (["set-due", "bbbb0001", "soon"], "error: date must be YYYY-MM-DD, got 'soon'"),
     (["set-scheduled", "bbbb0001", "30/9"], "error: date must be YYYY-MM-DD, got '30/9'"),
     (["set-priority", "bbbb0001", "Z"], "error: priority must be H, M, or L; got 'Z'"),

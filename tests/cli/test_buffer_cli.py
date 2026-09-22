@@ -116,6 +116,7 @@ def test_add_ref_accepts_every_record_kind(v):
 
 
 def test_quiet_does_not_silence_add(v):
+    # DEFERRED BUG 6: --quiet does not silence the add-* commands.
     r = buf(v, "--quiet", "add-text", "Projects/SGB", "still printed")
     assert r.stdout.startswith("buffered: ")
 
@@ -233,7 +234,7 @@ def test_tend_clean_and_quiet(v):
 
 
 def test_tend_creates_an_empty_buffer_file(v):
-    """Quirk, pinned: tend on a vault with no buffer.md writes an empty one."""
+    # DEFERRED BUG 5: tend on a vault with no buffer.md writes an empty one.
     r = buf(v, "tend")
     assert (r.returncode, r.stdout) == (0, "buffer tended: 0 entries, 0 group(s).\n")
     assert buffer_text(v) == ""
@@ -297,7 +298,7 @@ def test_flush_empty_and_quiet(v):
     assert buf(v, "flush").stdout == "buffer is empty; nothing to flush.\n"
     write(v, "buffer.md", "- [[Projects/SGB]] TEXT: quiet <!--2026-09-10T09:00:00-->\n")
     r = buf(v, "--quiet", "flush")
-    # Quirk, pinned: --quiet silences flush but not the `tasks` ingest it runs.
+    # DEFERRED BUG 6: --quiet silences flush but not the task ingest it runs.
     assert r.stdout == "Ingested: 0.  Failed: 0.\n"
     assert "TEXT: quiet" in v.read("logs/Projects/SGB/2026-09-10.md")
 
@@ -360,6 +361,3 @@ def test_suggest_never_prompts_even_on_a_terminal(v):
     assert "- UNKNOWN: Draft the SGB scope note by 2026-09-30" in buffer_text(v)
     assert "ACTION" not in buffer_text(v)
 
-
-def test_suggest_help_no_longer_mentions_prompting(vault):
-    assert "prompt" not in buf(vault, "suggest", "--help").stdout.lower()

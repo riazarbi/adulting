@@ -510,17 +510,3 @@ def test_full_lifecycle(vault):
 
 
 # ---------- removed commands ----------
-
-def test_install_subcommand_gone(vault):
-    r = vault.run("install", cli="tasks")
-    assert r.returncode != 0
-
-
-def test_rebuild_subcommand_gone(vault):
-    r = vault.run("rebuild", cli="tasks")
-    assert r.returncode != 0
-
-
-def test_migrate_layout_subcommand_gone(vault):
-    r = vault.run("migrate-layout", cli="tasks")
-    assert r.returncode != 0

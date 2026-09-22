@@ -119,6 +119,7 @@ def cmd_log(args):
                       ' '.join(args.note).strip() if args.note else '', V.all_ids())
     append_payment(kind, name, p)
     report_logged(p, ref)
+    return 0
 
 
 # ---------- query ----------
@@ -163,10 +164,10 @@ def cmd_list(args):
     rows.sort(key=lambda r: (r['received'], r['thread']))
     if args.json:
         print(json.dumps([as_output(r) for r in rows], indent=2))
-        return
+        return 0
     if not rows:
         print("(no payments)")
-        return
+        return 0
     tw = max(len(r['thread']) for r in rows)
     aw = max(len(r['account']) for r in rows) or 1
     print(f"{'ID':<9} {'RECEIVED':<11} {'THREAD':<{tw}}  {'AMOUNT':>16}  "
@@ -175,6 +176,7 @@ def cmd_list(args):
         print(f"{r['id']:<9} {r['received']:<11} {r['thread']:<{tw}}  "
               f"{V.fmt_money(r['amount'], r['currency']):>16}  "
               f"{r['account']:<{aw}}  {r['note']}")
+    return 0
 
 
 def find_payment(pid):
@@ -189,9 +191,10 @@ def cmd_show(args):
     row = as_output(as_row(ref, p))
     if args.json:
         print(json.dumps(row, indent=2))
-        return
+        return 0
     for k in ('id', 'thread', 'received', 'amount', 'currency', 'account', 'note'):
         print(f"{k:<10} {row[k]}")
+    return 0
 
 
 def cmd_edit(args):
@@ -220,6 +223,7 @@ def cmd_edit(args):
 
     save(path, records, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
+    return 0
 
 
 def cmd_rm(args):
@@ -229,6 +233,7 @@ def cmd_rm(args):
     records = [x for x in V.read_records(path, FENCE, KEY) if x.get('id') != args.id]
     save(path, records, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
+    return 0
 
 
 # ---------- statement ----------
@@ -321,6 +326,7 @@ def cmd_pdf(args):
           f"paid {V.fmt_money(st['payments'], st['currency'])}, "
           f"balance {V.fmt_money(st['balance'], st['currency'])} "
           f"as at {st['as_of']}")
+    return 0
 
 
 def cmd_statement(args):
@@ -352,10 +358,10 @@ def cmd_statement(args):
                            'received': float(x['received']),
                            'outstanding': float(x['outstanding'])}
                           for x in rows], indent=2))
-        return
+        return 0
     if not rows:
         print("(nothing to report)")
-        return
+        return 0
     tw = max(len(x['thread']) for x in rows)
     print(f"{'THREAD':<{tw}}  {'BILLED':>16}  {'RECEIVED':>16}  {'OUTSTANDING':>16}")
     for x in rows:
@@ -373,14 +379,15 @@ def cmd_statement(args):
         print(f"{'TOTAL ' + ccy:<{tw}}  {V.fmt_money(t['b'], ccy):>16}  "
               f"{V.fmt_money(t['r'], ccy):>16}  "
               f"{V.fmt_money(t['b'] - t['r'], ccy):>16}")
+    return 0
 
 
 # ---------- main ----------
 
 def main():
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Record money received against threads.")
-    sub = p.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand', required=True)
 
     log = sub.add_parser('log', help="Record a receipt.")
     log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -393,46 +400,42 @@ def main():
     log.set_defaults(func=cmd_log)
 
     ls = sub.add_parser('list', help="List payments.")
-    ls.add_argument('thread', nargs='?')
-    ls.add_argument('--since')
-    ls.add_argument('--until')
-    ls.add_argument('--json', action='store_true')
+    ls.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(ls)
     ls.set_defaults(func=cmd_list)
 
     st = sub.add_parser('statement', help="Billed vs received, by thread and currency.")
-    st.add_argument('--thread')
-    st.add_argument('--since')
-    st.add_argument('--until')
+    st.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(st)
     st.add_argument('--as-of', help="Statement date, YYYY-MM-DD; drives aging (default: today).")
     st.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
-    st.add_argument('--json', action='store_true')
     st.set_defaults(func=cmd_statement)
 
     sh = sub.add_parser('show', help="Show one payment.")
-    sh.add_argument('id')
-    sh.add_argument('--json', action='store_true')
+    sh.add_argument('id', help="The payment's 8-character id, from `payments list`.")
+    sh.add_argument('--json', action='store_true', help='JSON output.')
     sh.set_defaults(func=cmd_show)
 
     ed = sub.add_parser('edit', help="Change one field of a payment.")
-    ed.add_argument('id')
-    ed.add_argument('--amount')
-    ed.add_argument('-c', '--currency')
-    ed.add_argument('-d', '--date')
-    ed.add_argument('-t', '--time')
-    ed.add_argument('-a', '--account')
-    ed.add_argument('-n', '--note', nargs='*')
+    ed.add_argument('id', help="The payment's 8-character id, from `payments list`.")
+    ed.add_argument('--amount', help="New amount received.")
+    ed.add_argument('-c', '--currency', help="New ISO currency code.")
+    ed.add_argument('-d', '--date', help="New date received, YYYY-MM-DD.")
+    ed.add_argument('-t', '--time', help="New time received, HH:MM.")
+    ed.add_argument('-a', '--account', help="New account it landed in.")
+    ed.add_argument('-n', '--note', nargs='*', help="New free-text note.")
     ed.set_defaults(func=cmd_edit)
 
     rm = sub.add_parser('rm', help="Delete a payment.")
-    rm.add_argument('id')
+    rm.add_argument('id', help="The payment's 8-character id, from `payments list`.")
     rm.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
     rm.set_defaults(func=cmd_rm)
 
-    emit_helpjson_if_requested(p)
-    args = p.parse_args()
-    args.func(args)
+    emit_helpjson_if_requested(parser)
+    args = parser.parse_args()
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

@@ -568,50 +568,52 @@ def main():
         help="'(Assignee) description' or just 'description'.")
     p_add.add_argument('--due', help='YYYY-MM-DD due date.')
     p_add.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
-    p_add.add_argument('--priority', choices=['H', 'M', 'L'])
+    p_add.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
     p_add.add_argument('--depends', action='append', default=[],
         help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p_add.set_defaults(func=cmd_add)
 
     p_done = sub.add_parser('done',
         help="Mark a task complete; rewrites source TASK->DONE and stamps end.")
-    p_done.add_argument('uuid')
+    p_done.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
     p_done.set_defaults(func=cmd_done)
 
     p_sd = sub.add_parser('set-description', help="Rewrite source body.")
-    p_sd.add_argument('uuid')
-    p_sd.add_argument('text')
+    p_sd.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_sd.add_argument('text', help="The new description.")
     p_sd.set_defaults(func=cmd_set_description)
 
     p_sa = sub.add_parser('set-assignee', help="Rewrite the (Assignee) prefix.")
-    p_sa.add_argument('uuid')
-    p_sa.add_argument('person')
+    p_sa.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_sa.add_argument('person', help="A person with a file in people/; `people/` before the name is allowed.")
     p_sa.set_defaults(func=cmd_set_assignee)
 
     p_sdue = sub.add_parser('set-due', help="Set due date (YYYY-MM-DD).")
-    p_sdue.add_argument('uuid')
-    p_sdue.add_argument('date')
+    p_sdue.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_sdue.add_argument('date', help="YYYY-MM-DD.")
     p_sdue.set_defaults(func=cmd_set_due)
 
     p_ssch = sub.add_parser('set-scheduled', help="Set scheduled date.")
-    p_ssch.add_argument('uuid')
-    p_ssch.add_argument('date')
+    p_ssch.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_ssch.add_argument('date', help="YYYY-MM-DD.")
     p_ssch.set_defaults(func=cmd_set_scheduled)
 
     p_sp = sub.add_parser('set-priority',
         help="Set priority H|M|L; writes [#X] in the visible portion.")
-    p_sp.add_argument('uuid')
-    p_sp.add_argument('priority')
+    p_sp.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_sp.add_argument('priority', help="H, M or L.")
     p_sp.set_defaults(func=cmd_set_priority)
 
     p_ad = sub.add_parser('add-depends', help="Add a depends entry.")
-    p_ad.add_argument('uuid')
-    p_ad.add_argument('dep_uuid', metavar='dep-uuid')
+    p_ad.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_ad.add_argument('dep_uuid', metavar='dep-uuid',
+        help="The uuid of the task this one waits on; any unique prefix will do.")
     p_ad.set_defaults(func=cmd_add_depends)
 
     p_rd = sub.add_parser('rm-depends', help="Remove a depends entry.")
-    p_rd.add_argument('uuid')
-    p_rd.add_argument('dep_uuid', metavar='dep-uuid')
+    p_rd.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p_rd.add_argument('dep_uuid', metavar='dep-uuid',
+        help="The dependency to remove; any prefix that picks out one of this task's dependencies.")
     p_rd.set_defaults(func=cmd_rm_depends)
 
     p_list = sub.add_parser('list', help="List pending tasks (formatted).")
@@ -631,7 +633,7 @@ def main():
     p_next.set_defaults(func=cmd_next)
 
     p_show = sub.add_parser('show', help="Detail view of one anchor.")
-    p_show.add_argument('uuid')
+    p_show.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
     p_show.set_defaults(func=cmd_show)
 
     emit_helpjson_if_requested(parser)

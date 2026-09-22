@@ -53,6 +53,7 @@ def cmd_new(args):
         encoding='utf-8',
     )
     print(f"created: {path}")
+    return 0
 
 
 def _resolve_person(arg):
@@ -73,6 +74,7 @@ def cmd_delete(args):
         V.die(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
+    return 0
 
 
 def cmd_list(args):
@@ -105,14 +107,15 @@ def cmd_list(args):
 
     if args.json:
         print(json.dumps(rows, indent=2))
-        return
+        return 0
     if not rows:
         print("(no matches)" if args.query else "(no people)")
-        return
+        return 0
     person_w = max(len(r['person']) for r in rows)
     print(f"{'PERSON':<{person_w}}  {'STATUS':<8}  CATEGORY")
     for r in rows:
         print(f"{r['person']:<{person_w}}  {r['status']:<8}  {r['category']}")
+    return 0
 
 
 def cmd_show(args):
@@ -129,6 +132,7 @@ def cmd_show(args):
         }, indent=2))
     else:
         sys.stdout.write(path.read_text(encoding='utf-8'))
+    return 0
 
 
 def main():
@@ -162,8 +166,8 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
-    args.func(args)
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

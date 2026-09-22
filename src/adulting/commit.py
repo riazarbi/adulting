@@ -12,6 +12,7 @@ checks out, or pushes — the only mutating git calls it makes are
 import argparse
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from adulting import vault as V
@@ -140,7 +141,7 @@ def cmd_review(args):
     entries = status_entries()
     if not entries:
         print("no uncommitted changes; working tree clean")
-        return
+        return 0
 
     out = ["Changed paths:"] + [describe(*e) for e in entries]
 
@@ -187,6 +188,7 @@ def cmd_review(args):
         out += lines
 
     print('\n'.join(out))
+    return 0
 
 
 def cmd_save(args):
@@ -200,7 +202,7 @@ def cmd_save(args):
     if not entries:
         # Not an error: there was simply nothing to do.
         print("nothing to commit; working tree clean")
-        return
+        return 0
 
     if args.dry_run:
         print("dry run — nothing staged, nothing committed.")
@@ -215,7 +217,7 @@ def cmd_save(args):
             print()
             for line in args.body.split('\n'):
                 print(f"  {line}")
-        return
+        return 0
 
     git('add', '-A')
     # --message and --body only ever reach git as the value of -m. git
@@ -231,6 +233,7 @@ def cmd_save(args):
     sha = git('rev-parse', '--short', 'HEAD').stdout.strip()
     print(f"committed {sha}: {args.message}")
     print(f"{len(entries)} path(s) staged and committed.")
+    return 0
 
 
 def main():
@@ -269,8 +272,8 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
-    args.func(args)
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

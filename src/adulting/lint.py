@@ -766,8 +766,8 @@ def main():
 
     if not args.quiet:
         print(f"\n{len(files)} file(s) checked. {total} violation(s).")
-    sys.exit(1 if total else 0)
+    return 1 if total else 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

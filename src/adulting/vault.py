@@ -68,6 +68,15 @@ PAYMENTS_FENCE = '```adulting-payments'
 RECORD_DIRS = [('hours', HOURS_FENCE), ('payments', PAYMENTS_FENCE)]
 
 
+# ---------- command-line flags ----------
+
+def add_window_flags(parser):
+    """--since, --until and --json, worded the same for every command."""
+    parser.add_argument('--since', metavar='YYYY-MM-DD', help='On or after this date.')
+    parser.add_argument('--until', metavar='YYYY-MM-DD', help='On or before this date.')
+    parser.add_argument('--json', action='store_true', help='JSON output.')
+
+
 # ---------- config ----------
 
 def read_config():

@@ -176,6 +176,7 @@ def cmd_new(args):
     for thread in threads:
         buffer_ref(thread, stem, topic)
     print(path)
+    return 0
 
 
 def cmd_list(args):
@@ -186,19 +187,21 @@ def cmd_list(args):
             [r['stem'], r['date'], r['type'], ', '.join(r['threads']), r['topic']]).lower()]
     if args.json:
         print(json.dumps(rows, indent=2))
-        return
+        return 0
     if not rows:
         print("(no matches)" if args.filter else "(no notes)")
-        return
+        return 0
     cells = [[r['stem'], r['date'] or '-', r['type'] or '-',
               ', '.join(r['threads']) or '-', r['topic']] for r in rows]
     widths = [max(len(row[i]) for row in cells) for i in range(4)]
     for row in cells:
         print('  '.join(cell.ljust(widths[i]) for i, cell in enumerate(row[:4])) + '  ' + row[4])
+    return 0
 
 
 def cmd_cat(args):
     sys.stdout.write(note_path(args.stem).read_text(encoding='utf-8'))
+    return 0
 
 
 def cmd_last(args):
@@ -206,6 +209,7 @@ def cmd_last(args):
     if not rows:
         V.die(f"no notes in {notes_dir()}")
     print(rows[-1]['path'])
+    return 0
 
 
 def cmd_copy(args):
@@ -220,6 +224,7 @@ def cmd_copy(args):
     lines = [line + ' COPY' if line.startswith('topic:') else line for line in lines]
     target.write_text('\n'.join(lines), encoding='utf-8')
     print(f"Copied {source.name} to {target.name}")
+    return 0
 
 
 def cmd_delete(args):
@@ -228,6 +233,7 @@ def cmd_delete(args):
         V.die(f"refusing to delete {path} without -y")
     path.unlink()
     print(f"deleted: {path}")
+    return 0
 
 
 def cmd_render(args):
@@ -257,6 +263,7 @@ def cmd_render(args):
         sys.stdout.flush()
         V.die(f"PDF render failed: {message}")
     print(pdf_path)
+    return 0
 
 
 def main():
@@ -314,8 +321,8 @@ def main():
     args = parser.parse_args()
     if args.subcommand != 'new':
         ingest_actions()
-    args.func(args)
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

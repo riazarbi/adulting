@@ -37,6 +37,7 @@ warning on stderr would cost the caller its stdout.
 
 import argparse
 import json
+import sys
 from datetime import timedelta
 
 from adulting.helpjson import emit_helpjson_if_requested
@@ -159,6 +160,7 @@ def cmd_log(args):
                         minutes, rate, currency, V.all_ids())
     append_entry(kind, name, entry)
     report_logged(entry, ref)
+    return 0
 
 
 # ---------- query ----------
@@ -205,16 +207,17 @@ def cmd_list(args):
     rows.sort(key=lambda r: (r['date'], r['time']))
     if args.json:
         print(json.dumps([as_output(r) for r in rows], indent=2))
-        return
+        return 0
     if not rows:
         print("(no entries)")
-        return
+        return 0
     tw = max(len(r['thread']) for r in rows)
     print(f"{'ID':<9} {'DATE':<11} {'THREAD':<{tw}}  {'DUR':>7}  {'AMOUNT':>14}  DESCRIPTION")
     for r in rows:
         print(f"{r['id']:<9} {r['date']:<11} {r['thread']:<{tw}}  "
               f"{V.fmt_duration(r['minutes']):>7}  "
               f"{V.fmt_money(r['amount'], r['currency']):>14}  {r['description']}")
+    return 0
 
 
 def cmd_report(args):
@@ -231,10 +234,10 @@ def cmd_report(args):
     if args.json:
         print(json.dumps([{**b, 'amount': float(b['amount']),
                            'hours': round(b['minutes'] / 60, 2)} for b in out], indent=2))
-        return
+        return 0
     if not out:
         print("(no entries)")
-        return
+        return 0
     tw = max(len(b['thread']) for b in out)
     print(f"{'THREAD':<{tw}}  {'ENTRIES':>7}  {'DURATION':>10}  {'AMOUNT':>16}")
     for b in out:
@@ -254,6 +257,7 @@ def cmd_report(args):
         label = ('TOTAL ' + ccy) if ccy else 'TOTAL unbilled'
         print(f"{label:<{tw}}  {'':>7}  {V.fmt_duration(t['minutes']):>10}  "
               f"{V.fmt_money(t['amount'], ccy):>16}")
+    return 0
 
 
 def find_entry(entry_id):
@@ -268,10 +272,11 @@ def cmd_show(args):
     row = as_output(as_row(ref, e))
     if args.json:
         print(json.dumps(row, indent=2))
-        return
+        return 0
     for k in ('id', 'thread', 'date', 'time', 'minutes', 'rate', 'currency',
               'amount', 'description'):
         print(f"{k:<12} {row[k]}")
+    return 0
 
 
 def cmd_edit(args):
@@ -309,6 +314,7 @@ def cmd_edit(args):
 
     save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
+    return 0
 
 
 def cmd_rm(args):
@@ -318,14 +324,15 @@ def cmd_rm(args):
     entries = [e for e in V.read_records(path, FENCE) if e.get('id') != args.id]
     save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     print(f"deleted {args.id}")
+    return 0
 
 
 # ---------- main ----------
 
 def main():
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Track consulting hours in the adulting vault.")
-    sub = p.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand', required=True)
 
     log = sub.add_parser('log', help="Append an entry.")
     log.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -340,46 +347,43 @@ def main():
     log.set_defaults(func=cmd_log)
 
     ls = sub.add_parser('list', help="List entries.")
-    ls.add_argument('thread', nargs='?')
-    ls.add_argument('--since', help="YYYY-MM-DD, inclusive.")
-    ls.add_argument('--until', help="YYYY-MM-DD, inclusive.")
-    ls.add_argument('--json', action='store_true')
+    ls.add_argument('thread', nargs='?', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(ls)
     ls.set_defaults(func=cmd_list)
 
     rep = sub.add_parser('report',
                          help="Totals by thread and currency, with unbilled "
                               "time totalled separately.")
-    rep.add_argument('--thread')
-    rep.add_argument('--since')
-    rep.add_argument('--until')
-    rep.add_argument('--json', action='store_true')
+    rep.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
+    V.add_window_flags(rep)
     rep.set_defaults(func=cmd_report)
 
     sh = sub.add_parser('show', help="Show one entry.")
-    sh.add_argument('id')
-    sh.add_argument('--json', action='store_true')
+    sh.add_argument('id', help="The entry's 8-character id, from `hours list`.")
+    sh.add_argument('--json', action='store_true', help='JSON output.')
     sh.set_defaults(func=cmd_show)
 
     ed = sub.add_parser('edit', help="Change one field of an entry.")
-    ed.add_argument('id')
-    ed.add_argument('--description', nargs='*')
-    ed.add_argument('-m', '--minutes', type=int)
-    ed.add_argument('-r', '--rate', type=int)
-    ed.add_argument('-c', '--currency')
-    ed.add_argument('-d', '--date')
-    ed.add_argument('-t', '--time')
+    ed.add_argument('id', help="The entry's 8-character id, from `hours list`.")
+    ed.add_argument('--description', nargs='*', help="New description.")
+    ed.add_argument('-m', '--minutes', type=int,
+                    help="New duration; the start stays where it is.")
+    ed.add_argument('-r', '--rate', type=int, help="New hourly rate; needs a currency.")
+    ed.add_argument('-c', '--currency', help="New ISO currency code.")
+    ed.add_argument('-d', '--date', help="Move to this day, YYYY-MM-DD; the duration is kept.")
+    ed.add_argument('-t', '--time', help="Move to this start time, HH:MM; the duration is kept.")
     ed.set_defaults(func=cmd_edit)
 
     rm = sub.add_parser('rm', help="Delete an entry.")
-    rm.add_argument('id')
+    rm.add_argument('id', help="The entry's 8-character id, from `hours list`.")
     rm.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
     rm.set_defaults(func=cmd_rm)
 
-    emit_helpjson_if_requested(p)
-    args = p.parse_args()
-    args.func(args)
+    emit_helpjson_if_requested(parser)
+    args = parser.parse_args()
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

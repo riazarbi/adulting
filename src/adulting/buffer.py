@@ -653,17 +653,17 @@ def main():
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     p_a = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
-    p_a.add_argument('text')
+    p_a.add_argument('text', help="The raw text to capture.")
     p_a.set_defaults(func=cmd_add)
 
     p_s = sub.add_parser('suggest', help="Propose a structured add-* for raw text; run it with -y, else store as UNKNOWN.")
-    p_s.add_argument('text')
+    p_s.add_argument('text', help="The raw text to suggest a structured entry for.")
     p_s.add_argument('-y', '--yes', action='store_true', help="Accept and run the suggestion.")
     p_s.set_defaults(func=cmd_suggest)
 
     p_at = sub.add_parser('add-text', help="Append a TEXT entry.")
-    p_at.add_argument('thread')
-    p_at.add_argument('text')
+    p_at.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p_at.add_argument('text', help="The observation to record.")
     p_at.set_defaults(func=cmd_add_text)
 
     p_ar = sub.add_parser('add-ref', help="Append a REF entry.")
@@ -671,29 +671,29 @@ def main():
                       help="File under this day instead of today. Use the "
                            "date the thing happened, not the date you are "
                            "recording it.")
-    p_ar.add_argument('thread')
+    p_ar.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     p_ar.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
                          "hours/<Kind>/<Thread>, payments/<Kind>/<Thread>, "
                          "or <Kind>/<Thread>.")
-    p_ar.add_argument('summary', nargs='?', default='')
+    p_ar.add_argument('summary', nargs='?', default='', help="Optional words shown after the link.")
     p_ar.set_defaults(func=cmd_add_ref)
 
     p_aa = sub.add_parser('add-action', help="Append an ACTION entry. Also reachable as `tasks add`.")
-    p_aa.add_argument('thread')
-    p_aa.add_argument('text')
+    p_aa.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
+    p_aa.add_argument('text', help="'(Assignee) description' or just 'description'.")
     p_aa.add_argument('--due', help='YYYY-MM-DD due date applied on flush+ingest.')
     p_aa.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
-    p_aa.add_argument('--priority', choices=['H', 'M', 'L'])
+    p_aa.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
     p_aa.add_argument('--depends', action='append', default=[],
                       help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p_aa.set_defaults(func=cmd_add_action)
 
     p_list = sub.add_parser('list', help="Show buffer with line numbers.")
-    p_list.add_argument('filter', nargs='?', default='')
+    p_list.add_argument('filter', nargs='?', default='', help="Only lines containing this text, ignoring case.")
     p_list.set_defaults(func=cmd_list)
 
     p_rm = sub.add_parser('rm', help="Remove a single line by line number.")
-    p_rm.add_argument('line_number', metavar='line-number')
+    p_rm.add_argument('line_number', metavar='line-number', help="The line's number, from `buffer list`.")
     p_rm.set_defaults(func=cmd_rm)
 
     p_tend = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")

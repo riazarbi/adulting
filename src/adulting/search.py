@@ -29,6 +29,7 @@ the frontmatter date is missing or malformed.
 
 import argparse
 import re
+import sys
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -368,10 +369,12 @@ def render_docs(rows):
 
 def cmd_notes(args):
     show_docs(note_records(), args, args.type)
+    return 0
 
 
 def cmd_logs(args):
     show_docs(log_records(), args, None)
+    return 0
 
 
 def show_docs(records, args, type_):
@@ -420,6 +423,7 @@ def cmd_activity(args):
         print(f"\nwindow: {since} to {until or 'today'}")
 
     emit(rows, args.json, render)
+    return 0
 
 
 def cmd_overview(args):
@@ -477,6 +481,7 @@ def cmd_overview(args):
         print(json.dumps(data, indent=2))
     else:
         render(None)
+    return 0
 
 
 def cmd_stream(args):
@@ -525,11 +530,11 @@ def cmd_stream(args):
     if args.json:
         import json
         print(json.dumps(rows, indent=2))
-        return
+        return 0
     if not rows:
         print("(no events)")
         print(f"\nwindow: {since} to {args.until or 'today'}")
-        return
+        return 0
 
     kw = max(len(e['kind']) for e in rows)
     tw = min(max(len(e['thread']) for e in rows), 30)
@@ -544,17 +549,13 @@ def cmd_stream(args):
     print(f"\n{total} event(s); window {since} to {args.until or 'today'}")
     if total > len(rows):
         print(f"{total - len(rows)} more not shown — raise --limit")
+    return 0
 
 
 def main():
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Search notes and logs, and summarise thread activity.")
-    sub = p.add_subparsers(dest='cmd', required=True)
-
-    def add_range(sp):
-        sp.add_argument('--since', metavar='YYYY-MM-DD', help='On or after this date.')
-        sp.add_argument('--until', metavar='YYYY-MM-DD', help='On or before this date.')
-        sp.add_argument('--json', action='store_true', help='JSON output.')
+    sub = parser.add_subparsers(dest='subcommand', required=True)
 
     n = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
     n.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -562,7 +563,7 @@ def main():
     n.add_argument('--text', help='Case-insensitive literal, over topic and body.')
     n.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                    help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
-    add_range(n)
+    V.add_window_flags(n)
     n.set_defaults(func=cmd_notes)
 
     l = sub.add_parser('logs', help="Find daily logs by thread, date or text.")
@@ -570,20 +571,20 @@ def main():
     l.add_argument('--text', help='Case-insensitive literal, over the entry lines.')
     l.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
                    help=f'Max results (default {DEFAULT_LIMIT}; 0 for all).')
-    add_range(l)
+    V.add_window_flags(l)
     l.set_defaults(func=cmd_logs)
 
     a = sub.add_parser('activity',
                        help="Rank threads by what happened in a window.")
     a.add_argument('--thread', help='Limit to one thread.')
-    add_range(a)
+    V.add_window_flags(a)
     a.set_defaults(func=cmd_activity)
 
     o = sub.add_parser('overview', help="The whole picture of one thread.")
     o.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     o.add_argument('--limit', type=int, default=5,
                    help='Recent items to list (default 5; 0 for all).')
-    add_range(o)
+    V.add_window_flags(o)
     o.set_defaults(func=cmd_overview)
 
     st = sub.add_parser('stream',
@@ -598,13 +599,13 @@ def main():
                     help='Oldest first (default is newest first).')
     st.add_argument('--limit', type=int, default=100,
                     help='Max events (default 100; 0 for all).')
-    add_range(st)
+    V.add_window_flags(st)
     st.set_defaults(func=cmd_stream)
 
-    emit_helpjson_if_requested(p)
-    args = p.parse_args()
-    args.func(args)
+    emit_helpjson_if_requested(parser)
+    args = parser.parse_args()
+    return args.func(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

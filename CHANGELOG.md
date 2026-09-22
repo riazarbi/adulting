@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, parts C2 and C3: one main() shape, help for every argument
+
+- **Every command has the same `main()`:** it builds a parser named `parser`, with subcommands under `dest='subcommand'`, and ends `return args.func(args)` under `sys.exit(main())`. `notes`, `commit`, `hours`, `payments`, `people`, `search` and `threads` used to drop the result, and `lint` exited from inside `main`. Every `cmd_*` now returns an int: 56 bare or missing returns became `return 0`. Exit codes are unchanged, because None already exited 0.
+- **One `--since`/`--until`/`--json` helper, `vault.add_window_flags`,** for `hours list/report`, `payments list/statement` and every `search` subcommand; it replaces `search`'s local `add_range`.
+- **Every argument has help text.** 62 had none, mostly in `hours` and `payments` edit/show/rm, the `tasks` set-* commands and the `buffer` add commands. `--help`, the harvested manual and the agent tool definitions all now describe them. Each sentence was checked against the code, e.g. `hours edit -d` keeps the duration and `tasks rm-depends` matches a prefix of this task's dependencies first.
+- No behaviour change beyond the help text. **680 passing.** `dev/ci generate` will pick the new help text up into MANUAL.md and dev/tools the next time it runs.
+
 ## 2026-09-22 - review fixes, parts C6 and C7: comments that say what the code does
 
 - **Stale comments rewritten.** Covered: `buffer`'s module docstring and flush comments, which still mentioned a task backend, taskwarrior and a subprocess; `payments` and `statement_pdf`, which named the old `_statement` module; a `suggester` comment that promised ranking done elsewhere; and `vault`'s docstring, which said it served only `hours` and `payments`.

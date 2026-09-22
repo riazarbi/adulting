@@ -727,7 +727,7 @@ def main():
     p_aa.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
     p_aa.add_argument('--priority', choices=['H', 'M', 'L'])
     p_aa.add_argument('--depends', action='append', default=[],
-                      help='8-char UUID prefix; repeatable for multiple deps.')
+                      help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p_aa.set_defaults(func=cmd_add_action)
 
     p_list = sub.add_parser('list', help="Show buffer with line numbers.")

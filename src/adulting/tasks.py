@@ -151,12 +151,19 @@ def discover_source_files():
                     yield Path(root) / fname
 
 
+def read_source(path):
+    """A note or log's text, or None if it cannot be read as UTF-8."""
+    try:
+        return path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def walk_anchors():
     """Yield every parsed Anchor in the vault."""
     for path in discover_source_files():
-        try:
-            text = path.read_text(encoding='utf-8')
-        except OSError:
+        text = read_source(path)
+        if text is None:
             continue
         for i, line in enumerate(text.split('\n')):
             a = parse_anchor(line, path, i)
@@ -250,9 +257,8 @@ def build_threads_cache():
     """Walk all source files once, return {source_relpath: [threads]}."""
     cache = {}
     for f in discover_source_files():
-        try:
-            text = f.read_text(encoding='utf-8')
-        except OSError:
+        text = read_source(f)
+        if text is None:
             continue
         rel = str(f.relative_to(vault_home()).with_suffix(''))
         cache[rel] = parse_frontmatter_threads(text)
@@ -266,10 +272,9 @@ def threads_for(anchor: Anchor, cache: dict) -> list:
 
 # ---------- ingest ----------
 
-def find_action_lines(path: Path):
+def find_action_lines(text):
     """Yield (line_no, raw_line, assignee, body, attr_block) for each
-    ACTION: in a source file."""
-    text = path.read_text(encoding='utf-8')
+    ACTION: in a source file's text."""
     for i, line in enumerate(text.split('\n')):
         m = ACTION_RE.match(line)
         if m:
@@ -319,10 +324,14 @@ def cmd_default(args):
     """No subcommand: walk notes/logs and ingest each ACTION: line."""
     existing = {a.uuid for a in walk_anchors()}
     plan = []
+    unreadable = []
     for path in discover_source_files():
-        text = path.read_text(encoding='utf-8')
+        text = read_source(path)
+        if text is None:
+            unreadable.append((str(path), ["file is not valid UTF-8; skipped"]))
+            continue
         threads = parse_frontmatter_threads(text)
-        for i, raw_line, assignee, body, attr_block in find_action_lines(path):
+        for i, raw_line, assignee, body, attr_block in find_action_lines(text):
             errors = []
             if not body:
                 errors.append("missing description")
@@ -340,13 +349,13 @@ def cmd_default(args):
             errors.extend(attr_errs)
             plan.append((path, i, assignee, body, attrs, errors))
 
-    if not plan:
+    if not plan and not unreadable:
         if not args.quiet:
             print("Ingested: 0.  Failed: 0.")
         return 0
 
     succeeded = 0
-    failed = []
+    failed = list(unreadable)
     for path, i, assignee, body, attrs, errors in plan:
         prefix = f"{path}:{i + 1}"
         if errors:
@@ -497,6 +506,16 @@ def cmd_add_depends(args):
 
 def cmd_rm_depends(args):
     anchor = find_anchor(args.uuid)
+    # Match against the dependencies first: the task depended on may have
+    # been deleted, and a dangling dependency must still be removable.
+    prefix = args.dep_uuid.lower()
+    listed = [d for d in anchor.depends if d.startswith(prefix)]
+    if len(listed) > 1:
+        die(f"uuid prefix {args.dep_uuid!r} is ambiguous: {', '.join(listed)}")
+    if listed:
+        mutate_anchor(anchor, depends=tuple(d for d in anchor.depends if d != listed[0]))
+        print(f"{anchor.uuid} no longer depends on {listed[0]}")
+        return 0
     dep = find_anchor(args.dep_uuid)
     new_deps = tuple(d for d in anchor.depends if d != dep.uuid)
     if new_deps == anchor.depends:
@@ -619,7 +638,7 @@ def main():
     p_add.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
     p_add.add_argument('--priority', choices=['H', 'M', 'L'])
     p_add.add_argument('--depends', action='append', default=[],
-        help='8-char UUID prefix; repeatable.')
+        help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p_add.set_defaults(func=cmd_add)
 
     p_done = sub.add_parser('done',

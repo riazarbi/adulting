@@ -457,8 +457,9 @@ def cmd_overview(args):
         anchors['open'] += len(re.findall(r'^TASK:', r['body'], re.M))
         anchors['done'] += len(re.findall(r'^DONE:', r['body'], re.M))
 
-    recent = sorted(notes + logs, key=lambda r: (r['date'], r['path']),
-                    reverse=True)[:args.limit or 5]
+    recent = sorted(notes + logs, key=lambda r: (r['date'], r['path']), reverse=True)
+    if args.limit:  # 0 means all, as for every other --limit
+        recent = recent[:args.limit]
 
     data = {
         'thread': thread,
@@ -601,7 +602,7 @@ def main():
     o = sub.add_parser('overview', help="The whole picture of one thread.")
     o.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     o.add_argument('--limit', type=int, default=5,
-                   help='Recent items to list (default 5).')
+                   help='Recent items to list (default 5; 0 for all).')
     add_range(o)
     o.set_defaults(func=cmd_overview)
 

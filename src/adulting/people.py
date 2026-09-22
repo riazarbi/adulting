@@ -48,6 +48,8 @@ def cmd_new(args):
     name = args.name.strip()
     if not name:
         sys.exit("empty name")
+    if not V.is_plain_name(name):
+        sys.exit(f"name {name!r} cannot contain '/' or start with '.'")
 
     people_dir().mkdir(parents=True, exist_ok=True)
     path = people_dir() / f"{name}.md"

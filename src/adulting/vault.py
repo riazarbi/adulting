@@ -212,6 +212,12 @@ def thread_ref(kind, name):
     return f"{KIND_DIRS[kind]}/{name}"
 
 
+def is_plain_name(name):
+    """True if `name` can become <name>.md inside its folder: no `/`, which
+    would reach outside it, and no leading `.`, which would hide the file."""
+    return '/' not in name and not name.startswith('.')
+
+
 def is_thread(ref):
     """True if `ref` is exactly the `Kind/Name` of a thread file. Checked
     against the files in threads/, not by asking the filesystem, so case

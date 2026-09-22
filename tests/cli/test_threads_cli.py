@@ -184,3 +184,13 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(v):
 def test_help_no_longer_mentions_prompts(vault):
     r = threads(vault, "new", "--help")
     assert "prompt" not in r.stdout.lower()
+
+
+@pytest.mark.parametrize("name", ["../escaped", "a/b", ".hidden"])
+def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
+    """The name becomes threads/<Kind>/<name>.md, so a `/` could write
+    outside threads/ (or crash), and a leading `.` would make a hidden file."""
+    r = threads(vault, "new", *FLAGS, "--name", name)
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"name {name!r} cannot contain '/' or start with '.'\n"
+    assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []

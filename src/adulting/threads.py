@@ -43,6 +43,8 @@ def cmd_new(args):
     name = args.name.strip()
     if not name:
         sys.exit("empty name")
+    if not V.is_plain_name(name):
+        sys.exit(f"name {name!r} cannot contain '/' or start with '.'")
 
     # Billing defaults for `hours`. Optional -- most threads are never billed.
     currency = (args.currency or '').strip().upper()

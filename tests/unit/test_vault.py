@@ -221,3 +221,10 @@ def test_is_thread_wants_the_exact_kind_and_name(threads_dir):
     assert V.is_thread("Projects/SGB") and V.is_thread("Topics/SGB")
     for ref in ("SGB", "projects/SGB", "Projects/sgb", "People/Riaz", "Projects/Alpha.md", ""):
         assert not V.is_thread(ref), ref
+
+
+def test_is_plain_name():
+    for name in ("SGB", "Riaz Arbi", "AXA DORA", "José Núñez", "a.b"):
+        assert V.is_plain_name(name), name
+    for name in ("../x", "a/b", "/abs", ".hidden", "."):
+        assert not V.is_plain_name(name), name

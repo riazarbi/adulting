@@ -13,13 +13,13 @@ answer, the whole suggestion collapses to UNKNOWN (`add`) rather than
 guessing. Rejection is free downstream, so we prefer to bail than mislead.
 """
 
-import argparse
 import json
 import math
 import re
 import sys
 from datetime import date, timedelta
 
+from adulting import vault as V
 from adulting.vault import vault_home
 
 
@@ -593,15 +593,20 @@ def suggest(raw_text, today=None, threads=None, people=None, thread_index=None, 
 # ---------- CLI ----------
 
 def main():
-    parser = argparse.ArgumentParser(description="Rules-only capture suggester.")
+    parser = V.command_parser('suggester', "Rules-only capture suggester.")
     parser.add_argument('text', help="Raw capture string.")
     parser.add_argument('--today', help="Override today's date (YYYY-MM-DD).")
     args = parser.parse_args()
-    today = date.fromisoformat(args.today) if args.today else date.today()
-    out = suggest(args.text, today=today)
-    json.dump(out, sys.stdout, indent=2)
+    today = date.today()
+    if args.today:
+        try:
+            today = date.fromisoformat(args.today)
+        except ValueError:
+            V.die(f"bad --today {args.today!r}; expected YYYY-MM-DD")
+    json.dump(suggest(args.text, today=today), sys.stdout, indent=2)
     sys.stdout.write('\n')
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

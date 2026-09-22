@@ -9,7 +9,6 @@ checks out, or pushes — the only mutating git calls it makes are
 `git add` and `git commit`.
 """
 
-import argparse
 import os
 import subprocess
 import sys
@@ -236,8 +235,8 @@ def cmd_save(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=(
+    parser = V.command_parser(
+        'commit', (
             "Review uncommitted vault changes, then stage and commit them.\n"
             "\n"
             "Two steps, used in order: run `review` to see everything that has\n"

@@ -20,7 +20,6 @@ in the thread's daily log on the next `buffer flush`, as `notes new` and
 buffer can be written.
 """
 
-import argparse
 import json
 import sys
 from datetime import date, datetime
@@ -304,7 +303,7 @@ def one_thread_statement(thread_arg, as_of):
         if r != ref or not pm.get('received'):
             continue
         paid.append({'on': V.local(pm['received']).date(),
-                     'amount': V.dec(pm.get('amount', 0)),
+                     'amount': V.cents(pm.get('amount', 0)),
                      'account': pm.get('account', '')})
 
     st = S.build(ref, currency, entries, paid, as_of)
@@ -345,7 +344,7 @@ def cmd_statement(args):
     for _, ref, p in collect(args.thread, args.since, until):
         key = (ref, p.get('currency', ''))
         recv.setdefault(key, V.dec(0))
-        recv[key] += V.dec(p.get('amount', 0))
+        recv[key] += V.cents(p.get('amount', 0))
 
     rows = []
     for key in sorted(set(bill) | set(recv)):
@@ -386,8 +385,8 @@ def cmd_statement(args):
 # ---------- main ----------
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Record money received against threads.")
+    parser = V.command_parser(
+        'payments', "Record money received against threads.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     log = sub.add_parser('log', help="Record a receipt.")

@@ -86,3 +86,24 @@ def test_threads_cache_and_resolvers(tasks_home):
     cache = T.build_threads_cache()
     assert cache["notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
     assert T.threads_for(T.find_anchor("aaaa0002"), cache) == ["Projects/SGB"]
+
+
+def test_ingest_returns_what_it_did_and_prints_nothing(tasks_home, capsys):
+    note = tasks_home / "notes" / "2026-01-05-00-00-00.md"
+    note.write_text('---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: (Riaz Arbi) Draft it\nACTION:  \n')
+    ingested, failed = T.ingest()
+    [(uuid, where, body, line)] = ingested
+    assert (where, body) == (f"{note}:6", "Draft it")
+    assert line == f"TASK: (Riaz Arbi) Draft it <!--{uuid} entry:{T.today_iso()}-->  "
+    assert failed == [(f"{note}:7", ["missing description"])]
+    assert note.read_text().split("\n")[5] == line
+    assert capsys.readouterr() == ("", "")
+
+
+def test_ingest_dry_run_writes_nothing(tasks_home):
+    note = tasks_home / "notes" / "2026-01-05-00-00-00.md"
+    text = '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: Draft it\n'
+    note.write_text(text)
+    ingested, failed = T.ingest(dry_run=True)
+    assert (len(ingested), failed) == (1, [])
+    assert note.read_text() == text

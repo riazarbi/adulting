@@ -678,3 +678,18 @@ def test_hours_rate_must_be_an_integer_and_one_block_only(vault):
         f"{vault.home}/hours/Projects/SGB.md:8: hours_file: more than one tracker block",
         f"{vault.home}/hours/Projects/SGB.md:8: hours_file: entries[0].rate: 2.5 is not an integer",
     ]
+
+
+def test_links_and_assignees_must_match_the_files_case(vault):
+    """Checked against the files in the vault, not by asking the filesystem,
+    so a wrong case is reported on macOS as it is on Linux."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_person("Riaz Arbi")
+    p = vault.write_note("2026-09-10-14-30-00", "ACTION: (riaz arbi) Draft it",
+                         threads=["Projects/sgb"], type_="Meeting")
+    p.write_text(p.read_text().replace("---\n\n", 'people:\n  - "[[people/riaz arbi]]"\n---\n\n', 1))
+    assert violations(lint(vault)) == [
+        f"{p}:0: threads: wikilink '[[Projects/sgb]]' does not resolve",
+        f"{p}:0: people: wikilink '[[people/riaz arbi]]' does not resolve",
+        f"{p}:11: ACTION: assignee 'riaz arbi' does not resolve to people/riaz arbi.md",
+    ]

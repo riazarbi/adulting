@@ -98,6 +98,7 @@ def test_cat_accepts_a_trailing_md(notes_vault):
     ("notes/2026-09-10-14-30-00", "notes: error: give a note stem like 2026-09-10-14-30-00, "
                                   "got 'notes/2026-09-10-14-30-00'\n"),
     ("", "notes: error: give a note stem like 2026-09-10-14-30-00, got ''\n"),
+    (".hidden", "notes: error: give a note stem like 2026-09-10-14-30-00, got '.hidden'\n"),
 ])
 def test_bad_stems(notes_vault, stem, message):
     r = notes(notes_vault, "cat", stem)

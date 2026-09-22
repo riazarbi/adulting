@@ -25,7 +25,6 @@ Subcommands:
   show <uuid>                    detail view
 """
 
-import argparse
 import os
 import re
 import sys
@@ -166,11 +165,20 @@ def walk_anchors():
                 yield a
 
 
+def prefix_of(raw):
+    """A uuid prefix as typed, lower-cased. An empty one would match
+    everything, so it is refused."""
+    p = raw.strip().lower()
+    if not p:
+        V.die("give a uuid prefix; got an empty one")
+    return p
+
+
 def find_anchor(uuid_prefix):
     """Resolve a uuid prefix to a single anchor. Dies on not-found or
     ambiguous. Prefix matches against the 8-char uuid stored in the
     anchor — any prefix length is accepted (1..8)."""
-    p = uuid_prefix.lower()
+    p = prefix_of(uuid_prefix)
     hits = [a for a in walk_anchors() if a.uuid.startswith(p)]
     if not hits:
         V.die(f"no task found with uuid prefix {uuid_prefix!r}")
@@ -251,18 +259,25 @@ def find_action_lines(text):
 
 
 def cmd_default(args):
-    return ingest(args.dry_run, args.quiet)
+    try:
+        ingested, failed = ingest(args.dry_run)
+    except OSError as e:
+        V.die(str(e))
+    return report_ingest(ingested, failed, args.dry_run, args.quiet)
 
 
-def ingest(dry_run=False, quiet=False):
-    """No subcommand: walk notes/logs and ingest each ACTION: line."""
+def ingest(dry_run=False):
+    """Walk notes and logs and turn each valid ACTION: line into a TASK
+    anchor in place; with dry_run, write nothing. Returns (ingested, failed):
+    ingested is a list of (uuid, "path:line", body, anchor line), failed a
+    list of ("path:line", [errors]) for the lines left as ACTION:."""
     existing = {a.uuid for a in walk_anchors()}
     plan = []
-    unreadable = []
+    failed = []
     for path in discover_source_files():
         text = read_source(path)
         if text is None:
-            unreadable.append((str(path), ["file is not valid UTF-8; skipped"]))
+            failed.append((str(path), ["file is not valid UTF-8; skipped"]))
             continue
         threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
         for i, raw_line, assignee, body, attr_block in find_action_lines(text):
@@ -283,13 +298,7 @@ def ingest(dry_run=False, quiet=False):
             errors.extend(attr_errs)
             plan.append((path, i, assignee, body, attrs, errors))
 
-    if not plan and not unreadable:
-        if not quiet:
-            print("Ingested: 0.  Failed: 0.")
-        return 0
-
-    succeeded = 0
-    failed = list(unreadable)
+    ingested = []
     for path, i, assignee, body, attrs, errors in plan:
         prefix = f"{path}:{i + 1}"
         if errors:
@@ -309,20 +318,29 @@ def ingest(dry_run=False, quiet=False):
             depends=tuple(attrs.get('depends', [])),
         )
         new_line = format_anchor(anchor)
-        if dry_run:
-            if not quiet:
-                print(f"would: {new_line}")
-            continue
-        lines = path.read_text(encoding='utf-8').split('\n')
-        lines[i] = new_line
-        tmp = path.with_suffix(path.suffix + '.tmp')
-        tmp.write_text('\n'.join(lines), encoding='utf-8')
-        os.replace(tmp, path)
-        succeeded += 1
-        if not quiet:
-            short = body[:60] + ('...' if len(body) > 60 else '')
-            print(f"ingested: {u}  {prefix}  {short}")
+        if not dry_run:
+            lines = path.read_text(encoding='utf-8').split('\n')
+            lines[i] = new_line
+            tmp = path.with_suffix(path.suffix + '.tmp')
+            tmp.write_text('\n'.join(lines), encoding='utf-8')
+            os.replace(tmp, path)
+        ingested.append((u, prefix, body, new_line))
+    return ingested, failed
 
+
+def report_ingest(ingested, failed, dry_run, quiet):
+    """Print what ingest did, as `tasks` does. Returns 1 if any line failed."""
+    if not ingested and not failed:
+        if not quiet:
+            print("Ingested: 0.  Failed: 0.")
+        return 0
+    if not quiet:
+        for u, prefix, body, new_line in ingested:
+            if dry_run:
+                print(f"would: {new_line}")
+            else:
+                short = body[:60] + ('...' if len(body) > 60 else '')
+                print(f"ingested: {u}  {prefix}  {short}")
     if failed:
         print(file=sys.stderr)
         print(f"{len(failed)} action(s) NOT ingested (left as ACTION: in "
@@ -331,9 +349,9 @@ def ingest(dry_run=False, quiet=False):
             for e in errs:
                 print(f"  {p}: {e}", file=sys.stderr)
         print(file=sys.stderr)
-    if not quiet:
-        if succeeded or failed:
-            print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
+    succeeded = 0 if dry_run else len(ingested)
+    if not quiet and (succeeded or failed):
+        print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
     return 1 if failed else 0
 
 
@@ -343,8 +361,8 @@ def cmd_add(args):
     """`tasks add` is `buffer add-action` under another name: the ACTION is
     buffered, and becomes a task on the next flush and ingest."""
     from adulting import buffer  # here, not at the top: buffer imports tasks
-    return buffer.buffer_action(args.thread, args.text, args.due,
-                                args.scheduled, args.priority, args.depends)
+    return buffer.buffered(buffer.buffer_action, args.thread, args.text, args.due,
+                           args.scheduled, args.priority, args.depends)
 
 
 # ---------- subcommand: done ----------
@@ -440,7 +458,7 @@ def cmd_rm_depends(args):
     anchor = find_anchor(args.uuid)
     # Match against the dependencies first: the task depended on may have
     # been deleted, and a dangling dependency must still be removable.
-    prefix = args.dep_uuid.lower()
+    prefix = prefix_of(args.dep_uuid)
     listed = [d for d in anchor.depends if d.startswith(prefix)]
     if len(listed) > 1:
         V.die(f"uuid prefix {args.dep_uuid!r} is ambiguous: {', '.join(listed)}")
@@ -550,8 +568,8 @@ def cmd_show(args):
 # ---------- main ----------
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Bridge ACTION lines into source TASK anchors; "
+    parser = V.command_parser(
+        'tasks', "Bridge ACTION lines into source TASK anchors; "
                     "expose anchor mutations as subcommands.")
     parser.add_argument('--dry-run', action='store_true',
                         help="(default invocation only) Show what would "

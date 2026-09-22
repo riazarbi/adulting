@@ -473,3 +473,29 @@ def test_entries_on_different_days_split_across_log_files(vault):
     assert days == ["2026-08-01", "2026-08-09"], days
 
 
+
+
+@pytest.fixture
+def broken(hours_vault):
+    """A hand-edited entry with a rate but no currency."""
+    hours_vault.write_hours_file("Topics", "Wellness", currency="", entries=[{
+        "name": "Run", "id": "bbbb0001", "rate": 900,
+        "startTime": "2026-08-06T04:30:00.000Z", "endTime": "2026-08-06T05:00:00.000Z"}])
+    return hours_vault
+
+
+def test_edit_names_what_is_wrong_with_an_entry_it_cannot_keep(broken):
+    before = broken.snapshot()
+    r = hours(broken, "edit", "bbbb0001", "-m", "45")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == ("hours: error: entry bbbb0001 has a rate but no currency; "
+                        "pass --currency, or --rate 0 to leave it unbilled\n")
+    assert broken.snapshot() == before
+
+
+@pytest.mark.parametrize("fix, rate, currency", [(["-c", "zar"], 900, "ZAR"), (["--rate", "0"], 0, None)])
+def test_edit_can_repair_an_entry_with_a_rate_but_no_currency(broken, fix, rate, currency):
+    r = hours(broken, "edit", "bbbb0001", "-m", "45", *fix)
+    assert (r.returncode, r.stderr) == (0, "")
+    e = stored(broken, "bbbb0001")
+    assert (e["rate"], e.get("currency"), e["endTime"]) == (rate, currency, "2026-08-06T05:15:00.000Z")

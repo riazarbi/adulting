@@ -22,7 +22,7 @@ from pathlib import Path
 
 from adulting import vault as V
 
-CENT = Decimal('0.01')
+CENT = V.CENT
 
 
 def money(amount, currency):

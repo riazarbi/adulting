@@ -443,3 +443,17 @@ def test_a_backdated_payment_refs_into_that_days_log(vault):
     assert logs == ["2026-08-04.md"]
     assert re.fullmatch(r"REF: \[\[payments/Projects/SANA\]\] 15000 ZAR received \([0-9a-f]{8}\)",
                         vault.lines("logs/Projects/SANA/2026-08-04.md")[-2])
+
+
+def test_receipts_are_rounded_to_the_cent_before_they_are_summed(vault):
+    """As charges are, so the statement agrees with the receipts `list`
+    shows. Two hand-edited receipts of 1.005 list as 1 ZAR each, and used to
+    total 2.01 on the statement."""
+    vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
+    hrs(vault, "log", "SANA", "Work", "-m", "60", "-d", "2026-07-01", "-t", "09:00")
+    vault.write_payments_file("Projects", "SANA", payments=[
+        {"id": "cccc0001", "received": "2026-07-20T08:00:00.000Z", "amount": 1.005, "currency": "ZAR"},
+        {"id": "cccc0002", "received": "2026-07-21T08:00:00.000Z", "amount": 1.005, "currency": "ZAR"}])
+    assert [line.split()[3] for line in pay(vault, "list").stdout.splitlines()[1:]] == ["1", "1"]
+    assert pay(vault, "statement").stdout.splitlines()[1].split() == [
+        "Projects/SANA", "2500", "ZAR", "2", "ZAR", "2498", "ZAR"]

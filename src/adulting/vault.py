@@ -9,6 +9,7 @@ JSON inside a fenced code block. Only the fence name and the record shape
 differ.
 """
 
+import argparse
 import difflib
 import json
 import os
@@ -29,9 +30,21 @@ def vault_home():
 
 # ---------- errors ----------
 
+_program = None
+
+
+def command_parser(prog, description, **options):
+    """The argument parser for a command. Its name is also the one errors
+    and warnings start with, however the command was started."""
+    global _program
+    _program = prog
+    return argparse.ArgumentParser(prog=prog, description=description, **options)
+
+
 def program():
-    """The running command's name, found the way argparse finds it."""
-    return os.path.basename(sys.argv[0])
+    """The running command's name: the one its parser was given, else the
+    one argparse would find."""
+    return _program or os.path.basename(sys.argv[0])
 
 
 def die(msg, code=1):
@@ -476,12 +489,25 @@ DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
 
 
+def vault_file(rel):
+    """The path of the vault file `rel` (e.g. 'people/Riaz Arbi.md') if it
+    exists with exactly that spelling, else None. Each part is looked up in
+    its folder's listing rather than by asking the filesystem, so case
+    matters on macOS as it does on Linux, and `..` cannot leave the vault."""
+    path = vault_home()
+    for part in rel.split('/'):
+        if part in ('', '.', '..') or not path.is_dir() or part not in os.listdir(path):
+            return None
+        path = path / part
+    return path if path.is_file() else None
+
+
 def person_exists(name):
-    """True if people/<name>.md exists. No name means nobody is assigned,
-    which is fine."""
+    """True if people/<name>.md exists, spelt exactly so. No name means
+    nobody is assigned, which is fine."""
     if not name:
         return True
-    return (vault_home() / 'people' / f"{name}.md").exists()
+    return vault_file(f"people/{name}.md") is not None
 
 
 def parse_action_attrs(tokens):
@@ -574,11 +600,20 @@ def dec(x):
     return Decimal(str(x))
 
 
+CENT = Decimal('0.01')
+
+
+def cents(x):
+    """A JSON number as Decimal, rounded to the cent. Receipts are rounded
+    before they are summed, as charges are, so totals agree with the lines."""
+    return dec(x).quantize(CENT)
+
+
 def fmt_money(amount, currency):
     """Money as text. A currency-less amount is unbilled time, not zero money."""
     if not currency:
         return 'unbilled'
-    q = Decimal(amount).quantize(Decimal('0.01'))
+    q = Decimal(amount).quantize(CENT)
     whole = format(q, 'f').rstrip('0').rstrip('.')
     return f"{whole or '0'} {currency}"
 

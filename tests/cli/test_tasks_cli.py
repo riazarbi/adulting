@@ -627,3 +627,26 @@ def test_full_lifecycle(vault):
     # Migrated file passes lint.
     lint = vault.run(cli="lint")
     assert lint.returncode == 0, lint.stdout
+
+
+@pytest.mark.parametrize("argv", [["rm-depends", "aaaa0003", ""], ["rm-depends", "aaaa0003", "  "],
+                                  ["add-depends", "aaaa0003", ""], ["show", ""]])
+def test_an_empty_uuid_prefix_is_refused(board, argv):
+    """An empty prefix matches everything: `rm-depends X ""` silently removed
+    the task's only dependency."""
+    tasks(board, "add-depends", "aaaa0003", "dddd0001")
+    before = board.snapshot()
+    r = tasks(board, *argv)
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "tasks: error: give a uuid prefix; got an empty one\n"
+    assert board.snapshot() == before
+
+
+def test_rm_depends_refuses_a_prefix_matching_two_dependencies(board):
+    tasks(board, "add-depends", "aaaa0003", "aaaa0001")
+    tasks(board, "add-depends", "aaaa0003", "aaaa0002")
+    before = board.snapshot()
+    r = tasks(board, "rm-depends", "aaaa0003", "aaaa")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "tasks: error: uuid prefix 'aaaa' is ambiguous: aaaa0001, aaaa0002\n"
+    assert board.snapshot() == before

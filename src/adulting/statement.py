@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from adulting import vault as V
 
-CENT = Decimal('0.01')
+CENT = V.CENT
 AGING_BUCKETS = ('current', '30', '60', '90+')
 
 

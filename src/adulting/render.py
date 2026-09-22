@@ -330,9 +330,13 @@ def minutes_markdown(note_text, owner):
     """`notes minutes`: a Summary with Agreements, Resolutions and Action Items
     filled from AGREED:, RESOLVED: and ACTION/TASK/DONE lines."""
     if '# Summary' not in note_text:
-        # The summary goes on the lines just above `# Content`.
-        note_text = join_lines([MINUTES_SUMMARY + '\n' + line if line.strip() == '# Content' else line
-                            for line in split_lines(note_text)])
+        # The summary goes on the lines just above the first level-1 heading
+        # that starts `# Content`: `# Content`, `# Contents`, and so on.
+        lines = split_lines(note_text)
+        at = next((i for i, line in enumerate(lines) if line.startswith('# Content')), None)
+        if at is not None:
+            lines[at] = MINUTES_SUMMARY + '\n' + lines[at]
+        note_text = join_lines(lines)
     lines = split_lines(note_text)
     body = cut_sections(lines, ('# Minuted Agreements', '# Resolutions', '# Action Items'),
                         ('# Timesheet',))

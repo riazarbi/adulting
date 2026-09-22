@@ -35,7 +35,6 @@ be written the entry is still recorded, and nothing is reported, because a
 warning on stderr would cost the caller its stdout.
 """
 
-import argparse
 import json
 import sys
 from datetime import timedelta
@@ -297,9 +296,13 @@ def cmd_edit(args):
         if not V.is_currency_code(ccy):
             V.die(f"currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
-    # As in `log`: a rate is money, and money needs a currency.
+    # As in `log`: a rate is money, and money needs a currency. The entry
+    # may have been broken before this edit, so say which field is at fault.
     if target.get('rate') and not target.get('currency'):
-        V.die("--rate needs a currency; pass --currency as well")
+        if args.rate is not None:
+            V.die("--rate needs a currency; pass --currency as well")
+        V.die(f"entry {args.id} has a rate but no currency; "
+              f"pass --currency, or --rate 0 to leave it unbilled")
 
     if args.date or args.time:
         start = V.local(target['startTime'])
@@ -332,8 +335,8 @@ def cmd_rm(args):
 # ---------- main ----------
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Track consulting hours in the adulting vault.")
+    parser = V.command_parser(
+        'hours', "Track consulting hours in the adulting vault.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     log = sub.add_parser('log', help="Append an entry.")

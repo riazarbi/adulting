@@ -42,9 +42,6 @@ edits to buffer.md are discouraged — `tend` is the way to fix things,
 and individual entries are added/removed via the API.
 """
 
-import argparse
-import contextlib
-import io
 import re
 import shlex
 import sys
@@ -93,19 +90,17 @@ def stamp(date=None):
     if not date:
         return now_ts()
     if not V.DATE_RE.match(date):
-        V.die(f"--date must be YYYY-MM-DD; got {date!r}")
+        raise ValueError(f"--date must be YYYY-MM-DD; got {date!r}")
     return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
 
 
 def canonical_thread(arg, message):
     """The canonical `Kind/Name` for a thread given as a name, `Kind/Name` or
-    wikilink. Dies with `message` if it does not resolve."""
-    try:
-        match = V.resolve_thread(arg.strip())
-    except ValueError as e:
-        V.die(str(e))
+    wikilink. Raises ValueError with `message` if it does not resolve, or
+    with the ambiguity if it names threads of two kinds."""
+    match = V.resolve_thread(arg.strip())
     if not match:
-        V.die(message)
+        raise ValueError(message)
     kind, name, _ = match
     return V.thread_ref(kind, name)
 
@@ -127,23 +122,15 @@ def format_action_attrs(attrs):
 
 
 def ref_target_resolves(target):
-    """REF targets can point at any vault record file.
-
-    hours/ and payments/ were added after this function and were simply
-    missing from it, so a REF could not point at a time entry or a receipt.
-    Returns the absolute path if it would exist; else None.
-    """
+    """The file a REF target names, spelt exactly, or None. A target is a
+    thread (`<Kind>/Name`) or any file under notes/, logs/, people/, hours/
+    or payments/, without its `.md`."""
     target = target.strip()
-    if not target:
-        return None
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
-        path = vault_home() / 'threads' / f"{target}.md"
-    elif target.startswith(('people/', 'notes/', 'logs/', 'hours/',
-                            'payments/')):
-        path = vault_home() / f"{target}.md"
-    else:
-        return None
-    return path if path.exists() else None
+        return V.vault_file(f"threads/{target}.md")
+    if target.startswith(('people/', 'notes/', 'logs/', 'hours/', 'payments/')):
+        return V.vault_file(f"{target}.md")
+    return None
 
 
 def read_buffer():
@@ -169,26 +156,47 @@ def append_line(line):
     write_buffer(lines)
 
 
-# ---------- subcommand: add (UNKNOWN) ----------
+# ---------- adding entries ----------
+#
+# Each buffer_* function checks its input, appends one line and returns it.
+# A bad input raises ValueError and nothing is written. Only the cmd_*
+# functions print or stop the program, so other commands can call these.
+
+def buffered(add, *args):
+    """Run an add function for a command: print the line it buffered, or
+    stop with its error."""
+    try:
+        line = add(*args)
+    except ValueError as e:
+        V.die(str(e))
+    print(f"buffered: {line}")
+    return 0
+
 
 def cmd_add(args):
-    return buffer_unknown(args.text)
+    return buffered(buffer_unknown, args.text)
+
+
+def cmd_add_text(args):
+    return buffered(buffer_text, args.thread, args.text)
+
+
+def cmd_add_ref(args):
+    return buffered(buffer_ref, args.thread, args.target, args.summary, args.date)
+
+
+def cmd_add_action(args):
+    return buffered(buffer_action, args.thread, args.text, args.due, args.scheduled,
+                    args.priority, args.depends)
 
 
 def buffer_unknown(text):
     text = text.strip()
     if not text:
-        V.die("text is empty")
+        raise ValueError("text is empty")
     line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
     append_line(line)
-    print(f"buffered: {line}")
-    return 0
-
-
-# ---------- subcommand: add-text ----------
-
-def cmd_add_text(args):
-    return buffer_text(args.thread, args.text)
+    return line
 
 
 def buffer_text(thread, text):
@@ -197,17 +205,10 @@ def buffer_text(thread, text):
                 f"(expected Projects/X, Processes/X, or Topics/X)")
     text = text.strip()
     if not text:
-        V.die("text is empty")
+        raise ValueError("text is empty")
     line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
     append_line(line)
-    print(f"buffered: {line}")
-    return 0
-
-
-# ---------- subcommand: add-ref ----------
-
-def cmd_add_ref(args):
-    return buffer_ref(args.thread, args.target, args.summary, args.date)
+    return line
 
 
 def buffer_ref(thread, target, summary, date=None):
@@ -216,20 +217,12 @@ def buffer_ref(thread, target, summary, date=None):
     target = target.strip()
     summary = (summary or '').strip()
     if not ref_target_resolves(target):
-        V.die(f"ref target {target!r} does not resolve to a vault file "
-            f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
+        raise ValueError(f"ref target {target!r} does not resolve to a vault file "
+                         f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
     body = f"[[{target}]]" + (f" {summary}" if summary else "")
     line = f"- [[{thread}]] REF: {body} <!--{stamp(date)}-->"
     append_line(line)
-    print(f"buffered: {line}")
-    return 0
-
-
-# ---------- subcommand: add-action ----------
-
-def cmd_add_action(args):
-    return buffer_action(args.thread, args.text, args.due, args.scheduled,
-                         args.priority, args.depends)
+    return line
 
 
 def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends=None):
@@ -237,62 +230,47 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
         thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
     text = text.strip()
     if not text:
-        V.die("description is empty")
+        raise ValueError("description is empty")
     am = ASSIGNEE_PREFIX_RE.match(text)
     if am:
         assignee = am.group(1).strip()
         body = am.group(2).strip()
         if not body:
-            V.die("description after assignee is empty")
+            raise ValueError("description after assignee is empty")
         if not V.person_exists(assignee):
-            V.die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
-                f"(create the person file first)")
+            raise ValueError(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
+                             f"(create the person file first)")
         body_text = f"({assignee}) {body}"
     else:
         body_text = text
 
-    # Validate attr flags at write time.
-    attrs = {'depends': list(depends or [])}
-    if due:
-        if not V.DATE_RE.match(due):
-            V.die(f"--due must be YYYY-MM-DD; got {due!r}")
-        attrs['due'] = due
-    if scheduled:
-        if not V.DATE_RE.match(scheduled):
-            V.die(f"--scheduled must be YYYY-MM-DD; got {scheduled!r}")
-        attrs['scheduled'] = scheduled
-    if priority:
-        attrs['priority'] = priority
-    for d in attrs['depends']:
-        if not V.UUID8_RE.match(d):
-            V.die(f"--depends must be 8 hex chars; got {d!r}")
+    # The same rules the ACTION's attributes meet when they are ingested.
+    tokens = [f"due:{due}" if due else '', f"scheduled:{scheduled}" if scheduled else '',
+              f"priority:{priority}" if priority else '']
+    tokens += [f"depends:{d}" for d in depends or []]
+    attrs, errors = V.parse_action_attrs(tokens)
+    if errors:
+        raise ValueError(errors[0])
 
     attr_str = format_action_attrs(attrs)
     comment = now_ts() + (f" {attr_str}" if attr_str else "")
     line = f"- [[{thread}]] ACTION: {body_text} <!--{comment}-->"
     append_line(line)
-    print(f"buffered: {line}")
-    return 0
+    return line
 
 
-def add_ref(thread, target, summary, date=None, quiet=True):
-    """Append a REF entry on behalf of another command.
+def add_ref(thread, target, summary, date=None):
+    """Append a REF entry on behalf of another command, and return it.
 
     Best-effort: a record that was written must not be undone or reported as
-    failed because the buffer could not be. Returns True if the entry landed.
-    With quiet=True nothing is printed, which is what `hours` and `payments`
-    want: a warning on stderr would cost the caller its stdout.
+    failed because the buffer could not be, so any failure returns None and
+    prints nothing. `hours` and `payments` need that silence: a warning on
+    stderr would cost the caller its stdout.
     """
-    held = io.StringIO()
     try:
-        if quiet:
-            with contextlib.redirect_stdout(held), contextlib.redirect_stderr(held):
-                buffer_ref(thread, target, summary, date)
-        else:
-            buffer_ref(thread, target, summary, date)
-    except (Exception, SystemExit):  # noqa: BLE001 - never break the caller's write
-        return False
-    return True
+        return buffer_ref(thread, target, summary, date)
+    except (ValueError, OSError):
+        return None
 
 
 # ---------- subcommand: list ----------
@@ -456,45 +434,47 @@ def regroup_lines(entries, unknowns, unparsed):
 # ---------- subcommand: tend ----------
 
 def cmd_tend(args):
-    return tend(args.quiet)
+    new_lines, violations = tend(read_buffer())
+    write_buffer(new_lines)
+    if violations:
+        report_violations(violations)
+        return 1
+    if not args.quiet:
+        entries, _, _ = parse_buffer_entries(new_lines)
+        groups = {(e['thread'], e['date']) for e in entries}
+        print(f"buffer tended: {len(entries)} entries, {len(groups)} group(s).")
+    return 0
 
 
-def tend(quiet=False):
-    """Regroup and validate. Idempotent. Returns 0 if clean, 1 if any
-    violations, UNKNOWN entries, or unparsed lines remain."""
-    lines = read_buffer()
+def tend(lines):
+    """Regroup the buffer's lines and check them. Returns (new_lines,
+    violations); each violation is (line number in new_lines, message, line).
+    Clean means no violations: no invalid entry, UNKNOWN entry or unparsed
+    line remains."""
     entries, unknowns, unparsed = parse_buffer_entries(lines)
     new_lines = regroup_lines(entries, unknowns, unparsed)
-    write_buffer(new_lines)
 
-    # Re-parse so line numbers refer to the rewritten file.
-    lines2 = read_buffer()
-    entries2, unknowns2, unparsed2 = parse_buffer_entries(lines2)
-
+    # Re-parse so line numbers refer to the regrouped lines.
+    entries, unknowns, unparsed = parse_buffer_entries(new_lines)
     violations = []
-    for e in entries2:
+    for e in entries:
         for v in validate_entry(e):
             violations.append((e['line_no'], v, e['raw']))
-    for u in unknowns2:
+    for u in unknowns:
         violations.append((u['line_no'],
                            "UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass",
                            u['raw']))
-    for ln, raw in unparsed2:
+    for ln, raw in unparsed:
         violations.append((ln, "line does not match buffer entry shape", raw))
+    return new_lines, violations
 
-    if not violations:
-        groups = sorted({(e['thread'], e['date']) for e in entries2})
-        if not quiet:
-            print(f"buffer tended: {len(entries2)} entries, "
-                  f"{len(groups)} group(s).")
-        return 0
 
+def report_violations(violations):
     print(f"buffer has {len(violations)} violation(s):", file=sys.stderr)
     for ln, msg, raw in violations:
         print(f"  buffer.md:{ln}: {msg}", file=sys.stderr)
         print(f"    line: {raw}", file=sys.stderr)
         print(f"    fix: edit via `buffer rm {ln}` and re-add via the matching `buffer add-*`", file=sys.stderr)
-    return 1
 
 
 # ---------- subcommand: flush ----------
@@ -507,11 +487,12 @@ def cmd_flush(args):
     tend left it. Past that point it is not atomic: the log files are
     written one at a time and the buffer is cleared last, so a crash part
     way through can leave an entry both in a log and still in the buffer."""
-    rc = tend(quiet=True)
-    if rc != 0:
-        return rc
+    lines, violations = tend(read_buffer())
+    write_buffer(lines)
+    if violations:
+        report_violations(violations)
+        return 1
 
-    lines = read_buffer()
     entries, _unknowns, _unparsed = parse_buffer_entries(lines)
     if not entries:
         if not args.quiet:
@@ -577,9 +558,11 @@ def cmd_flush(args):
     # flush: the entries are safe in the logs and `tasks` can be re-run.
     from adulting import tasks  # here, not at the top: tasks imports buffer
     try:
-        tasks.ingest()
-    except (Exception, SystemExit) as e:  # noqa: BLE001
+        ingested, failed = tasks.ingest()
+    except OSError as e:
         V.warn(f"flushed, but the task ingest failed: {e}")
+        return 0
+    tasks.report_ingest(ingested, failed, dry_run=False, quiet=False)
     return 0
 
 
@@ -615,7 +598,7 @@ def dispatch_proposal(proposal, raw_text):
         return buffer_action(proposal['thread'], proposal['body'],
                              proposal.get('due'), proposal.get('scheduled'),
                              proposal.get('priority'))
-    V.die(f"internal error: unknown subcmd {sub!r}")
+    raise ValueError(f"internal error: unknown subcmd {sub!r}")
 
 
 def cmd_suggest(args):
@@ -625,7 +608,7 @@ def cmd_suggest(args):
     if proposal['subcmd'] == 'add':
         if not args.quiet:
             print("no structured suggestion; storing as UNKNOWN.")
-        return buffer_unknown(args.text)
+        return buffered(buffer_unknown, args.text)
 
     cmd_str = format_suggestion(proposal)
     print(f"suggested:\n  {cmd_str}")
@@ -634,15 +617,15 @@ def cmd_suggest(args):
         # Safe default: capture the raw text rather than run a suggestion
         # nobody accepted. The printed command can be run as-is instead.
         print("not accepted (pass -y to accept); storing as UNKNOWN.")
-        return buffer_unknown(args.text)
-    return dispatch_proposal(proposal, args.text)
+        return buffered(buffer_unknown, args.text)
+    return buffered(dispatch_proposal, proposal, args.text)
 
 
 # ---------- main ----------
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Buffer queue operations: capture, regroup, validate, flush.")
+    parser = V.command_parser(
+        'buffer', "Buffer queue operations: capture, regroup, validate, flush.")
     parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 

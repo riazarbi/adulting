@@ -124,11 +124,15 @@ def test_validate_cadences():
 
 # ---------- vault-relative ----------
 
-def test_resolve_wikilink_uses_the_current_vault(tmp_path, monkeypatch):
+def test_wikilink_exists_looks_in_the_current_vault(tmp_path, monkeypatch):
     monkeypatch.setenv("ADULTING_HOME", str(tmp_path))
-    assert L.resolve_wikilink("Projects/SGB") == tmp_path / "threads" / "Projects/SGB.md"
-    assert L.resolve_wikilink("people/Riaz") == tmp_path / "people/Riaz.md"
-    assert L.resolve_wikilink("Elsewhere/X") is None
+    (tmp_path / "threads" / "Projects").mkdir(parents=True)
+    (tmp_path / "threads" / "Projects" / "SGB.md").write_text("x")
+    (tmp_path / "people").mkdir()
+    (tmp_path / "people" / "Riaz.md").write_text("x")
+    assert L.wikilink_exists("Projects/SGB") and L.wikilink_exists("people/Riaz")
+    assert not L.wikilink_exists("Projects/sgb")
+    assert not L.wikilink_exists("Elsewhere/X")
 
 
 def test_find_file_schema_matches_directory_and_filename(tmp_path, monkeypatch):

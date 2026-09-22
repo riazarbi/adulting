@@ -7,7 +7,6 @@ action `assignee:`. They are not threads — they cannot be the value of
 `note.thread`. Skeleton: just create / delete / list / show.
 """
 
-import argparse
 import json
 import sys
 from datetime import datetime
@@ -58,17 +57,20 @@ def cmd_new(args):
 
 def _resolve_person(arg):
     """Accept either bare name ('Bern Sellmeyer') or wikilink-style
-    ('people/Bern Sellmeyer'). Strips the prefix if present."""
+    ('people/Bern Sellmeyer'). Strips the prefix if present. The name
+    becomes people/<name>.md, so it must be a plain filename."""
     arg = arg.strip()
     if arg.startswith('people/'):
         arg = arg[len('people/'):]
+    if not V.is_plain_name(arg):
+        V.die(f"name {arg!r} cannot contain '/' or start with '.'")
     return arg
 
 
 def cmd_delete(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
-    if not path.exists():
+    if not V.person_exists(name):
         V.die(f"not found: {path}")
     if not args.yes:
         V.die(f"refusing to delete {path} without -y")
@@ -121,7 +123,7 @@ def cmd_list(args):
 def cmd_show(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
-    if not path.exists():
+    if not V.person_exists(name):
         V.die(f"not found: {path}")
     if args.json:
         fm = V.read_frontmatter(path)
@@ -136,7 +138,7 @@ def cmd_show(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage people files.")
+    parser = V.command_parser('people', "Manage people files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     p_list = sub.add_parser('list', help="List person files (open by default).")

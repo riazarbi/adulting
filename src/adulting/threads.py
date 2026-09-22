@@ -7,7 +7,6 @@ Skeleton: just create / delete / list / show. The richer reporting tools
 be rebuilt when we know what views we actually want from notes data.
 """
 
-import argparse
 import json
 import sys
 from datetime import datetime
@@ -145,7 +144,7 @@ def cmd_show(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage thread files.")
+    parser = V.command_parser('threads', "Manage thread files.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     p_list = sub.add_parser('list', help="List thread files (open by default).")

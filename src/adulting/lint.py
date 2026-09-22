@@ -8,7 +8,6 @@ Exit code 0 if clean, 1 if any violations. Errors print as
 <path>:<line>: <message>. Pass --quiet for exit-code-only.
 """
 
-import argparse
 import json
 import os
 import re
@@ -301,22 +300,15 @@ def validate_cadences(cadences):
 
 # ---------- cross-file (wikilink resolution) ----------
 
-def resolve_wikilink(target):
-    """Given a wikilink target like 'Projects/SGB' or 'people/Charlie',
-    return the absolute path it refers to (whether or not it exists)."""
+def wikilink_exists(target):
+    """True if a wikilink target like 'Projects/SGB' or 'people/Charlie'
+    names a thread or person file, spelt exactly so."""
     target = target.strip()
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
-        return vault_home() / 'threads' / (target + '.md')
+        return V.vault_file(f"threads/{target}.md") is not None
     if target.startswith('people/'):
-        return vault_home() / (target + '.md')
-    return None  # unrecognised prefix
-
-
-def wikilink_exists(target):
-    p = resolve_wikilink(target)
-    if p is None:
-        return False
-    return p.exists()
+        return V.vault_file(f"{target}.md") is not None
+    return False
 
 
 # ---------- file validation ----------
@@ -468,8 +460,7 @@ def validate_file(path, schemas, registry=None):
                     yield (line_no, "ACTION: missing description")
                 if assignee_paren:
                     name = assignee_paren.strip()[1:-1].strip()  # strip ( )
-                    person_path = vault_home() / 'people' / f"{name}.md"
-                    if not person_path.exists():
+                    if not name or not V.person_exists(name):
                         yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
 
 
@@ -730,7 +721,7 @@ def discover_files():
 # ---------- main ----------
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate adulting files against schemas.")
+    parser = V.command_parser('lint', "Validate adulting files against schemas.")
     parser.add_argument('paths', nargs='*',
                         help='Files to validate (default: walk ~/vault/).')
     parser.add_argument('--schemas', default=str(SCHEMAS_DIR),

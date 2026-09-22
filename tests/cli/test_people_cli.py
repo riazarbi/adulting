@@ -178,3 +178,29 @@ def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"people: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []
+
+
+@pytest.mark.parametrize("command", [["delete", "-y"], ["show"], ["show", "--json"]])
+@pytest.mark.parametrize("name", ["../threads/Projects/SGB", "people/../threads/Projects/SGB", ".hidden"])
+def test_delete_and_show_refuse_a_name_that_is_not_a_plain_filename(vault, command, name):
+    """The name becomes people/<name>.md, so `../` reached outside people/:
+    `people delete ../threads/Projects/SGB -y` deleted the thread file."""
+    vault.write_thread("Projects", "SGB")
+    vault.write("people/.hidden.md", "---\nstatus: open\n---\n")
+    before = vault.snapshot()
+    r = vault.run(command[0], name, *command[1:], cli="people")
+    shown = name[len("people/"):] if name.startswith("people/") else name
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"people: error: name {shown!r} cannot contain '/' or start with '.'\n"
+    assert vault.snapshot() == before
+
+
+@pytest.mark.parametrize("command", [["delete", "-y"], ["show"]])
+def test_delete_and_show_need_the_exact_name(people_vault, command):
+    """On macOS the filesystem ignores case, so `people delete "riaz arbi"`
+    used to delete Riaz Arbi.md."""
+    before = people_vault.snapshot()
+    r = people_vault.run(command[0], "riaz arbi", *command[1:], cli="people")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'riaz arbi.md'}\n"
+    assert people_vault.snapshot() == before

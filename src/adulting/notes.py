@@ -23,9 +23,6 @@ ingested, the command carries on, with a one-line warning when stderr is a
 terminal.
 """
 
-import argparse
-import contextlib
-import io
 import json
 import re
 import sys
@@ -38,7 +35,6 @@ from adulting import tasks
 from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
-TOOL = 'notes'
 TIMESTAMP_RE = re.compile(r'^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$')
 NOTE_TYPES = ['Meeting', 'Correspondence', 'Workshop', 'Report', 'Log', 'Research', 'Recipe']
 PEOPLE_TYPES = ('Meeting', 'Correspondence')
@@ -54,7 +50,7 @@ def note_path(stem):
     name = stem.strip()
     if name.endswith('.md'):
         name = name[:-3]
-    if '/' in name or not name:
+    if not name or not V.is_plain_name(name):
         V.die(f"give a note stem like 2026-09-10-14-30-00, got {stem!r}")
     path = notes_dir() / f"{name}.md"
     if not path.is_file():
@@ -94,18 +90,16 @@ def all_notes():
 def ingest_actions():
     """Turn ACTION: lines into task anchors before doing anything else.
 
-    `tasks` prints nothing useful here, so its output is held back. If any
-    ACTION line fails to ingest, say so in one line and carry on, but only
+    Nothing is printed about what was ingested. If any ACTION line fails,
+    or the ingest cannot write, say so in one line and carry on, but only
     when stderr is a terminal. The agent harness discards stdout whenever
     stderr is non-empty, so a warning there would cost it the note.
     """
-    held = io.StringIO()
     try:
-        with contextlib.redirect_stdout(held), contextlib.redirect_stderr(held):
-            rc = tasks.ingest(quiet=True)
-    except (Exception, SystemExit):  # noqa: BLE001 - a failed ingest must not stop notes
-        rc = 1
-    if rc != 0 and sys.stderr.isatty():
+        _, failed = tasks.ingest()
+    except OSError:
+        failed = True
+    if failed and sys.stderr.isatty():
         V.warn("some ACTION lines were not ingested; run `tasks` to see why")
 
 
@@ -118,7 +112,7 @@ def quote(text):
 
 def people_entry(name):
     """A wikilink when the person has a file, else the plain name."""
-    if (V.vault_home() / 'people' / f"{name}.md").exists():
+    if V.person_exists(name):
         return f'"[[people/{name}]]"'
     return quote(name)
 
@@ -138,12 +132,6 @@ def note_text(stem, note_type, topic, threads, people=(), counterparty='', locat
         lines += [f'  - {people_entry(person)}' for person in people]
     lines += ['---', '', '# Content', '', '']
     return '\n'.join(lines)
-
-
-def buffer_ref(thread, stem, topic):
-    """Drop a REF into the buffer so the note shows up in the thread's daily
-    log. Best-effort; its `buffered:` line is printed, as before."""
-    buffer.add_ref(thread, f"notes/{stem}", topic, quiet=False)
 
 
 # ---------- subcommands ----------
@@ -173,8 +161,12 @@ def cmd_new(args):
     path.write_text(note_text(stem, args.type, topic, threads, people,
                               (args.counterparty or '').strip(), (args.location or '').strip()),
                     encoding='utf-8')
+    # A REF per thread puts the note in each thread's daily log on the next
+    # flush. Best-effort, as for hours and payments.
     for thread in threads:
-        buffer_ref(thread, stem, topic)
+        line = buffer.add_ref(thread, f"notes/{stem}", topic)
+        if line:
+            print(f"buffered: {line}")
     print(path)
     return 0
 
@@ -267,8 +259,8 @@ def cmd_render(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        prog=TOOL, description="Create, list, print, copy and delete notes, named by stem.")
+    parser = V.command_parser(
+        'notes', "Create, list, print, copy and delete notes, named by stem.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     p = sub.add_parser('new', help="Create a note and print its path.")

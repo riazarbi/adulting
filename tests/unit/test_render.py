@@ -1,5 +1,7 @@
 """Unit tests for adulting.render: each rule on its own."""
 
+import pytest
+
 from adulting import render as R
 
 NOTE = ['---', 'topic: "a \\"quoted\\" \\\\ topic"', "type: Meeting", "people:",
@@ -106,6 +108,16 @@ def test_minutes_insert_the_summary_once_before_the_content_heading():
     rendered = R.minutes_markdown(note, owner="Riaz Arbi")
     assert rendered.count("# Summary") == 1
     assert rendered.index("# Summary") < rendered.index("\n# Content\n")
+
+
+@pytest.mark.parametrize("heading", ["# Content", "# Contents", "# Content and notes"])
+def test_minutes_insert_the_summary_before_a_content_heading_of_any_wording(heading):
+    """Any level-1 heading that starts `# Content` gets the Summary block,
+    once, however many such headings follow; a `##` heading never does."""
+    note = f"---\ntopic: t\ntype: Workshop\n---\n\n## Content first\n\n{heading}\n\n# Content again\nbody\n"
+    rendered = R.minutes_markdown(note, owner="Riaz Arbi")
+    assert rendered.count("# Summary") == 1
+    assert rendered.index("## Content first") < rendered.index("# Summary") < rendered.index(f"\n{heading}\n")
 
 
 def test_a_note_with_no_type_gets_a_plain_details_heading():

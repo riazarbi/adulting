@@ -36,6 +36,7 @@ REFUSALS = [
     ("hours", ["rm", "{hours}"]),
     ("payments", ["rm", "{payments}"]),
     ("people", ["delete", "Riaz Arbi"]),
+    ("people", ["delete", "../threads/Projects/SGB", "-y"]),
     ("threads", ["delete", "SGB"]),
     ("notes", ["delete", "2026-09-10-14-30-00"]),
     ("hours", ["log"]),

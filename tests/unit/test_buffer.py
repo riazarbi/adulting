@@ -23,7 +23,7 @@ def test_attrs_round_trip():
 def test_stamp():
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", B.stamp())
     assert B.stamp("2026-08-04").startswith("2026-08-04T")
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="^--date must be YYYY-MM-DD; got '4 Aug'$"):
         B.stamp("4 Aug")
 
 
@@ -116,3 +116,40 @@ def test_format_suggestion_quotes_for_the_shell():
         "buffer add-action Projects/SGB 'Draft scope' --due 2026-09-30 --priority H"
     assert B.format_suggestion({"subcmd": "add-text", "thread": "Topics/X", "body": "hi"}) == \
         "buffer add-text Topics/X hi"
+
+
+# ---------- the add functions are for other commands too ----------
+
+def test_an_add_function_returns_its_line_and_prints_nothing(buffer_home, capsys):
+    line = B.buffer_text("SGB", "hello")
+    assert re.fullmatch(r"- \[\[Projects/SGB\]\] TEXT: hello <!--[0-9T:-]+-->", line)
+    assert (buffer_home / "buffer.md").read_text() == line + "\n"
+    assert capsys.readouterr() == ("", "")
+
+
+def test_a_bad_input_raises_and_writes_nothing(buffer_home, capsys):
+    with pytest.raises(ValueError, match="^text is empty$"):
+        B.buffer_text("SGB", "  ")
+    with pytest.raises(ValueError, match="^priority must be H, M, or L; got 'X'$"):
+        B.buffer_action("SGB", "Draft it", priority="X")
+    assert not (buffer_home / "buffer.md").exists()
+    assert capsys.readouterr() == ("", "")
+
+
+def test_add_ref_is_best_effort_and_silent(buffer_home, capsys):
+    assert B.add_ref("SGB", "notes/missing", "x") is None
+    assert B.add_ref("SGB", "notes/n", "x", "2026-08-04").startswith(
+        "- [[Projects/SGB]] REF: [[notes/n]] x <!--2026-08-04T")
+    assert capsys.readouterr() == ("", "")
+
+
+def test_tend_returns_the_regrouped_lines_and_writes_nothing(buffer_home):
+    lines = ["- [[Topics/B]] TEXT: later <!--2026-09-11T09:00:00-->",
+             "- [[Projects/SGB]] TEXT: sooner <!--2026-09-10T09:00:00-->",
+             "- UNKNOWN: raw <!--2026-09-10T10:00:00-->"]
+    new_lines, violations = B.tend(lines)
+    assert new_lines[:2] == [lines[1], lines[0]]
+    assert [(v[1], v[2]) for v in violations] == [
+        ("thread 'Topics/B' does not resolve", lines[0]),
+        ("UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass", lines[2])]
+    assert not (buffer_home / "buffer.md").exists()

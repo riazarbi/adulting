@@ -2,6 +2,29 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review round 2, part R-A: the bugs (with R-B1 and R-B3)
+
+Each fix has a test written to fail first.
+
+- **R-A1: `people delete` and `people show` accepted a path.** `people delete ../threads/Projects/Foo -y` deleted the thread file. Both now refuse a name with `/` or a leading `.`, as `new` does. `notes` refuses a stem with a leading `.` too. `threads` was safe: it only ever matches files it lists.
+- **R-A2: every thread and person check is case-exact.** A new `vault.vault_file(rel)` looks each part up in its folder's listing, so `..` cannot leave the vault either. `buffer add-ref` and `tend`, lint's wikilink and assignee checks, `people delete/show`, `notes new`'s people links and `vault.person_exists` all use it. On macOS, `buffer add-ref SGB Projects/sgb`, a note linking `[[Projects/sgb]]`, and `people delete "riaz arbi"` were all accepted. `threads new` and `people new` still ask the filesystem whether the name is taken, because on macOS `sgb` would overwrite `SGB`.
+- **R-A3 and R-B1: library functions no longer exit the process.**
+  - `buffer`'s add functions return the line they buffered and raise `ValueError` on bad input. `buffered()` prints or dies for the `cmd_*` functions.
+  - `buffer.tend(lines)` returns `(new_lines, violations)` and touches no file.
+  - `tasks.ingest(dry_run)` returns `(ingested, failed)`, and `tasks.report_ingest` prints them.
+  - `add_ref` is best-effort without redirecting output.
+  - Nothing in `src/` catches `SystemExit` or redirects stdout any more.
+  - `notes new` prints `buffered:` lines itself, and its `buffer_ref` wrapper is gone.
+- **R-B3: one ACTION attribute check.** `buffer add-action` runs its flags through `vault.parse_action_attrs`, so it now checks priority too. Its messages match `tasks`': `due must be YYYY-MM-DD`, where they said `--due must be`.
+- **R-A4: the minutes Summary goes before the first level-1 heading starting `# Content`,** so `# Contents` and `# Content and notes` get one. `## Content …` never does, and there is only ever one. All 111 notes in the vault copy use exactly `# Content`, so their renders are unchanged.
+- **R-A5:**
+  - `tasks` refuses an empty uuid prefix (`rm-depends X ""` removed the only dependency).
+  - Receipts are rounded to the cent before they are summed, as charges are. The review's example (2.675) already added up, but two receipts of 1.005 listed as 1 each and totalled 2.01.
+  - `hours edit` on an entry with a rate but no currency says what is wrong with the entry, not `--rate`. Such an entry could always be repaired with `-c` or `--rate 0`, and a test now proves it.
+  - The suggester's `main` has the usual shape and reports a bad `--today`.
+  - Every command's parser is built by `vault.command_parser(prog, …)`, and errors use that name, so `python -m adulting.notes` says `notes:`, not `notes.py:`.
+- **Verified on the vault copy:** the `buffer` add/tend/rm/flush, `tasks`, `hours log`, `notes list` and `notes minutes` flows give identical output and vault changes before and after. **753 passing.**
+
 ## 2026-09-22 - review fixes, part E: the refactor story is current
 
 - `stories/2026-09-17-python-package-refactor.md`:

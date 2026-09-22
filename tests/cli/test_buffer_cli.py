@@ -82,10 +82,10 @@ def test_add_ref_date_files_under_that_day_and_keeps_the_clock(buffer_vault):
     (["add-action", "Projects/SGB", "(Ghost) x"],
      "buffer: error: assignee 'Ghost' does not resolve to people/Ghost.md (create the person file first)"),
     (["add-action", "Projects/SGB", "(Riaz Arbi)  "], "buffer: error: description after assignee is empty"),
-    (["add-action", "Projects/SGB", "x", "--due", "Friday"], "buffer: error: --due must be YYYY-MM-DD; got 'Friday'"),
+    (["add-action", "Projects/SGB", "x", "--due", "Friday"], "buffer: error: due must be YYYY-MM-DD; got 'Friday'"),
     (["add-action", "Projects/SGB", "x", "--scheduled", "1/2/26"],
-     "buffer: error: --scheduled must be YYYY-MM-DD; got '1/2/26'"),
-    (["add-action", "Projects/SGB", "x", "--depends", "XYZ"], "buffer: error: --depends must be 8 hex chars; got 'XYZ'"),
+     "buffer: error: scheduled must be YYYY-MM-DD; got '1/2/26'"),
+    (["add-action", "Projects/SGB", "x", "--depends", "XYZ"], "buffer: error: depends must be 8 hex chars; got 'XYZ'"),
 ])
 def test_add_errors_write_nothing(buffer_vault, argv, message):
     r = buf(buffer_vault, *argv)
@@ -356,3 +356,16 @@ def test_a_failed_ingest_after_flush_warns_and_keeps_the_flush(vault):
     assert vault.read("buffer.md") == ""
     assert vault.lines(f"logs/Projects/SGB/{today}.md")[-2] == "TEXT: hello"
     assert vault.lines("notes/2026-09-10-14-30-00.md")[-2] == "ACTION: stuck"
+
+
+@pytest.mark.parametrize("target", ["Projects/sgb", "people/riaz arbi", "notes/../threads/Projects/SGB"])
+def test_add_ref_needs_the_exact_name_of_a_vault_file(buffer_vault, target):
+    """Checked against the files in the vault, not by asking the filesystem,
+    so a wrongly cased target is refused on macOS as on Linux, and `..`
+    cannot reach out of the folder it names."""
+    before = buffer_vault.snapshot()
+    r = buffer_vault.run("add-ref", "Projects/SGB", target, cli="buffer")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == (f"buffer: error: ref target {target!r} does not resolve to a vault file "
+                        "(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)\n")
+    assert buffer_vault.snapshot() == before

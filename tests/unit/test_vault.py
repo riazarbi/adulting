@@ -384,3 +384,15 @@ def test_reference_ignores_a_frontmatter_override(vault):
         "client_vat:", "client_reference: SOMETHING ELSE\nclient_vat:"),
         encoding="utf-8")
     assert V.client(p)["reference"] == "SANA Partners"
+
+
+def test_vault_file_needs_the_exact_spelling_and_stays_in_the_vault():
+    home = V.vault_home()
+    (home / "people").mkdir(parents=True)
+    (home / "people" / "Riaz Arbi.md").write_text("x")
+    assert V.vault_file("people/Riaz Arbi.md") == home / "people" / "Riaz Arbi.md"
+    assert V.vault_file("people/riaz arbi.md") is None
+    assert V.vault_file("people/../people/Riaz Arbi.md") is None
+    assert V.vault_file("people") is None            # a folder is not a file
+    assert V.vault_file("people/Nobody.md") is None
+    assert V.person_exists("Riaz Arbi") and not V.person_exists("riaz arbi")

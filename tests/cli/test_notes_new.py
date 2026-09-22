@@ -152,3 +152,18 @@ def test_new_does_not_run_the_ingest_pre_pass(new_note_vault):
     assert "ACTION: leave me" in new_note_vault.read("notes/2026-09-10-14-30-00.md")
 
 
+
+
+def test_a_buffer_it_cannot_write_does_not_stop_the_note(new_note_vault):
+    """The REF is best-effort: the note is written, nothing is said on
+    stderr, and there is simply no `buffered:` line."""
+    buffer = new_note_vault.write("buffer.md", "")
+    buffer.chmod(0o444)
+    try:
+        r = notes(new_note_vault, "new", "--type", "Log", "--topic", "Quiet", "--thread", "Projects/SGB")
+    finally:
+        buffer.chmod(0o644)
+    assert (r.returncode, r.stderr) == (0, "")
+    stem = created(new_note_vault, r)
+    assert r.stdout == f"{new_note_vault.home / 'notes' / stem}.md\n"
+    assert buffer.read_text() == ""

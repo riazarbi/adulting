@@ -27,7 +27,6 @@ its meeting, a session written up days after. The filename is used only when
 the frontmatter date is missing or malformed.
 """
 
-import argparse
 import json
 import re
 import sys
@@ -554,8 +553,8 @@ def cmd_stream(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Search notes and logs, and summarise thread activity.")
+    parser = V.command_parser(
+        'search', "Search notes and logs, and summarise thread activity.")
     sub = parser.add_subparsers(dest='subcommand', required=True)
 
     n = sub.add_parser('notes', help="Find notes by thread, type, date or text.")

@@ -624,7 +624,7 @@ def _task_anchor_per_line(captures):
     if end and entry and end < entry:
         yield f"task_anchor: end {end!r} precedes entry {entry!r}"
     if assignee:
-        if not (vault_home() / 'people' / f"{assignee}.md").exists():
+        if not V.person_exists(assignee):
             yield f"task_anchor.assignee: {assignee!r} does not resolve to people/{assignee}.md"
 
 

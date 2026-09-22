@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part B (B3): one ACTION attribute parser
+
+`buffer` and `tasks` each parsed an ACTION's `due:`/`scheduled:`/`priority:`/`depends:` attributes, and each checked people files and dates with its own copy of the same code.
+
+- **`vault.parse_action_attrs(tokens)`** replaces both parsers. It follows `tasks`: a bad value is reported and left out, and a buffer timestamp token is skipped. `buffer` only ever used the error list, so its behaviour is unchanged.
+- **`vault.person_exists`, `vault.DATE_RE` and `vault.UUID8_RE`** replace the copies in `buffer` and `tasks`; `lint`'s task-anchor assignee check uses `person_exists` too. `tasks`' unused `ASSIGNEE_PREFIX_RE` is gone, and `tasks.gen_uuid8` gives way to `vault.new_id`, which it duplicated.
+- **Tests:** the parser and `person_exists` tests moved to the vault tests. **672 passing.**
+- **Verified on the vault copy:** `buffer add-action` (good attributes, a bad date, an unknown assignee), `buffer list`, `buffer flush`, `tasks --dry-run`, `tasks list` and `lint` give identical output before and after, ids and clock times masked.
+
 ## 2026-09-22 - review fixes, part B (B1, B2): one copy of the shared helpers
 
 The review's part B lists code that several commands each kept their own copy of. These two steps move the simplest copies into `vault.py`. No output changes.

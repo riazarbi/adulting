@@ -414,6 +414,55 @@ def new_id(existing):
             return u
 
 
+# ---------- actions ----------
+
+DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
+
+
+def person_exists(name):
+    """True if people/<name>.md exists. No name means nobody is assigned,
+    which is fine."""
+    if not name:
+        return True
+    return (vault_home() / 'people' / f"{name}.md").exists()
+
+
+def parse_action_attrs(tokens):
+    """Parse `due:... scheduled:... priority:... depends:...` tokens from an
+    ACTION's attr comment. Returns (attrs, errors): a bad value is reported
+    and left out of attrs. A leading buffer timestamp token is skipped."""
+    attrs = {'depends': []}
+    errors = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if ':' not in tok:
+            errors.append(f"unknown attr token {tok!r}")
+            continue
+        key, _, val = tok.partition(':')
+        if key in ('due', 'scheduled'):
+            if DATE_RE.match(val):
+                attrs[key] = val
+            else:
+                errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
+        elif key == 'priority':
+            if val in ('H', 'M', 'L'):
+                attrs[key] = val
+            else:
+                errors.append(f"priority must be H, M, or L; got {val!r}")
+        elif key == 'depends':
+            if UUID8_RE.match(val):
+                attrs['depends'].append(val)
+            else:
+                errors.append(f"depends must be 8 hex chars; got {val!r}")
+        elif re.match(r'^\d{4}-\d{2}-\d{2}T', tok):
+            continue
+        else:
+            errors.append(f"unknown attr {key!r}")
+    return attrs, errors
+
+
 # ---------- time ----------
 
 def to_iso(dt):

@@ -7,21 +7,6 @@ import pytest
 from adulting import buffer as B
 
 
-def test_parse_action_attrs():
-    attrs, errors = B.parse_action_attrs(
-        ["due:2026-09-20", "priority:H", "depends:aaaaaaaa", "depends:bbbbbbbb",
-         "scheduled:2026-09-15", ""])
-    assert attrs == {"depends": ["aaaaaaaa", "bbbbbbbb"], "due": "2026-09-20",
-                     "priority": "H", "scheduled": "2026-09-15"}
-    assert errors == []
-    _, errors = B.parse_action_attrs(["due:soon", "priority:X", "depends:XYZ", "foo", "bar:1"])
-    assert errors == ["due must be YYYY-MM-DD; got 'soon'",
-                      "priority must be H, M, or L; got 'X'",
-                      "depends must be 8 hex chars; got 'XYZ'",
-                      "unknown attr token 'foo'",
-                      "unknown attr 'bar'"]
-
-
 def test_format_action_attrs_is_deterministic():
     assert B.format_action_attrs({"scheduled": "2026-09-15", "priority": "L", "due": "2026-09-20",
                                   "depends": ["bbbbbbbb", "aaaaaaaa"]}) == \
@@ -31,7 +16,7 @@ def test_format_action_attrs_is_deterministic():
 
 def test_attrs_round_trip():
     text = "depends:aaaaaaaa due:2026-09-20 priority:M"
-    attrs, _ = B.parse_action_attrs(text.split())
+    attrs, _ = B.V.parse_action_attrs(text.split())
     assert B.format_action_attrs(attrs) == text
 
 
@@ -88,8 +73,6 @@ def home():
 
 def test_resolvers(home):
     assert B.canonical_thread("[[Projects/SGB]]", "unused") == "Projects/SGB"
-    assert B.assignee_resolves("") and B.assignee_resolves("Riaz Arbi")
-    assert not B.assignee_resolves("Ghost")
     assert B.ref_target_resolves("notes/n") == home / "notes/n.md"
     assert B.ref_target_resolves("Projects/SGB") == home / "threads/Projects/SGB.md"
     assert B.ref_target_resolves("hours/Projects/SGB") == home / "hours/Projects/SGB.md"

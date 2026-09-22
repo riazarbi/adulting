@@ -73,9 +73,6 @@ UNKNOWN_LINE_RE = re.compile(
     r'^-\s+UNKNOWN:\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})-->\s*$'
 )
 
-DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
-UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
-
 
 # ---------- helpers ----------
 
@@ -98,7 +95,7 @@ def stamp(date=None):
     """
     if not date:
         return now_ts()
-    if not DATE_RE.match(date):
+    if not V.DATE_RE.match(date):
         die(f"--date must be YYYY-MM-DD; got {date!r}")
     return f"{date}T{datetime.now().strftime('%H:%M:%S')}"
 
@@ -114,43 +111,6 @@ def canonical_thread(arg, message):
         die(message)
     kind, name, _ = match
     return V.thread_ref(kind, name)
-
-
-def assignee_resolves(name):
-    if not name:
-        return True
-    return (vault_home() / 'people' / f"{name}.md").exists()
-
-
-def parse_action_attrs(tokens):
-    """Parse the attr block from an ACTION buffer comment. `tokens` is
-    a list of whitespace-separated strings (TS already removed).
-    Returns (attrs_dict, errors). Each error is a string describing
-    what's wrong; attrs_dict is built best-effort."""
-    attrs = {'depends': []}
-    errors = []
-    for tok in tokens:
-        if not tok:
-            continue
-        if ':' not in tok:
-            errors.append(f"unknown attr token {tok!r}")
-            continue
-        key, _, val = tok.partition(':')
-        if key in ('due', 'scheduled'):
-            if not DATE_RE.match(val):
-                errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
-            attrs[key] = val
-        elif key == 'priority':
-            if val not in ('H', 'M', 'L'):
-                errors.append(f"priority must be H, M, or L; got {val!r}")
-            attrs[key] = val
-        elif key == 'depends':
-            if not UUID8_RE.match(val):
-                errors.append(f"depends must be 8 hex chars; got {val!r}")
-            attrs['depends'].append(val)
-        else:
-            errors.append(f"unknown attr {key!r}")
-    return attrs, errors
 
 
 def format_action_attrs(attrs):
@@ -270,7 +230,7 @@ def cmd_add_action(args):
         body = am.group(2).strip()
         if not body:
             die("description after assignee is empty")
-        if not assignee_resolves(assignee):
+        if not V.person_exists(assignee):
             die(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
                 f"(create the person file first)")
         body_text = f"({assignee}) {body}"
@@ -280,17 +240,17 @@ def cmd_add_action(args):
     # Validate attr flags at write time.
     attrs = {'depends': list(args.depends or [])}
     if args.due:
-        if not DATE_RE.match(args.due):
+        if not V.DATE_RE.match(args.due):
             die(f"--due must be YYYY-MM-DD; got {args.due!r}")
         attrs['due'] = args.due
     if args.scheduled:
-        if not DATE_RE.match(args.scheduled):
+        if not V.DATE_RE.match(args.scheduled):
             die(f"--scheduled must be YYYY-MM-DD; got {args.scheduled!r}")
         attrs['scheduled'] = args.scheduled
     if args.priority:
         attrs['priority'] = args.priority
     for d in attrs['depends']:
-        if not UUID8_RE.match(d):
+        if not V.UUID8_RE.match(d):
             die(f"--depends must be 8 hex chars; got {d!r}")
 
     attr_str = format_action_attrs(attrs)
@@ -426,12 +386,12 @@ def validate_entry(e):
             rest = am.group(2).strip()
             if not rest:
                 yield "ACTION description after assignee is empty"
-            if not assignee_resolves(assignee):
+            if not V.person_exists(assignee):
                 yield f"ACTION assignee {assignee!r} does not resolve to people/{assignee}.md"
         else:
             if not body:
                 yield "ACTION description is empty"
-        _attrs, attr_errors = parse_action_attrs(e.get('attr_tokens', []))
+        _attrs, attr_errors = V.parse_action_attrs(e.get('attr_tokens', []))
         for err in attr_errors:
             yield f"ACTION {err}"
     elif e['type'] in ('TEXT', 'REF') and e.get('attr_tokens'):

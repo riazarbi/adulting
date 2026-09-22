@@ -151,6 +151,41 @@ def test_new_id_is_eight_lowercase_hex_characters():
         assert re.fullmatch(r"[0-9a-f]{8}", V.new_id(set()))
 
 
+# ---------- actions ----------
+
+def test_parse_action_attrs_keeps_good_values_and_reports_bad_ones():
+    attrs, errors = V.parse_action_attrs(
+        ["due:2026-09-20", "priority:H", "depends:aaaaaaaa", "depends:bbbbbbbb",
+         "scheduled:2026-09-15", ""])
+    assert attrs == {"depends": ["aaaaaaaa", "bbbbbbbb"], "due": "2026-09-20",
+                     "priority": "H", "scheduled": "2026-09-15"}
+    assert errors == []
+    _, errors = V.parse_action_attrs(["due:soon", "priority:X", "depends:XYZ", "foo", "bar:1"])
+    assert errors == ["due must be YYYY-MM-DD; got 'soon'",
+                      "priority must be H, M, or L; got 'X'",
+                      "depends must be 8 hex chars; got 'XYZ'",
+                      "unknown attr token 'foo'",
+                      "unknown attr 'bar'"]
+
+
+def test_parse_action_attrs_tolerates_the_buffer_timestamp():
+    attrs, errors = V.parse_action_attrs("2026-09-10T08:00:00 due:2026-09-20 depends:aaaa0001".split())
+    assert attrs == {"depends": ["aaaa0001"], "due": "2026-09-20"}
+    assert errors == []
+    attrs, errors = V.parse_action_attrs(["due:soon", "priority:H"])
+    assert attrs == {"depends": [], "priority": "H"}  # bad values are not kept
+    assert errors == ["due must be YYYY-MM-DD; got 'soon'"]
+
+
+def test_person_exists_is_true_for_no_one_and_for_a_person_file():
+    people = V.vault_home() / "people"
+    people.mkdir(parents=True)
+    (people / "Riaz Arbi.md").write_text("x")
+    assert V.person_exists("") and V.person_exists(None)
+    assert V.person_exists("Riaz Arbi")
+    assert not V.person_exists("Ghost")
+
+
 # ---------- time ----------
 
 def test_to_iso_and_from_iso_round_trip():

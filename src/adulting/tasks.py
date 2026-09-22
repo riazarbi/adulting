@@ -29,7 +29,6 @@ import argparse
 import os
 import re
 import sys
-import uuid as _uuid
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -58,9 +57,6 @@ ANCHOR_RE = re.compile(
     r'(?:\s+depends:(?P<depends>[a-f0-9,]+))?'
     r'\s*-->\s*$'
 )
-DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
-ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
-UUID8_RE = re.compile(r'^[a-f0-9]{8}$')
 
 PRIORITY_ORDER = {'H': 0, 'M': 1, 'L': 2}
 
@@ -213,7 +209,7 @@ def today_iso() -> str:
 
 
 def validate_date(s):
-    if not DATE_RE.match(s):
+    if not V.DATE_RE.match(s):
         raise ValueError(f"date must be YYYY-MM-DD, got {s!r}")
     return s
 
@@ -222,20 +218,6 @@ def validate_priority(s):
     if s not in ('H', 'M', 'L'):
         raise ValueError(f"priority must be H, M, or L; got {s!r}")
     return s
-
-
-def assignee_resolves(name):
-    if not name:
-        return True
-    return (vault_home() / 'people' / f"{name}.md").exists()
-
-
-def gen_uuid8(existing: set) -> str:
-    """Generate an 8-char hex uuid that doesn't collide with `existing`."""
-    while True:
-        u = _uuid.uuid4().hex[:8]
-        if u not in existing:
-            return u
 
 
 # ---------- frontmatter parsing (used for thread cache) ----------
@@ -281,42 +263,6 @@ def find_action_lines(text):
             yield i, line, assignee, body, attr_block
 
 
-def parse_action_attrs(block: str):
-    """Parse `due:... priority:... depends:...` tokens from an ACTION's
-    trailing HTML comment. Returns (attrs_dict, errors_list)."""
-    attrs = {'depends': []}
-    errors = []
-    for tok in (block or '').split():
-        if not tok:
-            continue
-        if ':' not in tok:
-            errors.append(f"unknown attr token {tok!r}")
-            continue
-        k, _, v = tok.partition(':')
-        if k in ('due', 'scheduled'):
-            if not DATE_RE.match(v):
-                errors.append(f"{k} must be YYYY-MM-DD; got {v!r}")
-                continue
-            attrs[k] = v
-        elif k == 'priority':
-            if v not in ('H', 'M', 'L'):
-                errors.append(f"priority must be H, M, or L; got {v!r}")
-                continue
-            attrs[k] = v
-        elif k == 'depends':
-            if not UUID8_RE.match(v):
-                errors.append(f"depends must be 8 hex chars; got {v!r}")
-                continue
-            attrs['depends'].append(v)
-        else:
-            # Tolerate buffer's leading timestamp token (now_ts). Anything
-            # else with an unknown key is an error.
-            if re.match(r'^\d{4}-\d{2}-\d{2}T', tok):
-                continue
-            errors.append(f"unknown attr {k!r}")
-    return attrs, errors
-
-
 def cmd_default(args):
     """No subcommand: walk notes/logs and ingest each ACTION: line."""
     existing = {a.uuid for a in walk_anchors()}
@@ -338,11 +284,11 @@ def cmd_default(args):
                 for t in threads:
                     if not V.is_thread(t):
                         errors.append(f"thread {t!r} does not resolve")
-            if assignee and not assignee_resolves(assignee):
+            if assignee and not V.person_exists(assignee):
                 errors.append(
                     f"assignee {assignee!r} does not resolve to "
                     f"people/{assignee}.md")
-            attrs, attr_errs = parse_action_attrs(attr_block)
+            attrs, attr_errs = V.parse_action_attrs(attr_block.split())
             errors.extend(attr_errs)
             plan.append((path, i, assignee, body, attrs, errors))
 
@@ -358,7 +304,7 @@ def cmd_default(args):
         if errors:
             failed.append((prefix, errors))
             continue
-        u = gen_uuid8(existing)
+        u = V.new_id(existing)
         existing.add(u)
         anchor = Anchor(
             kind='TASK',
@@ -444,7 +390,7 @@ def cmd_set_assignee(args):
     person = args.person.strip()
     if person.startswith('people/'):
         person = person[len('people/'):]
-    if not assignee_resolves(person):
+    if not V.person_exists(person):
         die(f"person {person!r} does not resolve to people/{person}.md")
     mutate_anchor(anchor, assignee=person)
     print(f"updated: {anchor.uuid}  assignee={person}")

@@ -1,7 +1,5 @@
 """Unit tests for adulting.tasks. conftest points ADULTING_HOME at tmp_path/vault."""
 
-import re
-
 import pytest
 
 from adulting import tasks as T
@@ -36,15 +34,6 @@ def test_parse_anchor_rejects_other_lines(line):
     assert T.parse_anchor(line) is None
 
 
-def test_parse_action_attrs_tolerates_the_buffer_timestamp():
-    attrs, errors = T.parse_action_attrs("2026-09-10T08:00:00 due:2026-09-20 depends:aaaa0001")
-    assert attrs == {"depends": ["aaaa0001"], "due": "2026-09-20"}
-    assert errors == []
-    attrs, errors = T.parse_action_attrs("due:soon priority:H")
-    assert attrs == {"depends": [], "priority": "H"}  # bad values are not kept
-    assert errors == ["due must be YYYY-MM-DD; got 'soon'"]
-
-
 def test_parse_frontmatter_threads():
     note = '---\ntopic: x\nthreads:\n  - "[[Projects/SGB]]"\n  - Topics/Plain\ntype: Log\n---\nthreads: body\n'
     assert T.parse_frontmatter_threads(note) == ["Projects/SGB", "Topics/Plain"]
@@ -64,14 +53,12 @@ def test_sort_keys_and_thread_cell():
     assert T._format_threads(["Projects/SGB", "Topics/X", "Topics/Y"]) == "Projects/SGB +2"
 
 
-def test_validators_and_uuid_generation():
+def test_validators():
     assert T.validate_date("2026-05-27") == "2026-05-27"
     with pytest.raises(ValueError):
         T.validate_date("27 May")
     with pytest.raises(ValueError):
         T.validate_priority("Z")
-    for _ in range(50):
-        assert re.fullmatch(r"[0-9a-f]{8}", T.gen_uuid8(set()))
 
 
 @pytest.fixture
@@ -117,5 +104,3 @@ def test_threads_cache_and_resolvers(home):
     cache = T.build_threads_cache()
     assert cache["notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
     assert T.threads_for(T.find_anchor("aaaa0002"), cache) == ["Projects/SGB"]
-    assert T.assignee_resolves(None) and T.assignee_resolves("Riaz Arbi")
-    assert not T.assignee_resolves("Ghost")

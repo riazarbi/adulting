@@ -205,9 +205,15 @@ def as_row(ref, e):
         'minutes': minutes_of(e),
         'rate': e.get('rate', 0),
         'currency': e.get('currency', ''),
-        'amount': float(money_of(e)),
+        'amount': money_of(e),
         'description': e.get('name', ''),
     }
+
+
+def as_output(row):
+    """A row as `--json` and `show` print it: the amount as a plain number.
+    Rows keep the Decimal until this point, so text output rounds exactly."""
+    return {**row, 'amount': float(row['amount'])}
 
 
 def cmd_list(args):
@@ -215,7 +221,7 @@ def cmd_list(args):
             collect(args.thread, args.since, args.until)]
     rows.sort(key=lambda r: (r['date'], r['time']))
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(json.dumps([as_output(r) for r in rows], indent=2))
         return
     if not rows:
         print("(no entries)")
@@ -276,7 +282,7 @@ def find_entry(entry_id):
 
 def cmd_show(args):
     _, ref, e = find_entry(args.id)
-    row = as_row(ref, e)
+    row = as_output(as_row(ref, e))
     if args.json:
         print(json.dumps(row, indent=2))
         return

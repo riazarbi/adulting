@@ -210,3 +210,14 @@ def test_rm_without_yes_refuses_even_if_stdin_says_yes(v, paid):
 def test_help_no_longer_mentions_interactive_mode(vault):
     for argv in (["--help"], ["log", "--help"]):
         assert "interactive" not in pay(vault, *argv).stdout.lower()
+
+
+def test_list_and_statement_round_the_same_amount_the_same_way(v):
+    """Money is kept as Decimal until it is printed. `list` used to go through
+    float, so a hand-edited 2.675 showed as 2.67 there and 2.68 in the
+    statement."""
+    v.write_payments_file("Projects", "SANA", payments=[{
+        "id": "cccc0001", "received": "2026-07-20T08:00:00.000Z",
+        "amount": 2.675, "currency": "ZAR"}])
+    assert "  2.68 ZAR  " in pay(v, "list").stdout
+    assert "  2.68 ZAR  " in pay(v, "statement", "--thread", "SANA").stdout

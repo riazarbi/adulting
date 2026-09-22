@@ -154,11 +154,17 @@ def as_row(ref, p):
         'id': p.get('id', ''),
         'thread': ref,
         'received': V.local(p['received']).strftime('%Y-%m-%d'),
-        'amount': float(V.dec(p.get('amount', 0))),
+        'amount': V.dec(p.get('amount', 0)),
         'currency': p.get('currency', ''),
         'account': p.get('account', ''),
         'note': p.get('note', ''),
     }
+
+
+def as_output(row):
+    """A row as `--json` and `show` print it: the amount as a plain number.
+    Rows keep the Decimal until this point, so text output rounds exactly."""
+    return {**row, 'amount': float(row['amount'])}
 
 
 def cmd_list(args):
@@ -166,7 +172,7 @@ def cmd_list(args):
             collect(args.thread, args.since, args.until)]
     rows.sort(key=lambda r: (r['received'], r['thread']))
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(json.dumps([as_output(r) for r in rows], indent=2))
         return
     if not rows:
         print("(no payments)")
@@ -190,7 +196,7 @@ def find_payment(pid):
 
 def cmd_show(args):
     _, ref, p = find_payment(args.id)
-    row = as_row(ref, p)
+    row = as_output(as_row(ref, p))
     if args.json:
         print(json.dumps(row, indent=2))
         return

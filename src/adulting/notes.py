@@ -102,7 +102,7 @@ def ingest_actions():
     held = io.StringIO()
     try:
         with contextlib.redirect_stdout(held), contextlib.redirect_stderr(held):
-            rc = tasks.cmd_default(argparse.Namespace(dry_run=False, quiet=True))
+            rc = tasks.ingest(quiet=True)
     except (Exception, SystemExit):  # noqa: BLE001 - a failed ingest must not stop notes
         rc = 1
     if rc != 0 and sys.stderr.isatty():

@@ -175,7 +175,11 @@ def append_line(line):
 # ---------- subcommand: add (UNKNOWN) ----------
 
 def cmd_add(args):
-    text = args.text.strip()
+    return buffer_unknown(args.text)
+
+
+def buffer_unknown(text):
+    text = text.strip()
     if not text:
         die("text is empty")
     line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
@@ -187,10 +191,14 @@ def cmd_add(args):
 # ---------- subcommand: add-text ----------
 
 def cmd_add_text(args):
+    return buffer_text(args.thread, args.text)
+
+
+def buffer_text(thread, text):
     thread = canonical_thread(
-        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md "
-                     f"(expected Projects/X, Processes/X, or Topics/X)")
-    text = args.text.strip()
+        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md "
+                f"(expected Projects/X, Processes/X, or Topics/X)")
+    text = text.strip()
     if not text:
         die("text is empty")
     line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
@@ -202,15 +210,19 @@ def cmd_add_text(args):
 # ---------- subcommand: add-ref ----------
 
 def cmd_add_ref(args):
+    return buffer_ref(args.thread, args.target, args.summary, args.date)
+
+
+def buffer_ref(thread, target, summary, date=None):
     thread = canonical_thread(
-        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
-    target = args.target.strip()
-    summary = (args.summary or '').strip()
+        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
+    target = target.strip()
+    summary = (summary or '').strip()
     if not ref_target_resolves(target):
         die(f"ref target {target!r} does not resolve to a vault file "
             f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
     body = f"[[{target}]]" + (f" {summary}" if summary else "")
-    line = f"- [[{thread}]] REF: {body} <!--{stamp(args.date)}-->"
+    line = f"- [[{thread}]] REF: {body} <!--{stamp(date)}-->"
     append_line(line)
     print(f"buffered: {line}")
     return 0
@@ -219,9 +231,14 @@ def cmd_add_ref(args):
 # ---------- subcommand: add-action ----------
 
 def cmd_add_action(args):
+    return buffer_action(args.thread, args.text, args.due, args.scheduled,
+                         args.priority, args.depends)
+
+
+def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends=None):
     thread = canonical_thread(
-        args.thread, f"thread {args.thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
-    text = args.text.strip()
+        thread, f"thread {thread.strip()!r} does not resolve to threads/<Kind>/<Name>.md")
+    text = text.strip()
     if not text:
         die("description is empty")
     am = ASSIGNEE_PREFIX_RE.match(text)
@@ -238,17 +255,17 @@ def cmd_add_action(args):
         body_text = text
 
     # Validate attr flags at write time.
-    attrs = {'depends': list(args.depends or [])}
-    if args.due:
-        if not V.DATE_RE.match(args.due):
-            die(f"--due must be YYYY-MM-DD; got {args.due!r}")
-        attrs['due'] = args.due
-    if args.scheduled:
-        if not V.DATE_RE.match(args.scheduled):
-            die(f"--scheduled must be YYYY-MM-DD; got {args.scheduled!r}")
-        attrs['scheduled'] = args.scheduled
-    if args.priority:
-        attrs['priority'] = args.priority
+    attrs = {'depends': list(depends or [])}
+    if due:
+        if not V.DATE_RE.match(due):
+            die(f"--due must be YYYY-MM-DD; got {due!r}")
+        attrs['due'] = due
+    if scheduled:
+        if not V.DATE_RE.match(scheduled):
+            die(f"--scheduled must be YYYY-MM-DD; got {scheduled!r}")
+        attrs['scheduled'] = scheduled
+    if priority:
+        attrs['priority'] = priority
     for d in attrs['depends']:
         if not V.UUID8_RE.match(d):
             die(f"--depends must be 8 hex chars; got {d!r}")
@@ -269,14 +286,13 @@ def add_ref(thread, target, summary, date=None, quiet=True):
     With quiet=True nothing is printed, which is what `hours` and `payments`
     want: a warning on stderr would cost the caller its stdout.
     """
-    args = argparse.Namespace(thread=thread, target=target, summary=summary, date=date)
     held = io.StringIO()
     try:
         if quiet:
             with contextlib.redirect_stdout(held), contextlib.redirect_stderr(held):
-                cmd_add_ref(args)
+                buffer_ref(thread, target, summary, date)
         else:
-            cmd_add_ref(args)
+            buffer_ref(thread, target, summary, date)
     except (Exception, SystemExit):  # noqa: BLE001 - never break the caller's write
         return False
     return True
@@ -443,6 +459,10 @@ def regroup_lines(entries, unknowns, unparsed):
 # ---------- subcommand: tend ----------
 
 def cmd_tend(args):
+    return tend(args.quiet)
+
+
+def tend(quiet=False):
     """Regroup and validate. Idempotent. Returns 0 if clean, 1 if any
     violations, UNKNOWN entries, or unparsed lines remain."""
     lines = read_buffer()
@@ -467,7 +487,7 @@ def cmd_tend(args):
 
     if not violations:
         groups = sorted({(e['thread'], e['date']) for e in entries2})
-        if not args.quiet:
+        if not quiet:
             print(f"buffer tended: {len(entries2)} entries, "
                   f"{len(groups)} group(s).")
         return 0
@@ -487,7 +507,7 @@ def cmd_flush(args):
     logs/<thread>/<date>.md (append if exists) and remove flushed
     entries from buffer. Atomic per-flush — if validation fails, the
     buffer is left as `tend` left it and nothing is written."""
-    rc = cmd_tend(argparse.Namespace(quiet=True))
+    rc = tend(quiet=True)
     if rc != 0:
         return rc
 
@@ -558,7 +578,7 @@ def cmd_flush(args):
     # flush: the entries are safe in the logs and `tasks` can be re-run.
     from adulting import tasks
     try:
-        tasks.cmd_default(argparse.Namespace(dry_run=False, quiet=False))
+        tasks.ingest()
     except (Exception, SystemExit) as e:  # noqa: BLE001
         print(f"buffer: flushed, but the task ingest failed: {e}", file=sys.stderr)
     return 0
@@ -597,26 +617,19 @@ def format_suggestion(proposal):
 
 
 def dispatch_proposal(proposal, raw_text):
-    """Invoke the matching cmd_* with a synthesized argparse.Namespace."""
+    """Buffer the entry a proposal describes."""
     sub = proposal['subcmd']
     if sub == 'add':
-        return cmd_add(argparse.Namespace(text=raw_text))
+        return buffer_unknown(raw_text)
     if sub == 'add-text':
-        return cmd_add_text(argparse.Namespace(
-            thread=proposal['thread'], text=proposal['body']))
+        return buffer_text(proposal['thread'], proposal['body'])
     if sub == 'add-ref':
-        return cmd_add_ref(argparse.Namespace(
-            thread=proposal['thread'],
-            target=proposal.get('ref_target') or '',
-            summary=proposal.get('ref_summary') or ''))
+        return buffer_ref(proposal['thread'], proposal.get('ref_target') or '',
+                          proposal.get('ref_summary') or '')
     if sub == 'add-action':
-        return cmd_add_action(argparse.Namespace(
-            thread=proposal['thread'],
-            text=proposal['body'],
-            due=proposal.get('due'),
-            scheduled=proposal.get('scheduled'),
-            priority=proposal.get('priority'),
-            depends=[]))
+        return buffer_action(proposal['thread'], proposal['body'],
+                             proposal.get('due'), proposal.get('scheduled'),
+                             proposal.get('priority'))
     die(f"internal error: unknown subcmd {sub!r}")
 
 
@@ -628,7 +641,7 @@ def cmd_suggest(args):
     if proposal['subcmd'] == 'add':
         if not args.quiet:
             print("no structured suggestion; storing as UNKNOWN.")
-        return cmd_add(argparse.Namespace(text=args.text))
+        return buffer_unknown(args.text)
 
     cmd_str = format_suggestion(proposal)
     print(f"suggested:\n  {cmd_str}")
@@ -637,7 +650,7 @@ def cmd_suggest(args):
         # Safe default: capture the raw text rather than run a suggestion
         # nobody accepted. The printed command can be run as-is instead.
         print("not accepted (pass -y to accept); storing as UNKNOWN.")
-        return cmd_add(argparse.Namespace(text=args.text))
+        return buffer_unknown(args.text)
     return dispatch_proposal(proposal, args.text)
 
 

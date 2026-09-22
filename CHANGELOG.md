@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part B (B6): plain functions, not fake argparse results
+
+Commands called each other by building a fake `argparse.Namespace` to pass to the other's `cmd_*` function, so a reader had to find the argparse setup to learn what a call needed.
+
+- **The work now lives in plain functions with ordinary arguments:** `buffer.buffer_unknown(text)`, `buffer_text(thread, text)`, `buffer_ref(thread, target, summary, date)`, `buffer_action(thread, text, due, scheduled, priority, depends)`, `buffer.tend(quiet)` and `tasks.ingest(dry_run, quiet)`. Each `cmd_*` is now a one-line adapter from the parsed arguments.
+- **Callers use them directly:** `buffer flush` (tend, then ingest), `buffer suggest -y`, `buffer.add_ref` (used by `hours`, `payments` and `notes`), `tasks add`, and the pre-pass in `notes`. No `argparse.Namespace(` is left in `src/`.
+- **Verified on the vault copy:** the same run of `buffer add`, `add-text`, `add-ref`, `add-action`, `suggest` (with and without `-y`), `tend`, `flush` (with its ingest), `tasks add`, bare `tasks`, `hours log` and `notes new` gives identical output and identical vault changes before and after, ids and clock times masked. **674 passing.**
+
 ## 2026-09-22 - review fixes, part B (B5): lint's record blocks
 
 - **One block reader for hours and payments files.** `validate_hours_block` and `validate_payments_block` each carried the same twenty lines: find the block, refuse a second one, parse the JSON, check its shape. `lint.read_block` does that once. The messages are unchanged, down to "tracker JSON" versus plain "JSON".

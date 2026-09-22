@@ -254,6 +254,10 @@ def find_action_lines(text):
 
 
 def cmd_default(args):
+    return ingest(args.dry_run, args.quiet)
+
+
+def ingest(dry_run=False, quiet=False):
     """No subcommand: walk notes/logs and ingest each ACTION: line."""
     existing = {a.uuid for a in walk_anchors()}
     plan = []
@@ -283,7 +287,7 @@ def cmd_default(args):
             plan.append((path, i, assignee, body, attrs, errors))
 
     if not plan and not unreadable:
-        if not args.quiet:
+        if not quiet:
             print("Ingested: 0.  Failed: 0.")
         return 0
 
@@ -308,8 +312,8 @@ def cmd_default(args):
             depends=tuple(attrs.get('depends', [])),
         )
         new_line = format_anchor(anchor)
-        if args.dry_run:
-            if not args.quiet:
+        if dry_run:
+            if not quiet:
                 print(f"would: {new_line}")
             continue
         lines = path.read_text(encoding='utf-8').split('\n')
@@ -318,7 +322,7 @@ def cmd_default(args):
         tmp.write_text('\n'.join(lines), encoding='utf-8')
         os.replace(tmp, path)
         succeeded += 1
-        if not args.quiet:
+        if not quiet:
             short = body[:60] + ('...' if len(body) > 60 else '')
             print(f"ingested: {u}  {prefix}  {short}")
 
@@ -330,7 +334,7 @@ def cmd_default(args):
             for e in errs:
                 print(f"  {p}: {e}", file=sys.stderr)
         print(file=sys.stderr)
-    if not args.quiet:
+    if not quiet:
         if succeeded or failed:
             print(f"Ingested: {succeeded}.  Failed: {len(failed)}.")
     return 1 if failed else 0
@@ -342,10 +346,8 @@ def cmd_add(args):
     """`tasks add` is `buffer add-action` under another name: the ACTION is
     buffered, and becomes a task on the next flush and ingest."""
     from adulting import buffer
-    return buffer.cmd_add_action(argparse.Namespace(
-        thread=args.thread, text=args.text, due=args.due,
-        scheduled=args.scheduled, priority=args.priority,
-        depends=args.depends or []))
+    return buffer.buffer_action(args.thread, args.text, args.due,
+                                args.scheduled, args.priority, args.depends)
 
 
 # ---------- subcommand: done ----------

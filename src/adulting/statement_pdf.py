@@ -192,7 +192,7 @@ def render(st, out_path):
 
     doc = markdown(st, supplier, client_party, bank)
     out_path = Path(out_path).resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    V.make_dir(out_path.parent)
 
     with tempfile.TemporaryDirectory() as workdir:
         src = Path(workdir) / 'statement.md'

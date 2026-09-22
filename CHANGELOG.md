@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - an output folder that cannot be made is an error, not a traceback
+
+Found while checking the error-message change on the vault copy, and present before this refactor: `payments statement --pdf` into a folder that cannot be created printed a Python traceback. So did `notes pdf|minutes|agenda --out`.
+
+- **`vault.make_dir`** creates the folder or stops with `<command>: error: cannot create <folder>: <reason>`, e.g. `Not a directory`. Only these two commands create a folder the user named, and both now use it.
+- **Tests:** one for each command, both failing with the traceback before the fix. **679 passing.**
+
 ## 2026-09-22 - review fixes, part C: every error looks the same
 
 Errors came in three shapes, depending on the command: `error: text is empty` (`buffer`, `tasks`, `commit`), `hours: empty description` (`hours`, `payments`, `notes`, `search`), and no prefix at all (`threads`, `people`: `not found: Nope`). Decided 2026-09-22: every message looks the same, behind one shared helper.

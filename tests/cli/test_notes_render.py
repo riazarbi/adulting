@@ -130,3 +130,11 @@ def test_a_relative_out_dir_is_relative_to_where_you_run_it(v, tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout == f"{cwd / 'rel' / 'with_summary.md'}\n{cwd / 'rel' / 'with_summary.md.pdf'}\n"
     assert (cwd / "rel" / "with_summary.md.pdf").stat().st_size > 1000
+
+
+def test_an_out_dir_that_cannot_be_made_is_an_error_not_a_traceback(v, tmp_path):
+    blocker = tmp_path / "a-file"
+    blocker.write_text("")
+    r = v.run("pdf", "with_summary", "--out", str(blocker / "out"), cli="notes")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"notes: error: cannot create {blocker / 'out'}: Not a directory\n"

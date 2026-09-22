@@ -236,7 +236,7 @@ def cmd_render(args):
     source = note_path(args.stem)
     # Absolute, because pandoc runs from a scratch directory.
     out_dir = (Path(args.out).expanduser() if args.out else Path.home() / 'Downloads').resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    V.make_dir(out_dir)
     text = source.read_text(**render.ENCODING)
     owner = V.read_config().get('owner', '')
     if args.subcommand == 'pdf':

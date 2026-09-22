@@ -48,6 +48,14 @@ def warn(msg):
     print(f"{program()}: warning: {msg}", file=sys.stderr)
 
 
+def make_dir(path):
+    """Create a folder the user named, and its parents, or stop saying why not."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        die(f"cannot create {path}: {e.strerror}")
+
+
 KIND_DIRS = {'project': 'Projects', 'process': 'Processes', 'topic': 'Topics'}
 
 CLOSE = '```'

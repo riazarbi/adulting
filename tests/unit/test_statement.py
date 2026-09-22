@@ -336,3 +336,15 @@ def test_check_refuses_a_statement_that_does_not_add_up(monkeypatch, capsys):
             S.check({**good, **bad})
         assert exc.value.code == 1
         assert capsys.readouterr().err == f"payments: error: statement check failed: {message}\n"
+
+
+def test_a_pdf_folder_that_cannot_be_made_is_an_error_not_a_traceback(vault):
+    sana(vault)
+    vault.run("log", "SANA Partners", "work", "-m", "60", "-r", "100",
+              "-d", "2026-06-01", "-t", "09:00", cli="hours")
+    blocker = vault.home / "a-file"
+    blocker.write_text("")
+    r = vault.run("statement", "--thread", "SANA Partners", "--pdf", str(blocker / "out" / "s.pdf"),
+                  "--as-of", "2026-06-30", cli="payments")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"payments: error: cannot create {blocker / 'out'}: Not a directory\n"

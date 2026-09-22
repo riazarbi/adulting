@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part B (B1, B2): one copy of the shared helpers
+
+The review's part B lists code that several commands each kept their own copy of. These two steps move the simplest copies into `vault.py`. No output changes.
+
+- **B1: one `vault_home()`.** `commit`, `people`, `buffer`, `threads`, `lint`, `tasks` and the suggester each defined their own; all now import the vault's. Unused imports went with them.
+- **B2: shared record helpers.** `vault.HOURS_FENCE` and `vault.PAYMENTS_FENCE` replace five copies of the fence strings. `vault.minutes_of` replaces five copies of the minutes sum, and `vault.in_window` replaces four copies of the since/until check. `vault.is_currency_code` replaces seven copies of the ISO-code regex. Each command keeps its own error message; `search`'s record filter keeps its own date check, which also drops undated records.
+- **Tests:** `minutes_of` moved from the hours tests to the vault tests, with new tests for `in_window` and `is_currency_code`.
+- **Verified on the vault copy:** hours report and list, payments statement and list, and search activity and stream, with and without date windows, give identical output before and after (1,907 lines). **671 passing.**
+
 ## 2026-09-22 - review fixes, parts D1 and D6: tests that can fail, and labelled deferred bugs
 
 The review found tests that pass whatever the code does, and deferred bugs whose tests either were not labelled or presented the bug as intended. This fixes both.

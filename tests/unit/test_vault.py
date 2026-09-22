@@ -228,3 +228,24 @@ def test_is_plain_name():
         assert V.is_plain_name(name), name
     for name in ("../x", "a/b", "/abs", ".hidden", "."):
         assert not V.is_plain_name(name), name
+
+
+def test_minutes_of_counts_whole_minutes_and_is_zero_without_both_ends():
+    e = {"startTime": "2026-08-04T07:00:00.000Z", "endTime": "2026-08-04T08:30:59.000Z"}
+    assert V.minutes_of(e) == 90
+    assert V.minutes_of({"startTime": e["startTime"]}) == 0
+    assert V.minutes_of({"endTime": e["endTime"]}) == 0
+
+
+def test_in_window_includes_both_bounds_and_treats_empty_as_open():
+    assert V.in_window("2026-08-04", "2026-08-04", "2026-08-04")
+    assert not V.in_window("2026-08-03", "2026-08-04", "")
+    assert not V.in_window("2026-08-05", None, "2026-08-04")
+    assert V.in_window("2026-08-05", None, None)
+
+
+def test_is_currency_code_wants_three_capitals():
+    assert V.is_currency_code("ZAR")
+    assert not V.is_currency_code("zar")
+    assert not V.is_currency_code("ZA")
+    assert not V.is_currency_code("ZARR")

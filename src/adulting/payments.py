@@ -22,7 +22,6 @@ buffer can be written.
 
 import argparse
 import json
-import re
 import sys
 from decimal import Decimal, InvalidOperation
 
@@ -33,13 +32,13 @@ from adulting import statement as S
 
 TOOL = 'payments'
 SUBDIR = 'payments'
-FENCE = '```adulting-payments'
+FENCE = V.PAYMENTS_FENCE
 HEADING = ' — payments'
 KEY = 'payments'
 
 # `hours` side, for the statement.
 HOURS_SUBDIR = 'hours'
-HOURS_FENCE = '```simple-time-tracker'
+HOURS_FENCE = V.HOURS_FENCE
 
 BY_RECEIVED = lambda p: p.get('received') or ''  # noqa: E731
 
@@ -142,9 +141,7 @@ def collect(thread=None, since=None, until=None):
         if not p.get('received'):
             continue
         day = V.local(p['received']).strftime('%Y-%m-%d')
-        if since and day < since:
-            continue
-        if until and day > until:
+        if not V.in_window(day, since, until):
             continue
         yield path, ref, p
 
@@ -213,7 +210,7 @@ def cmd_edit(args):
         target['amount'] = amount_json(parse_amount(args.amount))
     if args.currency is not None:
         ccy = args.currency.upper()
-        if not re.match(r'^[A-Z]{3}$', ccy):
+        if not V.is_currency_code(ccy):
             sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
     if args.account is not None:
@@ -263,11 +260,9 @@ def billed(thread=None, since=None, until=None):
         if not e.get('currency'):
             continue
         day = V.local(e['startTime']).strftime('%Y-%m-%d')
-        if since and day < since:
+        if not V.in_window(day, since, until):
             continue
-        if until and day > until:
-            continue
-        mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
+        mins = V.minutes_of(e)
         amt = S.charge_of(mins, e.get('rate', 0) or 0)
         out.setdefault((ref, e.get('currency', '')), V.dec(0))
         out[(ref, e.get('currency', ''))] += amt
@@ -300,7 +295,7 @@ def one_thread_statement(thread_arg, as_of):
         # on a statement in that currency, as the text statement has it.
         if e.get('currency') != currency:
             continue
-        mins = int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
+        mins = V.minutes_of(e)
         entries.append({'on': V.local(e['startTime']).date(),
                         'description': e.get('name', ''),
                         'minutes': mins,

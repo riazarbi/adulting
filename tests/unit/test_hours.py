@@ -14,11 +14,6 @@ def entry(start="2026-08-04T07:00:00.000Z", end="2026-08-04T08:30:00.000Z", **ov
     return e
 
 
-def test_minutes_of():
-    assert H.minutes_of(entry()) == 90
-    assert H.minutes_of(entry(end=None)) == 0
-
-
 def test_money_of_is_a_decimal_rounded_to_the_cent():
     assert H.money_of(entry(end="2026-08-04T07:20:00.000Z", rate=2500)) == Decimal("833.33")
     assert H.money_of(entry(end="2026-08-04T07:40:00.000Z", rate=2500)) == Decimal("1666.67")
@@ -29,7 +24,7 @@ def test_build_entry_omits_currency_for_unbilled_time():
     when = datetime(2026, 8, 4, 9, 0).astimezone()
     billed = H.build_entry("Work", when, 45, 1800, "ZAR", set())
     assert billed["currency"] == "ZAR" and billed["rate"] == 1800
-    assert H.minutes_of(billed) == 45
+    assert H.V.minutes_of(billed) == 45
     unbilled = H.build_entry("Run", when, 30, 0, None, set())
     assert "currency" not in unbilled
 

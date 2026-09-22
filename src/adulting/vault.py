@@ -34,7 +34,9 @@ ISO = '%Y-%m-%dT%H:%M:%S.000Z'
 
 # Every record-bearing directory, as (subdir, fence). Used for vault-wide id
 # uniqueness so an id is never reused across tools.
-RECORD_DIRS = [('hours', '```simple-time-tracker'), ('payments', '```adulting-payments')]
+HOURS_FENCE = '```simple-time-tracker'
+PAYMENTS_FENCE = '```adulting-payments'
+RECORD_DIRS = [('hours', HOURS_FENCE), ('payments', PAYMENTS_FENCE)]
 
 
 # ---------- config ----------
@@ -254,7 +256,7 @@ def resolve_currency(tool, tpath, ref, flag):
                  f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
                  f"or pass --currency")
     currency = currency.upper()
-    if not re.match(r'^[A-Z]{3}$', currency):
+    if not is_currency_code(currency):
         sys.exit(f"{tool}: currency {currency!r} is not a 3-letter ISO code")
     return currency
 
@@ -427,6 +429,24 @@ def from_iso(s):
 
 def local(s):
     return from_iso(s).astimezone()
+
+
+def minutes_of(e):
+    """Whole minutes between an entry's startTime and endTime; 0 if either
+    is missing."""
+    if not e.get('startTime') or not e.get('endTime'):
+        return 0
+    return int((from_iso(e['endTime']) - from_iso(e['startTime'])).total_seconds() // 60)
+
+
+def in_window(day, since, until):
+    """True if the YYYY-MM-DD `day` falls within since..until. Either bound
+    may be empty, meaning open-ended."""
+    return (not since or day >= since) and (not until or day <= until)
+
+
+def is_currency_code(code):
+    return bool(re.match(r'^[A-Z]{3}$', code))
 
 
 def when_from_flags(tool, date_s, time_s):

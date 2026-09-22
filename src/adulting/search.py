@@ -37,8 +37,8 @@ from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 
 TOOL = 'search'
-HOURS_FENCE = '```simple-time-tracker'
-PAYMENTS_FENCE = '```adulting-payments'
+HOURS_FENCE = V.HOURS_FENCE
+PAYMENTS_FENCE = V.PAYMENTS_FENCE
 
 STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
                 'thread', 'person', 'pending')
@@ -216,8 +216,7 @@ def _safe_load(subdir, fence, key='entries'):
 
 def minutes_between(e):
     try:
-        return int((V.from_iso(e['endTime'])
-                    - V.from_iso(e['startTime'])).total_seconds() // 60)
+        return V.minutes_of(e)
     except Exception:  # noqa: BLE001
         return 0
 
@@ -336,12 +335,10 @@ def hours_in_window(since=None, until=None):
         # duration. Slicing the UTC string instead would misfile evening work.
         try:
             d = V.local(start).strftime('%Y-%m-%d')
-            minutes = int((V.from_iso(end) - V.from_iso(start)).total_seconds() // 60)
+            minutes = V.minutes_of(rec)
         except Exception:  # noqa: BLE001 - a malformed entry is skipped, not fatal
             continue
-        if since and d < since:
-            continue
-        if until and d > until:
+        if not V.in_window(d, since, until):
             continue
         if minutes > 0:
             mins[ref] += minutes

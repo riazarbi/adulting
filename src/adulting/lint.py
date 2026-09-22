@@ -15,6 +15,7 @@ import re
 import sys
 from pathlib import Path
 
+from adulting import vault as V
 from adulting.helpjson import emit_helpjson_if_requested
 from adulting.vault import vault_home
 
@@ -474,7 +475,7 @@ def validate_file(path, schemas, registry=None):
 
 # ---------- hours_file: tracker block + vault-wide rules ----------
 
-TRACKER_FENCE = '```simple-time-tracker'
+TRACKER_FENCE = V.HOURS_FENCE
 # currency is optional on an hours entry: absent means unbilled time.
 # The ISO-code check further down still applies when one is present.
 ENTRY_FIELDS = ('name', 'startTime', 'endTime', 'id', 'rate')
@@ -534,7 +535,7 @@ def validate_hours_block(text, path, registry=None):
         if st and en and ISO_RE.match(str(st)) and ISO_RE.match(str(en)) and en < st:
             yield (fence_line, f"hours_file: {tag}: endTime precedes startTime")
         ccy = e.get('currency')
-        if ccy and not re.match(r'^[A-Z]{3}$', str(ccy)):
+        if ccy and not V.is_currency_code(str(ccy)):
             yield (fence_line, f"hours_file: {tag}.currency: {ccy!r} is not a 3-letter ISO code")
         rate = e.get('rate')
         if rate is not None and not isinstance(rate, int):
@@ -544,7 +545,7 @@ def validate_hours_block(text, path, registry=None):
                 (path, fence_line))
 
 
-PAYMENTS_FENCE = '```adulting-payments'
+PAYMENTS_FENCE = V.PAYMENTS_FENCE
 PAYMENT_FIELDS = ('id', 'received', 'amount', 'currency')
 
 
@@ -586,7 +587,7 @@ def validate_payments_block(text, path, registry=None):
         if recv and not ISO_RE.match(str(recv)):
             yield (fence_line, f"payments_file: {tag}.received: {recv!r} is not ISO 8601 UTC")
         ccy = p.get('currency')
-        if ccy and not re.match(r'^[A-Z]{3}$', str(ccy)):
+        if ccy and not V.is_currency_code(str(ccy)):
             yield (fence_line, f"payments_file: {tag}.currency: {ccy!r} is not a 3-letter ISO code")
         amt = p.get('amount')
         if amt is not None:

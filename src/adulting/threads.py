@@ -9,7 +9,6 @@ be rebuilt when we know what views we actually want from notes data.
 
 import argparse
 import json
-import re
 import sys
 from datetime import datetime
 
@@ -42,7 +41,7 @@ def cmd_new(args):
 
     # Billing defaults for `hours`. Optional -- most threads are never billed.
     currency = (args.currency or '').strip().upper()
-    if currency and not re.match(r'^[A-Z]{3}$', currency):
+    if currency and not V.is_currency_code(currency):
         sys.exit(f"currency {currency!r} is not a 3-letter ISO code")
     rate = args.rate
     if rate is not None and not currency:

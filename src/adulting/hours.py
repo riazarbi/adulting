@@ -37,7 +37,6 @@ warning on stderr would cost the caller its stdout.
 
 import argparse
 import json
-import re
 import sys
 from datetime import timedelta
 
@@ -48,7 +47,7 @@ from adulting import vault as V
 
 TOOL = 'hours'
 SUBDIR = 'hours'
-FENCE = '```simple-time-tracker'
+FENCE = V.HOURS_FENCE
 HEADING = ' — hours'
 
 DEFAULT_MINUTES = 60
@@ -59,16 +58,10 @@ BY_START = lambda e: e.get('startTime') or ''  # noqa: E731
 
 # ---------- entries ----------
 
-def minutes_of(e):
-    if not e.get('startTime') or not e.get('endTime'):
-        return 0
-    return int((V.from_iso(e['endTime']) - V.from_iso(e['startTime'])).total_seconds() // 60)
-
-
 def money_of(e):
     """Decimal, not float: these figures get invoiced. Rounded to the cent
     per entry, as the statement does, so every total is a sum of the lines."""
-    return S.charge_of(minutes_of(e), e.get('rate', 0) or 0)
+    return S.charge_of(V.minutes_of(e), e.get('rate', 0) or 0)
 
 
 def resolve_rate(tpath, flag):
@@ -97,7 +90,7 @@ def resolve_billing(tpath, ref, currency_flag, rate_flag):
                      f"omit --rate to log the time as unbilled")
         return None, 0
     currency = currency.upper()
-    if not re.match(r'^[A-Z]{3}$', currency):
+    if not V.is_currency_code(currency):
         sys.exit(f"{TOOL}: currency {currency!r} is not a 3-letter ISO code")
     return currency, resolve_rate(tpath, rate_flag)
 
@@ -138,7 +131,7 @@ def append_entry(kind, name, entry):
     # `ref` is already the directory form (Processes/SGB); `kind` is the
     # frontmatter form (process) and would not resolve as a path.
     buffer_ref(ref, f"hours/{ref}",
-               f"{V.fmt_duration(minutes_of(entry))} {entry['name']} "
+               f"{V.fmt_duration(V.minutes_of(entry))} {entry['name']} "
                f"({entry['id']})",
                date=V.local(entry['startTime']).strftime('%Y-%m-%d'))
     return path
@@ -152,7 +145,7 @@ def report_logged(entry, ref):
     else:
         tail = "unbilled"
     print(f"logged {entry['id']}  {ref}  {when}  "
-          f"{V.fmt_duration(minutes_of(entry))} {tail}")
+          f"{V.fmt_duration(V.minutes_of(entry))} {tail}")
 
 
 # ---------- log ----------
@@ -189,9 +182,7 @@ def collect(thread=None, since=None, until=None):
         if not e.get('startTime'):
             continue
         day = V.local(e['startTime']).strftime('%Y-%m-%d')
-        if since and day < since:
-            continue
-        if until and day > until:
+        if not V.in_window(day, since, until):
             continue
         yield path, ref, e
 
@@ -202,7 +193,7 @@ def as_row(ref, e):
         'thread': ref,
         'date': V.local(e['startTime']).strftime('%Y-%m-%d'),
         'time': V.local(e['startTime']).strftime('%H:%M'),
-        'minutes': minutes_of(e),
+        'minutes': V.minutes_of(e),
         'rate': e.get('rate', 0),
         'currency': e.get('currency', ''),
         'amount': money_of(e),
@@ -240,7 +231,7 @@ def cmd_report(args):
         key = (ref, e.get('currency', ''))
         b = buckets.setdefault(key, {'thread': ref, 'currency': key[1],
                                      'minutes': 0, 'amount': V.dec(0), 'entries': 0})
-        b['minutes'] += minutes_of(e)
+        b['minutes'] += V.minutes_of(e)
         b['amount'] += money_of(e)
         b['entries'] += 1
     out = sorted(buckets.values(),
@@ -304,7 +295,7 @@ def cmd_edit(args):
         target['rate'] = int(args.rate)
     if args.currency is not None:
         ccy = args.currency.upper()
-        if not re.match(r'^[A-Z]{3}$', ccy):
+        if not V.is_currency_code(ccy):
             sys.exit(f"{TOOL}: currency {ccy!r} is not a 3-letter ISO code")
         target['currency'] = ccy
     # As in `log`: a rate is money, and money needs a currency.
@@ -313,7 +304,7 @@ def cmd_edit(args):
 
     if args.date or args.time:
         start = V.local(target['startTime'])
-        mins = minutes_of(target)
+        mins = V.minutes_of(target)
         when = V.when_from_flags(TOOL, args.date or start.strftime('%Y-%m-%d'),
                                  args.time or start.strftime('%H:%M'))
         target['startTime'] = V.to_iso(when)

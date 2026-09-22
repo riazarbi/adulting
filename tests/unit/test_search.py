@@ -65,19 +65,11 @@ def test_apply_filters_and_newest_first_order():
     assert S.apply_filters(rows, text="agenda roof") == []
 
 
-def test_line_patterns():
-    m = S.ANCHOR_RE.match("DONE: [#H] (Riaz Arbi) Filed it <!--abcd1234 entry:2026-08-20 end:2026-08-25-->")
-    assert m.groups() == ("DONE", "Riaz Arbi", "Filed it", "abcd1234", "2026-08-20", "2026-08-25")
-    m = S.BUFFER_LINE_RE.match("- [[Processes/SGB]] TEXT: Pending thought <!--2026-08-30T10:05:00-->")
-    assert m.groups() == ("Processes/SGB", "TEXT", "Pending thought", "2026-08-30", "10:05")
-    assert S.SELF_REF_RE.match("REF: [[hours/Projects/Alpha]] 1h")
-    assert not S.SELF_REF_RE.match("REF: [[notes/2026-08-22-09-00-00]] Agenda")
-
 
 # ---------- against a real vault ----------
 
 @pytest.fixture
-def home():
+def search_home():
     h = S.V.vault_home()
     for rel, text in {
         "threads/Processes/SGB.md": "---\nstatus: open\nstarted: 2026-01-05\n---\n",
@@ -97,37 +89,37 @@ def home():
     return h
 
 
-def test_note_records_skip_files_without_frontmatter(home):
+def test_note_records_skip_files_without_frontmatter(search_home):
     notes = S.note_records()
     assert [(n["date"], n["topic"], n["threads"]) for n in notes] == [
         ("2026-08-27", "Agenda", ["Processes/SGB"])]
 
 
-def test_log_records_recover_the_thread_from_the_path(home):
+def test_log_records_recover_the_thread_from_the_path(search_home):
     [log] = S.log_records()
     assert log["threads"] == ["Processes/SGB"]
     assert log["entries"] == 3
     assert log["date"] == "2026-08-28"
 
 
-def test_stream_documents_drop_self_refs(home):
+def test_stream_documents_drop_self_refs(search_home):
     events = [(e["kind"], e["summary"]) for e in S.stream_documents()]
     assert events == [("note", "Agenda"), ("log", "one"), ("task", "Chase")]
 
 
-def test_stream_entities_need_a_valid_started_date(home):
+def test_stream_entities_need_a_valid_started_date(search_home):
     assert [(e["kind"], e["summary"]) for e in S.stream_entities()] == [
         ("thread", "thread opened: Processes/SGB")]
 
 
-def test_stream_pending_parses_and_drops_self_refs(home):
+def test_stream_pending_parses_and_drops_self_refs(search_home):
     [e] = S.stream_pending()
     assert (e["kind"], e["date"], e["time"], e["summary"]) == (
         "pending", "2026-08-30", "10:05", "TEXT: Pending")
-    assert e["path"] == str(home / "buffer.md")
+    assert e["path"] == str(search_home / "buffer.md")
 
 
-def test_resolve_thread_arg(home):
+def test_resolve_thread_arg(search_home):
     assert S.resolve_thread_arg(None) is None
     assert S.resolve_thread_arg("sgb") == "Processes/SGB"
     with pytest.raises(SystemExit):

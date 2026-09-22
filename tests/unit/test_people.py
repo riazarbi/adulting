@@ -3,10 +3,6 @@
 from adulting import people as P
 
 
-def test_resolve_person_strips_the_wikilink_prefix():
-    assert P._resolve_person("  people/Riaz Arbi ") == "Riaz Arbi"
-    assert P._resolve_person("Riaz Arbi") == "Riaz Arbi"
-
 
 def test_discover_people_follows_the_vault_and_skips_non_person_files():
     d = P.people_dir()

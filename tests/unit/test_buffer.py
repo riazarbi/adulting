@@ -62,7 +62,7 @@ def test_regroup_lines_orders_groups_then_unknowns_then_unparsed():
 
 
 @pytest.fixture
-def home():
+def buffer_home():
     h = B.vault_home()
     for rel in ("threads/Projects/SGB.md", "people/Riaz Arbi.md", "notes/n.md",
                 "hours/Projects/SGB.md"):
@@ -71,11 +71,11 @@ def home():
     return h
 
 
-def test_resolvers(home):
+def test_resolvers(buffer_home):
     assert B.canonical_thread("[[Projects/SGB]]", "unused") == "Projects/SGB"
-    assert B.ref_target_resolves("notes/n") == home / "notes/n.md"
-    assert B.ref_target_resolves("Projects/SGB") == home / "threads/Projects/SGB.md"
-    assert B.ref_target_resolves("hours/Projects/SGB") == home / "hours/Projects/SGB.md"
+    assert B.ref_target_resolves("notes/n") == buffer_home / "notes/n.md"
+    assert B.ref_target_resolves("Projects/SGB") == buffer_home / "threads/Projects/SGB.md"
+    assert B.ref_target_resolves("hours/Projects/SGB") == buffer_home / "hours/Projects/SGB.md"
     for bad in ("", "notes/nope", "assets/x"):
         assert B.ref_target_resolves(bad) is None, bad
 
@@ -85,7 +85,7 @@ def entry(line):
     return e
 
 
-def test_validate_entry(home):
+def test_validate_entry(buffer_home):
     ok = "- [[Projects/SGB]] ACTION: (Riaz Arbi) Do <!--2026-09-10T15:00:00 priority:H-->"
     assert list(B.validate_entry(entry(ok))) == []
     assert list(B.validate_entry(entry(
@@ -97,7 +97,7 @@ def test_validate_entry(home):
         "REF entries do not accept attrs; got 'due:2026-09-20'"]
 
 
-def test_read_append_write_buffer(home):
+def test_read_append_write_buffer(buffer_home):
     assert B.read_buffer() == []
     B.write_buffer(["a", "", ""])
     B.append_line("b")
@@ -107,8 +107,9 @@ def test_read_append_write_buffer(home):
 
 
 def test_format_suggestion_quotes_for_the_shell():
-    assert B._shquote("Projects/SGB") == "Projects/SGB"
-    assert B._shquote("it's here") == "'it'\\''s here'"
+    # Paste-safe: a quote in the text cannot end the argument early.
+    assert B.format_suggestion({"subcmd": "add-text", "thread": "Topics/X", "body": "it's here"}) == \
+        "buffer add-text Topics/X 'it'\"'\"'s here'"
     assert B.format_suggestion({"subcmd": "add-action", "thread": "Projects/SGB",
                                 "body": "Draft scope", "due": "2026-09-30",
                                 "scheduled": None, "priority": "H"}) == \

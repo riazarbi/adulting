@@ -34,16 +34,6 @@ def test_parse_anchor_rejects_other_lines(line):
     assert T.parse_anchor(line) is None
 
 
-def test_sort_keys_and_thread_cell():
-    high_late = T.parse_anchor("TASK: [#H] a <!--aaaa0002 entry:2026-05-27 due:2026-06-30-->")
-    high_soon = T.parse_anchor("TASK: [#H] b <!--aaaa0003 entry:2026-05-28 due:2026-06-01-->")
-    none = T.parse_anchor("TASK: c <!--aaaa0001 entry:2026-05-01-->")
-    assert sorted([none, high_late, high_soon], key=T._sort_key) == [high_soon, high_late, none]
-    assert T._thread_sort_key([]) == (1, "")
-    assert T._thread_sort_key(["projects/b", "A"]) == (0, "projects/b")
-    assert T._format_threads([]) == "-"
-    assert T._format_threads(["Projects/SGB", "Topics/X", "Topics/Y"]) == "Projects/SGB +2"
-
 
 def test_validators():
     assert T.validate_date("2026-05-27") == "2026-05-27"
@@ -54,7 +44,7 @@ def test_validators():
 
 
 @pytest.fixture
-def home():
+def tasks_home():
     h = T.vault_home()
     files = {
         "notes/2026-01-01-00-00-00.md": '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\n'
@@ -72,11 +62,11 @@ def home():
     return h
 
 
-def test_walk_anchors_skips_dot_files_and_dirs(home):
+def test_walk_anchors_skips_dot_files_and_dirs(tasks_home):
     assert [(a.uuid, a.line_no) for a in T.walk_anchors()] == [("aaaa0001", 5), ("aaaa0002", 4)]
 
 
-def test_find_anchor(home):
+def test_find_anchor(tasks_home):
     assert T.find_anchor("AAAA0001").body == "one"
     with pytest.raises(SystemExit):
         T.find_anchor("aaaa")
@@ -84,15 +74,15 @@ def test_find_anchor(home):
         T.find_anchor("ffff")
 
 
-def test_mutate_anchor_rewrites_only_that_line(home):
+def test_mutate_anchor_rewrites_only_that_line(tasks_home):
     a = T.find_anchor("aaaa0001")
     T.mutate_anchor(a, priority="M", due="2026-02-01")
-    assert (home / "notes/2026-01-01-00-00-00.md").read_text().split("\n")[4:] == [
+    assert (tasks_home / "notes/2026-01-01-00-00-00.md").read_text().split("\n")[4:] == [
         "", "TASK: [#M] one <!--aaaa0001 entry:2026-01-01 due:2026-02-01-->  ", "plain", ""]
-    assert not list(home.rglob("*.tmp"))
+    assert not list(tasks_home.rglob("*.tmp"))
 
 
-def test_threads_cache_and_resolvers(home):
+def test_threads_cache_and_resolvers(tasks_home):
     cache = T.build_threads_cache()
     assert cache["notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
     assert T.threads_for(T.find_anchor("aaaa0002"), cache) == ["Projects/SGB"]

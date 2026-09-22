@@ -605,6 +605,7 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
+    V.require_vault()
     return args.func(args)
 
 

@@ -2,6 +2,37 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - review fixes, part D (2 of 3): the rest of the test review, and two fixes it turned up
+
+- **Behaviour change: every command refuses a vault that is not a directory.** With `ADULTING_HOME` pointing at nothing, reads reported an empty vault, and `buffer add`, `people new` and `threads new` quietly started a new vault there, so a mistyped path went unnoticed. With it pointing at a file, those four crashed with a traceback. Every command now stops with `<command>: error: ADULTING_HOME is not a directory: <path>`, as `commit` already did, via a new `vault.require_vault()`.
+- **Behaviour change: `buffer suggest` quotes with `shlex.quote`.** It had its own `_shquote`, as the review suggested replacing. A quote in the text is now written `'it'"'"'s'` instead of `'it'\''s'`; both paste the same.
+- **One file per command, finished:**
+  - `test_tasks_output.py` merges into `test_tasks_cli.py`, and `test_search_output.py` into `test_search_cli.py`.
+  - The ten per-command `--help-json` tests become one parametrized test in the new `test_every_command.py`.
+  - The review's duplicates are deleted: ten in `tasks`, four in `search`, one in `commit`.
+- **Exact assertions** where the review found loose ones:
+  - `tasks`: the ingest failures, `next` showing exactly the first five, `done` stamping today's date, `rm-depends` refusing and writing nothing, and `add` writing the exact buffer line.
+  - `buffer rm` errors check the exit code and that the buffer is unchanged.
+  - The `commit` outputs, `people new`'s file, the whole meeting template, and `search overview --json`.
+- **Implementation details no longer tested directly:**
+  - Deleted, with each behaviour covered through the commands: the `tasks` sort keys, `lint._rotate_to_min`, `people._resolve_person` and `search`'s line regexes.
+  - Rewritten: the suggester tests assert which thread wins rather than weight numbers, and the fuzzy-score test asserts ranking order rather than thresholds.
+  - The manual-harvest test reads the section list from the script instead of splitting its source.
+- **New tests:**
+  - `test_no_prompts.py` runs every create and delete command with a real terminal on stdin and "y" already typed. Each must refuse, print nothing to stdout, and leave the vault byte-identical. A static check confirms nothing in `src/` reads stdin. Injecting a terminal-only prompt into `people delete` fails both.
+  - Whole-output unit tests for `render.header` and all three renderers.
+  - The notes ingest pre-pass on every subcommand but `new`, which failed when `last` was made to skip it.
+  - `buffer flush` warning after a real ingest failure, on a read-only notes folder.
+  - `payments log -d` filing its REF under that day.
+  - The vault check for all ten commands.
+- **Harness:**
+  - `Vault` gains `write`, `run_on_a_terminal`, `snapshot` and a `cwd` for `run`, and loses the unused `check`.
+  - A comment explains why isolation happens both per session and per test.
+  - Eight per-file `write` helpers, three `THREAD` constants, `commit`'s own `GitVault` and the notes tests' direct subprocess calls give way to the conftest helpers. The one exception is the pty test that needs stderr on the terminal, and a comment says why.
+  - Fixtures named `v` or `home` now say what they hold: `buffer_vault`, `notes_vault`, `tasks_home` and so on.
+  - The empty, untracked `tests/fixtures/threads/` is gone.
+- **705 passing.**
+
 ## 2026-09-22 - review fixes, part D (1 of 3): one test file per command, duplicates gone, exact assertions
 
 The review found tests split across files by refactor unit rather than by command, with about 50 duplicates and many assertions that check a substring or only the exit code.

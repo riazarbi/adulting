@@ -432,7 +432,14 @@ def test_a_pdf_folder_that_cannot_be_made_is_an_error_not_a_traceback(vault):
     assert r.stderr == f"payments: error: cannot create {blocker / 'out'}: Not a directory\n"
 
 
-def test_help_json_lists_subcommands(vault):
-    manifest = json.loads(pay(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == [
-        "log", "list", "statement", "show", "edit", "rm"]
+
+def test_a_backdated_payment_refs_into_that_days_log(vault):
+    """As for hours: the REF is filed under the day the money arrived, not
+    the day the buffer was flushed."""
+    vault.write_thread("Projects", "SANA", currency="ZAR")
+    pay(vault, "log", "Projects/SANA", "15000", "-d", "2026-08-04")
+    vault.run("flush", cli="buffer")
+    logs = sorted(p.name for p in (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    assert logs == ["2026-08-04.md"]
+    assert re.fullmatch(r"REF: \[\[payments/Projects/SANA\]\] 15000 ZAR received \([0-9a-f]{8}\)",
+                        vault.lines("logs/Projects/SANA/2026-08-04.md")[-2])

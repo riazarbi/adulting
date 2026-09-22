@@ -46,6 +46,7 @@ import argparse
 import contextlib
 import io
 import re
+import shlex
 import sys
 from datetime import datetime
 
@@ -584,22 +585,15 @@ def cmd_flush(args):
 
 # ---------- subcommand: suggest ----------
 
-def _shquote(s):
-    """Minimal shell-quoting so the suggested command is paste-safe."""
-    if s and re.match(r'^[A-Za-z0-9_./:@=+-]+$', s):
-        return s
-    return "'" + s.replace("'", "'\\''") + "'"
-
-
 def format_suggestion(proposal):
     """Render a proposal dict as the shell command a user would type."""
     sub = proposal['subcmd']
     if sub == 'add':
-        return f"buffer add {_shquote(proposal['body'])}"
+        return f"buffer add {shlex.quote(proposal['body'])}"
     if sub == 'add-text':
-        return f"buffer add-text {_shquote(proposal['thread'])} {_shquote(proposal['body'])}"
+        return f"buffer add-text {shlex.quote(proposal['thread'])} {shlex.quote(proposal['body'])}"
     if sub == 'add-action':
-        parts = ['buffer', 'add-action', _shquote(proposal['thread']), _shquote(proposal['body'])]
+        parts = ['buffer', 'add-action', shlex.quote(proposal['thread']), shlex.quote(proposal['body'])]
         if proposal.get('due'):
             parts += ['--due', proposal['due']]
         if proposal.get('scheduled'):
@@ -607,7 +601,7 @@ def format_suggestion(proposal):
         if proposal.get('priority'):
             parts += ['--priority', proposal['priority']]
         return ' '.join(parts)
-    return f"buffer add {_shquote(proposal.get('body', ''))}"
+    return f"buffer add {shlex.quote(proposal.get('body', ''))}"
 
 
 def dispatch_proposal(proposal, raw_text):
@@ -704,6 +698,7 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
+    V.require_vault()
     return args.func(args)
 
 

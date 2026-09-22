@@ -26,27 +26,19 @@ KICKOFF = ('---\ntopic: Kickoff\ntype: Meeting\nthreads:\n  - "[[Projects/SGB]]"
 
 
 def notes(vault, *argv):
-    return subprocess.run([command_path("notes", vault.env), *argv], capture_output=True,
-                          text=True, env=vault.env, input="")
-
-
-def write(vault, rel, text):
-    p = vault.home / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-    return p
+    return vault.run(*argv, cli="notes", input="")
 
 
 @pytest.fixture
-def v(vault):
-    write(vault, "threads/Projects/SGB.md", "---\nstatus: open\n---\n")
-    write(vault, "threads/Topics/Zeta.md", "---\nstatus: open\n---\n")
-    write(vault, "notes/2026-09-10-14-30-00.md", KICKOFF)
+def notes_vault(vault):
+    vault.write("threads/Projects/SGB.md", "---\nstatus: open\n---\n")
+    vault.write("threads/Topics/Zeta.md", "---\nstatus: open\n---\n")
+    vault.write("notes/2026-09-10-14-30-00.md", KICKOFF)
     # Written on the 11th about something that happened on the 12th.
-    write(vault, "notes/2026-09-11-09-00-00.md",
+    vault.write("notes/2026-09-11-09-00-00.md",
           '---\ntopic: "Quoted, topic"\ntype: Report\nthreads:\n  - "[[Topics/Zeta]]"\n'
           "timestamp: 2026-09-12-08-00-00\n---\n\nbody\n")
-    write(vault, "notes/2026-09-12-07-00-00.md",
+    vault.write("notes/2026-09-12-07-00-00.md",
           '---\ntopic: Same day earlier\ntype: Log\nthread: "[[Projects/SGB]]"\n'
           "timestamp: 2026-09-12-07-00-00\n---\n\nbody\n")
     return vault
@@ -54,8 +46,8 @@ def v(vault):
 
 # ---------- list ----------
 
-def test_list_is_ordered_by_timestamp_not_filename(v):
-    r = notes(v, "list")
+def test_list_is_ordered_by_timestamp_not_filename(notes_vault):
+    r = notes(notes_vault, "list")
     assert (r.returncode, r.stderr) == (0, "")
     assert r.stdout == (
         "2026-09-10-14-30-00  2026-09-10  Meeting  Projects/SGB, Topics/Zeta  Kickoff\n"
@@ -63,42 +55,42 @@ def test_list_is_ordered_by_timestamp_not_filename(v):
         "2026-09-11-09-00-00  2026-09-12  Report   Topics/Zeta                Quoted, topic\n")
 
 
-def test_list_filter_and_empty_messages(v, vault):
-    assert notes(v, "list", "ZETA").stdout.count("\n") == 2
-    assert notes(v, "list", "report").stdout.startswith("2026-09-11-09-00-00")
-    assert notes(v, "list", "nothing matches").stdout == "(no matches)\n"
+def test_list_filter_and_empty_messages(notes_vault, vault):
+    assert notes(notes_vault, "list", "ZETA").stdout.count("\n") == 2
+    assert notes(notes_vault, "list", "report").stdout.startswith("2026-09-11-09-00-00")
+    assert notes(notes_vault, "list", "nothing matches").stdout == "(no matches)\n"
     for f in (vault.home / "notes").iterdir():
         f.unlink()
     assert notes(vault, "list").stdout == "(no notes)\n"
 
 
-def test_list_json(v):
-    rows = json.loads(notes(v, "list", "--json").stdout)
+def test_list_json(notes_vault):
+    rows = json.loads(notes(notes_vault, "list", "--json").stdout)
     assert rows[1] == {
-        "stem": "2026-09-12-07-00-00", "path": str(v.home / "notes" / "2026-09-12-07-00-00.md"),
+        "stem": "2026-09-12-07-00-00", "path": str(notes_vault.home / "notes" / "2026-09-12-07-00-00.md"),
         "timestamp": "2026-09-12-07-00-00", "date": "2026-09-12", "type": "Log",
         "threads": ["Projects/SGB"], "topic": "Same day earlier"}
 
 
-def test_a_note_without_a_timestamp_sorts_by_its_stem(v):
-    write(v, "notes/2026-09-11-12-00-00.md", "---\ntopic: Untimed\n---\n")
-    stems = [r["stem"] for r in json.loads(notes(v, "list", "--json").stdout)]
+def test_a_note_without_a_timestamp_sorts_by_its_stem(notes_vault):
+    notes_vault.write("notes/2026-09-11-12-00-00.md", "---\ntopic: Untimed\n---\n")
+    stems = [r["stem"] for r in json.loads(notes(notes_vault, "list", "--json").stdout)]
     assert stems == ["2026-09-10-14-30-00", "2026-09-11-12-00-00",
                      "2026-09-12-07-00-00", "2026-09-11-09-00-00"]
-    assert "2026-09-11-12-00-00  -           -" in notes(v, "list").stdout
+    assert "2026-09-11-12-00-00  -           -" in notes(notes_vault, "list").stdout
 
 
 # ---------- cat, last ----------
 
-def test_cat_prints_the_note_after_ingesting_its_actions(v):
-    r = notes(v, "cat", "2026-09-10-14-30-00")
+def test_cat_prints_the_note_after_ingesting_its_actions(notes_vault):
+    r = notes(notes_vault, "cat", "2026-09-10-14-30-00")
     assert r.returncode == 0
-    assert r.stdout == v.read("notes/2026-09-10-14-30-00.md")
+    assert r.stdout == notes_vault.read("notes/2026-09-10-14-30-00.md")
     assert re.search(r"^TASK: ingest me <!--[0-9a-f]{8} entry:", r.stdout, re.M)
 
 
-def test_cat_accepts_a_trailing_md(v):
-    assert notes(v, "cat", "2026-09-12-07-00-00.md").stdout.startswith("---\ntopic: Same day")
+def test_cat_accepts_a_trailing_md(notes_vault):
+    assert notes(notes_vault, "cat", "2026-09-12-07-00-00.md").stdout.startswith("---\ntopic: Same day")
 
 
 @pytest.mark.parametrize("stem, message", [
@@ -107,15 +99,15 @@ def test_cat_accepts_a_trailing_md(v):
                                   "got 'notes/2026-09-10-14-30-00'\n"),
     ("", "notes: error: give a note stem like 2026-09-10-14-30-00, got ''\n"),
 ])
-def test_bad_stems(v, stem, message):
-    r = notes(v, "cat", stem)
+def test_bad_stems(notes_vault, stem, message):
+    r = notes(notes_vault, "cat", stem)
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == message.format(notes=v.home / "notes")
+    assert r.stderr == message.format(notes=notes_vault.home / "notes")
 
 
-def test_last_prints_the_newest_note_by_timestamp(v):
-    r = notes(v, "last")
-    assert (r.returncode, r.stdout) == (0, f"{v.home / 'notes' / '2026-09-11-09-00-00.md'}\n")
+def test_last_prints_the_newest_note_by_timestamp(notes_vault):
+    r = notes(notes_vault, "last")
+    assert (r.returncode, r.stdout) == (0, f"{notes_vault.home / 'notes' / '2026-09-11-09-00-00.md'}\n")
 
 
 def test_last_with_no_notes(vault):
@@ -125,26 +117,26 @@ def test_last_with_no_notes(vault):
 
 # ---------- copy, delete ----------
 
-def test_copy_marks_every_topic_line_and_keeps_the_timestamp(v):
+def test_copy_marks_every_topic_line_and_keeps_the_timestamp(notes_vault):
     # DEFERRED BUG 4: every line starting with `topic:` gets ` COPY`, body
     # lines included, and the copy keeps the original `timestamp:`.
-    r = notes(v, "copy", "2026-09-10-14-30-00")
+    r = notes(notes_vault, "copy", "2026-09-10-14-30-00")
     m = re.fullmatch(r"Copied 2026-09-10-14-30-00\.md to (\d{4}(?:-\d{2}){5})\.md\n", r.stdout)
     assert m, r.stdout
-    original = v.read("notes/2026-09-10-14-30-00.md")
-    copy = v.read(f"notes/{m.group(1)}.md")
+    original = notes_vault.read("notes/2026-09-10-14-30-00.md")
+    copy = notes_vault.read(f"notes/{m.group(1)}.md")
     assert copy == original.replace("topic: Kickoff\n", "topic: Kickoff COPY\n").replace(
         "topic: in the body\n", "topic: in the body COPY\n")
     assert "timestamp: 2026-09-10-14-30-00" in copy
 
 
-def test_delete_needs_yes(v):
-    path = v.home / "notes" / "2026-09-12-07-00-00.md"
-    r = notes(v, "delete", "2026-09-12-07-00-00")
+def test_delete_needs_yes(notes_vault):
+    path = notes_vault.home / "notes" / "2026-09-12-07-00-00.md"
+    r = notes(notes_vault, "delete", "2026-09-12-07-00-00")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"notes: error: refusing to delete {path} without -y\n"
     assert path.exists()
-    r = notes(v, "delete", "2026-09-12-07-00-00", "-y")
+    r = notes(notes_vault, "delete", "2026-09-12-07-00-00", "-y")
     assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")
     assert not path.exists()
 
@@ -152,27 +144,29 @@ def test_delete_needs_yes(v):
 # ---------- the ingest pre-pass ----------
 
 def break_an_action(vault):
-    write(vault, "notes/2026-09-13-09-00-00.md",
+    vault.write("notes/2026-09-13-09-00-00.md",
           "---\ntopic: broken\ntimestamp: 2026-09-13-09-00-00\n---\n\nACTION: (Ghost) nobody\n")
 
 
-def test_a_failed_ingest_is_silent_when_stderr_is_not_a_terminal(v):
+def test_a_failed_ingest_is_silent_when_stderr_is_not_a_terminal(notes_vault):
     """The agent harness drops stdout whenever stderr is non-empty, so a
     warning here would cost it the note."""
-    break_an_action(v)
-    r = notes(v, "cat", "2026-09-12-07-00-00")
+    break_an_action(notes_vault)
+    r = notes(notes_vault, "cat", "2026-09-12-07-00-00")
     assert (r.returncode, r.stderr) == (0, "")
-    assert r.stdout == v.read("notes/2026-09-12-07-00-00.md")
-    assert "ACTION: (Ghost) nobody" in v.read("notes/2026-09-13-09-00-00.md")
+    assert r.stdout == notes_vault.read("notes/2026-09-12-07-00-00.md")
+    assert "ACTION: (Ghost) nobody" in notes_vault.read("notes/2026-09-13-09-00-00.md")
 
 
-def test_a_failed_ingest_warns_once_on_a_terminal(v):
-    break_an_action(v)
+def test_a_failed_ingest_warns_once_on_a_terminal(notes_vault):
+    break_an_action(notes_vault)
+    # stderr, not stdin, is the terminal here, so this runs the command
+    # itself rather than through vault.run_on_a_terminal.
     parent, child = pty.openpty()
     try:
-        r = subprocess.run([command_path("notes", v.env), "cat", "2026-09-12-07-00-00"],
+        r = subprocess.run([command_path("notes", notes_vault.env), "cat", "2026-09-12-07-00-00"],
                            stdout=subprocess.PIPE, stderr=child, stdin=subprocess.DEVNULL,
-                           text=True, env=v.env, timeout=30)
+                           text=True, env=notes_vault.env, timeout=30)
         # Read while the child end is still open: closing it first can
         # discard what the process wrote to the terminal.
         ready, _, _ = select.select([parent], [], [], 5)
@@ -181,22 +175,34 @@ def test_a_failed_ingest_warns_once_on_a_terminal(v):
         os.close(child)
         os.close(parent)
     assert r.returncode == 0
-    assert r.stdout == v.read("notes/2026-09-12-07-00-00.md")
+    assert r.stdout == notes_vault.read("notes/2026-09-12-07-00-00.md")
     assert warning.replace("\r\n", "\n") == (
         "notes: warning: some ACTION lines were not ingested; run `tasks` to see why\n")
 
 
-def test_ingest_runs_before_list_too(v):
-    notes(v, "list")
-    assert "ACTION: ingest me" not in v.read("notes/2026-09-10-14-30-00.md")
+INGESTED = re.compile(r"TASK: ingest me <!--[0-9a-f]{8} entry:\d{4}-\d\d-\d\d-->  ")
 
 
-def test_help_json(vault):
-    manifest = json.loads(notes(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == [
-        "new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]
+@pytest.mark.parametrize("argv", [
+    ["list"], ["cat", "2026-09-12-07-00-00"], ["last"], ["copy", "2026-09-12-07-00-00"],
+    ["delete", "2026-09-12-07-00-00", "-y"],
+    ["minutes", "2026-09-12-07-00-00", "--out", "{out}"],
+    ["agenda", "2026-09-12-07-00-00", "--out", "{out}"],
+    ["pdf", "2026-09-12-07-00-00", "--out", "{out}"],
+], ids=lambda a: a[0])
+def test_every_subcommand_but_new_ingests_first(notes_vault, tmp_path, argv):
+    """The ACTION in the Kickoff note becomes a TASK, whichever note the
+    subcommand is about."""
+    notes(notes_vault, *[a.format(out=tmp_path / "out") for a in argv])
+    assert INGESTED.fullmatch(notes_vault.lines("notes/2026-09-10-14-30-00.md")[-2])
 
 
-def test_help_json_does_not_ingest(v):
-    notes(v, "--help-json")
-    assert "ACTION: ingest me" in v.read("notes/2026-09-10-14-30-00.md")
+def test_new_does_not_ingest(notes_vault):
+    notes(notes_vault, "new", "--type", "Log", "--topic", "Fresh", "--thread", "Topics/Zeta")
+    assert notes_vault.lines("notes/2026-09-10-14-30-00.md")[-2] == "ACTION: ingest me"
+
+
+
+def test_help_json_does_not_ingest(notes_vault):
+    notes(notes_vault, "--help-json")
+    assert "ACTION: ingest me" in notes_vault.read("notes/2026-09-10-14-30-00.md")

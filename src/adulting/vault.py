@@ -43,6 +43,15 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+def require_vault():
+    """Stop unless the vault exists and is a directory. Every command checks
+    this first, so a mistyped ADULTING_HOME is reported rather than read as
+    an empty vault, or silently started as a new one."""
+    home = vault_home()
+    if not home.is_dir():
+        die(f"ADULTING_HOME is not a directory: {home}")
+
+
 def warn(msg):
     """`<command>: warning: <msg>` on stderr, and carry on."""
     print(f"{program()}: warning: {msg}", file=sys.stderr)

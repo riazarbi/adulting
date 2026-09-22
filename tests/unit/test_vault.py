@@ -73,16 +73,15 @@ def test_read_frontmatter_reads_scalars_by_path(tmp_path):
     assert V.read_frontmatter(f) == {}
 
 
-def test_fuzzy_score_ladder():
-    """The ladder `threads list` and `people list` rank with."""
-    assert V.fuzzy_score("riaz arbi", "Riaz Arbi") == 1.0
-    assert V.fuzzy_score("riaz", "Riaz Arbi") == 0.9
-    assert V.fuzzy_score("ra", "Riaz Arbi") == 0.85
-    assert V.fuzzy_score("arbi", "Riaz Arbi") == 0.7
-    assert V.fuzzy_score("bsr", "Bern Sellmeyer Rhodes") == 0.85
-    assert V.fuzzy_score("bs", "Bern Sellmeyer Rhodes") == 0.6
-    assert V.fuzzy_score("r", "Bern Sellmeyer Rhodes") == 0.7   # substring beats initials
-    assert V.fuzzy_score("zzz", "Riaz Arbi") < 0.3
+def test_fuzzy_score_ranks_closer_matches_first():
+    """The order `threads list` and `people list` rank in: an exact name,
+    then a prefix, then all the initials, then a substring, then a partial
+    run of initials, then nothing like it."""
+    ranked = ["riaz arbi", "riaz", "ra", "arbi", "zzz"]
+    scores = [V.fuzzy_score(q, "Riaz Arbi") for q in ranked]
+    assert scores == sorted(scores, reverse=True) and len(set(scores)) == len(scores)
+    name = "Bern Sellmeyer Rhodes"
+    assert V.fuzzy_score("bsr", name) > V.fuzzy_score("r", name) > V.fuzzy_score("bs", name)
 
 
 # ---------- record blocks ----------

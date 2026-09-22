@@ -739,6 +739,7 @@ def main():
                         help='Suppress per-violation output.')
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
+    V.require_vault()
 
     schemas = load_schemas(Path(args.schemas))
     if not schemas:

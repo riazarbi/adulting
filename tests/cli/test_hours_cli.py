@@ -473,7 +473,3 @@ def test_entries_on_different_days_split_across_log_files(vault):
     assert days == ["2026-08-01", "2026-08-09"], days
 
 
-def test_help_json_lists_subcommands(vault):
-    manifest = json.loads(hours(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == [
-        "log", "list", "report", "show", "edit", "rm"]

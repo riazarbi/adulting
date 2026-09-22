@@ -80,8 +80,8 @@ def test_detect_explicit_thread_spans_the_directive():
 def test_build_body_strips_dates_links_people_and_prefixes_assignee():
     text = "Forward bern the lease by 2026-06-01 ASAP"
     dates = G.parse_dates(text, TODAY)
-    spans = [(m.start(), m.end()) for m in G.PRIORITY_HIGH.finditer(text)]
-    assert G.build_body(text, ["Bern Sellmeyer"], dates["spans"], spans, assignee="Riaz Arbi") == \
+    asap = (text.index("ASAP"), text.index("ASAP") + len("ASAP"))
+    assert G.build_body(text, ["Bern Sellmeyer"], dates["spans"], [asap], assignee="Riaz Arbi") == \
         "(Riaz Arbi) Forward [[people/Bern Sellmeyer]] the lease"
 
 
@@ -110,13 +110,18 @@ def small_vault():
     return home
 
 
-def test_loaders_and_index_read_the_vault(small_vault):
+def test_loaders_read_the_vault(small_vault):
     assert G.load_threads() == ["Processes/SGB", "Topics/Wellness"]
     assert G.load_people() == ["Bern Sellmeyer"]
-    index = G.build_thread_index(G.load_threads())
-    assert index["Processes/SGB"]["sgb"] == 11       # name weight 10 + heading
-    assert index["Processes/SGB"]["symonds"] == 2    # thread file + log
-    assert index["Topics/Wellness"]["ladder"] == 1   # from the linked note
+
+
+@pytest.mark.parametrize("text, thread", [
+    ("check the sgb figures", "Processes/SGB"),        # the thread's own name
+    ("chase symonds about it", "Processes/SGB"),       # a word from its log
+    ("book the squash ladder", "Topics/Wellness"),     # a word from a linked note
+])
+def test_the_thread_whose_words_match_ranks_first(small_vault, text, thread):
+    assert G.suggest(text, today=TODAY)["thread"] == thread
 
 
 def test_suggest_end_to_end(small_vault):

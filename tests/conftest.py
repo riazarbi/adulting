@@ -22,7 +22,9 @@ hits. Nothing is mocked.
 
 from __future__ import annotations
 
+import json
 import os
+import pty
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -96,10 +98,9 @@ class Vault:
                         currency: str = "ZAR") -> Path:
         """kind in {Projects, Processes, Topics}. entries is a list of entry
         dicts; None writes an empty tracker block."""
-        import json as _json
         p = self.home / "hours" / kind / f"{name}.md"
         p.parent.mkdir(parents=True, exist_ok=True)
-        payload = _json.dumps({"entries": entries or []}, indent=2)
+        payload = json.dumps({"entries": entries or []}, indent=2)
         p.write_text(
             f'---\nthread: "[[{kind}/{name}]]"\ncurrency: {currency}\n---\n\n'
             f"# {name} — hours\n\n```simple-time-tracker\n{payload}\n```\n",
@@ -108,20 +109,18 @@ class Vault:
 
     def entries(self, kind: str, name: str) -> list:
         """Parse the tracker block out of a time file."""
-        import json as _json
         text = self.read(f"hours/{kind}/{name}.md")
         lines = text.split("\n")
         i = lines.index("```simple-time-tracker")
         j = lines.index("```", i + 1)
-        return _json.loads("\n".join(lines[i + 1:j])).get("entries", [])
+        return json.loads("\n".join(lines[i + 1:j])).get("entries", [])
 
     def write_payments_file(self, kind: str, name: str,
                             payments: list | None = None,
                             currency: str = "ZAR"):
-        import json as _json
         p = self.home / "payments" / kind / f"{name}.md"
         p.parent.mkdir(parents=True, exist_ok=True)
-        payload = _json.dumps({"payments": payments or []}, indent=2)
+        payload = json.dumps({"payments": payments or []}, indent=2)
         p.write_text(
             f'---\nthread: "[[{kind}/{name}]]"\ncurrency: {currency}\n---\n\n'
             f"# {name} — payments\n\n```adulting-payments\n{payload}\n```\n",
@@ -129,12 +128,18 @@ class Vault:
         return p
 
     def payments(self, kind: str, name: str) -> list:
-        import json as _json
         text = self.read(f"payments/{kind}/{name}.md")
         lines = text.split("\n")
         i = lines.index("```adulting-payments")
         j = lines.index("```", i + 1)
-        return _json.loads("\n".join(lines[i + 1:j])).get("payments", [])
+        return json.loads("\n".join(lines[i + 1:j])).get("payments", [])
+
+    def write(self, relpath: str, text: str) -> Path:
+        """Write a file in the vault, making its folders. Returns the path."""
+        p = self.home / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
 
     def read(self, relpath: str) -> str:
         return (self.home / relpath).read_text(encoding="utf-8")
@@ -144,15 +149,38 @@ class Vault:
 
     # ---- CLI helpers ----
 
-    def run(self, *argv: str, cli: str = "tasks", check: bool = False,
-            input: str | None = None) -> subprocess.CompletedProcess:
+    def run(self, *argv: str, cli: str = "tasks", input: str | None = None,
+            cwd: Path | None = None) -> subprocess.CompletedProcess:
         """Run a CLI from the repo against this vault. Returns the
         CompletedProcess; stdout/stderr are text-decoded."""
         cmd = [command_path(cli, self.env), *argv]
         return subprocess.run(cmd, capture_output=True, text=True,
-                              env=self.env, check=check, input=input)
+                              env=self.env, input=input, cwd=cwd)
+
+    def run_on_a_terminal(self, *argv: str, cli: str, typed: str = "y\n"):
+        """Run a CLI with stdin attached to a real pseudo-terminal, with
+        `typed` already waiting on it, so a prompt that only appears on a
+        terminal would read it. stdout and stderr stay as pipes. A command
+        that waits for more input than `typed` times out and fails the test."""
+        parent, child = pty.openpty()
+        try:
+            os.write(parent, typed.encode())
+            return subprocess.run([command_path(cli, self.env), *argv], stdin=child,
+                                  capture_output=True, text=True, env=self.env, timeout=30)
+        finally:
+            os.close(child)
+            os.close(parent)
+
+    def snapshot(self) -> dict:
+        """Every file in the vault and its contents."""
+        return {str(p.relative_to(self.home)): p.read_bytes()
+                for p in sorted(self.home.rglob("*")) if p.is_file()}
 
 
+# Isolation happens twice, on purpose. pytest_configure (below) isolates
+# os.environ once for the whole session, which covers code that runs at
+# import or collection time, before any fixture exists. This fixture then
+# gives each test its own HOME and vault, so no two tests share files.
 @pytest.fixture(autouse=True)
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     """Give every test its own HOME and ADULTING_HOME, in os.environ too."""

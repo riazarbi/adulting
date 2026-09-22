@@ -18,12 +18,11 @@ and listed in stories/2026-09-17-python-package-refactor.md.
 
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from harness import command_path, without_program
+from harness import without_program
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "render"
 KINDS = ("pdf", "minutes", "agenda")
@@ -31,13 +30,12 @@ NOTES = sorted(p for p in FIXTURES.glob("*.md") if ".expected." not in p.name)
 HAS_PANDOC = shutil.which("pandoc") is not None and shutil.which("xelatex") is not None
 
 
-def notes(vault, *argv):
-    return subprocess.run([command_path("notes", vault.env), *argv], capture_output=True,
-                          text=True, env=vault.env, input="")
+def notes(vault, *argv, cwd=None):
+    return vault.run(*argv, cli="notes", input="", cwd=cwd)
 
 
 @pytest.fixture
-def v(vault):
+def render_vault(vault):
     (vault.home / ".adulting" / "config.yaml").write_text('owner: "Riaz Arbi"\n', encoding="utf-8")
     for note in NOTES:
         shutil.copy(note, vault.home / "notes" / note.name)
@@ -46,9 +44,9 @@ def v(vault):
 
 @pytest.mark.parametrize("note", NOTES, ids=lambda p: p.stem)
 @pytest.mark.parametrize("kind", KINDS)
-def test_markdown_matches_the_old_renderer(v, kind, note, tmp_path):
+def test_markdown_matches_the_old_renderer(render_vault, kind, note, tmp_path):
     out = tmp_path / "out"
-    r = notes(v, kind, note.stem, "--out", str(out))
+    r = notes(render_vault, kind, note.stem, "--out", str(out))
     written = out / note.name
     expected = (FIXTURES / f"{note.stem}.{kind}.expected.md").read_text(encoding="utf-8")
     assert written.read_text(encoding="utf-8") == expected
@@ -56,22 +54,22 @@ def test_markdown_matches_the_old_renderer(v, kind, note, tmp_path):
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
-def test_a_render_writes_a_pdf_and_prints_both_paths(v, tmp_path):
+def test_a_render_writes_a_pdf_and_prints_both_paths(render_vault, tmp_path):
     out = tmp_path / "out"
-    r = notes(v, "minutes", "with_summary", "--out", str(out))
+    r = notes(render_vault, "minutes", "with_summary", "--out", str(out))
     assert r.returncode == 0, r.stderr
     assert r.stdout == f"{out / 'with_summary.md'}\n{out / 'with_summary.md.pdf'}\n"
     assert (out / "with_summary.md.pdf").stat().st_size > 1000
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
-def test_a_topic_with_quotes_still_breaks_the_pdf(v, tmp_path):
+def test_a_topic_with_quotes_still_breaks_the_pdf(render_vault, tmp_path):
     # DEFERRED BUG 1
     """The topic goes into the metadata unquoted, so a topic
     containing quotes and a colon is invalid YAML and pandoc refuses it. The
     markdown is still written."""
     out = tmp_path / "out"
-    r = notes(v, "pdf", "meeting_full", "--out", str(out))
+    r = notes(render_vault, "pdf", "meeting_full", "--out", str(out))
     assert r.returncode == 1
     assert r.stdout == f"{out / 'meeting_full.md'}\n"
     assert r.stderr.startswith("notes: error: PDF render failed:")
@@ -81,16 +79,15 @@ def test_a_topic_with_quotes_still_breaks_the_pdf(v, tmp_path):
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc")
-def test_a_failed_render_leaves_no_stale_pdf(v, tmp_path):
+def test_a_failed_render_leaves_no_stale_pdf(render_vault, tmp_path):
     """A PDF left from an earlier render must not pass for this one. The
     render fails for real: pandoc runs, but there is no xelatex to call."""
     out = tmp_path / "out"
     out.mkdir()
     stale = out / "with_summary.md.pdf"
     stale.write_text("not a pdf")
-    no_latex = without_program(v.env, "xelatex")
-    r = subprocess.run([command_path("notes", no_latex), "pdf", "with_summary", "--out", str(out)],
-                       capture_output=True, text=True, env=no_latex)
+    render_vault.env = without_program(render_vault.env, "xelatex")
+    r = notes(render_vault, "pdf", "with_summary", "--out", str(out))
     assert r.returncode == 1
     assert r.stdout == f"{out / 'with_summary.md'}\n"
     assert r.stderr.startswith("notes: error: PDF render failed:")
@@ -98,17 +95,17 @@ def test_a_failed_render_leaves_no_stale_pdf(v, tmp_path):
     assert (out / "with_summary.md").exists()
 
 
-def test_renders_default_to_downloads(v):
-    r = notes(v, "agenda", "correspondence")
-    downloads = Path(v.env["HOME"]) / "Downloads"
+def test_renders_default_to_downloads(render_vault):
+    r = notes(render_vault, "agenda", "correspondence")
+    downloads = Path(render_vault.env["HOME"]) / "Downloads"
     assert r.stdout.splitlines()[0] == str(downloads / "correspondence.md")
     assert (downloads / "correspondence.md").exists()
 
 
-def test_render_of_a_missing_note(v):
-    r = notes(v, "minutes", "nope")
+def test_render_of_a_missing_note(render_vault):
+    r = notes(render_vault, "minutes", "nope")
     assert r.returncode == 1
-    assert r.stderr == f"notes: error: no note 'nope' in {v.home / 'notes'}\n"
+    assert r.stderr == f"notes: error: no note 'nope' in {render_vault.home / 'notes'}\n"
 
 
 def test_help_json_lists_the_renderers(vault):
@@ -120,21 +117,20 @@ def test_help_json_lists_the_renderers(vault):
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
-def test_a_relative_out_dir_is_relative_to_where_you_run_it(v, tmp_path):
+def test_a_relative_out_dir_is_relative_to_where_you_run_it(render_vault, tmp_path):
     """pandoc runs in a scratch directory, so a relative --out used to point
     it at a file that wasn't there, and the PDF was never written."""
     cwd = tmp_path / "work"
     cwd.mkdir()
-    r = subprocess.run([command_path("notes", v.env), "minutes", "with_summary", "--out", "rel"],
-                       capture_output=True, text=True, env=v.env, cwd=cwd)
+    r = notes(render_vault, "minutes", "with_summary", "--out", "rel", cwd=cwd)
     assert r.returncode == 0, r.stderr
     assert r.stdout == f"{cwd / 'rel' / 'with_summary.md'}\n{cwd / 'rel' / 'with_summary.md.pdf'}\n"
     assert (cwd / "rel" / "with_summary.md.pdf").stat().st_size > 1000
 
 
-def test_an_out_dir_that_cannot_be_made_is_an_error_not_a_traceback(v, tmp_path):
+def test_an_out_dir_that_cannot_be_made_is_an_error_not_a_traceback(render_vault, tmp_path):
     blocker = tmp_path / "a-file"
     blocker.write_text("")
-    r = v.run("pdf", "with_summary", "--out", str(blocker / "out"), cli="notes")
+    r = render_vault.run("pdf", "with_summary", "--out", str(blocker / "out"), cli="notes")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"notes: error: cannot create {blocker / 'out'}: Not a directory\n"

@@ -51,8 +51,7 @@ def require_repo():
     """The vault must be the root of a git repo. If it were merely a
     subdirectory of one, `git add -A` would sweep in files outside it."""
     home = vault_home()
-    if not home.is_dir():
-        V.die(f"ADULTING_HOME is not a directory: {home}")
+    V.require_vault()
     r = git('rev-parse', '--show-toplevel', check=False)
     if r.returncode != 0:
         V.die(f"not a git repository: {home}")
@@ -272,6 +271,7 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
+    V.require_vault()
     return args.func(args)
 
 

@@ -9,12 +9,15 @@ notice, which is what makes these worth pinning.
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 HARVEST = REPO / "dev" / "manual-harvest"
+sys.path.insert(0, str(REPO / "dev"))
+from commands import COMMANDS  # noqa: E402
 
 
 def harvest(fmt="md"):
@@ -39,15 +42,15 @@ def test_subsections_of_a_harvested_section_survive():
 
 def test_every_declared_readme_section_is_present():
     corpus = harvest()
-    src = HARVEST.read_text()
-    declared = src.split("README_SECTIONS = [")[1].split("]")[0]
-    for name in [x.strip().strip("'\"") for x in declared.split(",")]:
-        if name:
-            assert f"### {name}" in corpus, f"README section {name!r} missing"
+    declared = runpy.run_path(str(HARVEST))["README_SECTIONS"]
+    assert declared
+    for name in declared:
+        assert f"### {name}" in corpus, f"README section {name!r} missing"
 
 
 def test_every_operator_tool_appears():
     data = json.loads(harvest("json"))
+    assert data["operator_tools"] == COMMANDS
     for tool in data["operator_tools"]:
         assert any(t["name"] == tool for t in data["tools"]), tool
         manifest = next(t for t in data["tools"] if t["name"] == tool)

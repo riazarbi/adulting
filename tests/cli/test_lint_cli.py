@@ -1,8 +1,6 @@
 """The `lint` command: its surface, and every schema it checks: threads,
 people, notes, logs, task anchors, hours files and payments files."""
 
-import json
-
 import pytest
 
 
@@ -13,13 +11,6 @@ def lint(vault, *argv):
 def violations(r):
     """The `<path>:<line>: <message>` lines, without the summary."""
     return [l for l in r.stdout.split("\n") if l and "file(s) checked" not in l]
-
-
-def write(vault, rel, text):
-    p = vault.home / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-    return p
 
 
 # ---------- command surface ----------
@@ -88,19 +79,13 @@ def test_schemas_flag_uses_another_directory(vault, tmp_path):
 
 
 def test_walk_skips_dot_directories_dot_files_and_bak_files(vault):
-    write(vault, "threads/.trash/Projects/Old.md", "garbage")
-    write(vault, "threads/Projects/.hidden.md", "garbage")
-    write(vault, "threads/Projects/SGB.md.bak", "garbage")
-    write(vault, "threads/Projects/notes.txt", "garbage")
+    vault.write("threads/.trash/Projects/Old.md", "garbage")
+    vault.write("threads/Projects/.hidden.md", "garbage")
+    vault.write("threads/Projects/SGB.md.bak", "garbage")
+    vault.write("threads/Projects/notes.txt", "garbage")
     r = lint(vault)
     assert (r.returncode, r.stdout) == (0, "\n0 file(s) checked. 0 violation(s).\n")
 
-
-def test_help_json(vault):
-    r = lint(vault, "--help-json")
-    manifest = json.loads(r.stdout)
-    assert manifest["name"] == "lint"
-    assert [f["name"] for f in manifest["flags"]] == ["--schemas", "--quiet"]
 
 
 # ---------- threads and people ----------
@@ -115,7 +100,7 @@ def test_closed_thread_and_person_need_ended(vault):
 
 
 def test_missing_required_field(vault):
-    p = write(vault, "people/Nobody.md", "---\nstatus: open\ncategory: personal\n---\n")
+    p = vault.write("people/Nobody.md", "---\nstatus: open\ncategory: personal\n---\n")
     assert violations(lint(vault)) == [
         f"{p}:0: missing required field 'started' (per person)"]
 
@@ -127,7 +112,7 @@ def test_regex_constraint(vault):
 
 
 def test_cadence_rules(vault):
-    p = write(vault, "threads/Projects/SGB.md",
+    p = vault.write("threads/Projects/SGB.md",
               "---\nstatus: open\nkind: project\ncategory: professional\n"
               "started: 2026-01-01\ncadences:\n"
               "  - key: weekly\n    frequency: 7\n    description: Check in\n"
@@ -178,7 +163,7 @@ def test_a_valid_note_is_clean(vault):
 
 
 def test_note_with_an_unmatched_filename_has_no_schema(vault):
-    p = write(vault, "notes/meeting notes.md", "---\ntopic: x\ntype: Log\n---\n")
+    p = vault.write("notes/meeting notes.md", "---\ntopic: x\ntype: Log\n---\n")
     assert violations(lint(vault)) == [f"{p}:0: no matching file schema"]
 
 
@@ -232,7 +217,7 @@ def test_action_lines_in_a_note(vault):
 # ---------- logs ----------
 
 def test_log_thread_must_resolve(vault):
-    p = write(vault, "logs/Projects/Gone/2026-09-10.md",
+    p = vault.write("logs/Projects/Gone/2026-09-10.md",
               '---\nthread: "[[Projects/Gone]]"\ndate: 2026-09-10\ntype: Log\n---\n\n'
               "- TEXT: something\n")
     assert violations(lint(vault)) == [
@@ -241,7 +226,7 @@ def test_log_thread_must_resolve(vault):
 
 def test_log_actions_are_checked_like_notes(vault):
     vault.write_thread("Projects", "SGB")
-    p = write(vault, "logs/Projects/SGB/2026-09-10.md",
+    p = vault.write("logs/Projects/SGB/2026-09-10.md",
               '---\nthread: "[[Projects/SGB]]"\ndate: 2026-09-10\ntype: Log\n---\n\n'
               "ACTION: (Ghost) Chase it\n")
     assert violations(lint(vault)) == [
@@ -665,14 +650,14 @@ def test_lint_walks_payments_dir(vault):
 def test_payments_block_errors(vault, block, expected):
     vault.write_thread("Projects", "SGB", currency="ZAR")
     body = "" if block is None else f"```adulting-payments\n{block}\n```\n"
-    p = write(vault, "payments/Projects/SGB.md",
+    p = vault.write("payments/Projects/SGB.md",
               f'---\nthread: "[[Projects/SGB]]"\ncurrency: ZAR\n---\n\n{body}')
     assert violations(lint(vault)) == [f"{p}:{expected}"]
 
 
 def test_payment_fields_are_each_checked(vault):
     vault.write_thread("Projects", "SGB", currency="ZAR")
-    p = write(vault, "payments/Projects/SGB.md",
+    p = vault.write("payments/Projects/SGB.md",
               '---\nthread: "[[Projects/SGB]]"\ncurrency: ZAR\n---\n\n```adulting-payments\n'
               '{"payments": [{"id": "abcd1234", "received": "2026-09-10", "amount": "10", "currency": "zar"}]}\n'
               '```\n')

@@ -319,6 +319,7 @@ def main():
 
     emit_helpjson_if_requested(parser)
     args = parser.parse_args()
+    V.require_vault()
     if args.subcommand != 'new':
         ingest_actions()
     return args.func(args)

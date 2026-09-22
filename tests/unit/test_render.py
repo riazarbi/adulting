@@ -142,3 +142,64 @@ def test_a_non_person_link_is_listed_as_an_attendee():
     # link in `people:` is listed as an attendee as written.
     lines = ["---", "type: Meeting", "people:", '  - "[[Projects/Not A Person]]"', "---"]
     assert "- [[Projects/Not A Person]]" in R.header(lines, "minutes")
+
+
+# ---------- each renderer, whole output, on one small note ----------
+
+HR = "-" * 68
+KICKOFF = ('---\ntopic: Kickoff\ntype: Meeting\nlocation: Cape Town\ntimestamp: 2026-09-10-14-30-00\n'
+           'people:\n  - "[[people/Riaz Arbi]]"\n  - Sam\n---\n\n'
+           + R.MINUTES_SUMMARY +
+           "# Content\n\n## Scope\n\nAGREED: Ship in May\nRESOLVED: Hire a PM\n"
+           "!: Budget is tight\nACTION: (Sam) Draft the plan\nDONE: Book the room\n\n"
+           "### Empty\n\n# Timesheet\n\n09:00 start\n")
+PREAMBLE = ("mainfont: Arial\nheader-includes:\n  - \\usepackage{geometry}\ngeometry:\n"
+            "- top=30mm\n- left=20mm\n- heightrounded\n---\n\n\\newpage\n\n"
+            "# Meeting Details\n\n**Location**: Cape Town  \n\n**Attendees**:  \n\n- Riaz Arbi\n- Sam\n")
+ACTIONS = ("| Assignee | Task | Status |\n"
+           "|----------|--------------------------------------------------|--------|\n"
+           "| Sam | Draft the plan | Open |\n"
+           "| Riaz Arbi | Book the room | Done |\n")
+CONTENT = ("# Content\n\n## Scope\n\nAGREED: Ship in May\nRESOLVED: Hire a PM\n"
+           "!: Budget is tight\nACTION: (Sam) Draft the plan\nDONE: Book the room\n\n")
+
+
+def test_header_for_each_kind():
+    lines = R.split_lines(KICKOFF)
+    assert R.join_lines(R.header(lines, "pdf")) == (
+        "---\ntitle: Kickoff\ndate: 2026-09-10 \ntoc: false\n" + PREAMBLE)
+    assert R.join_lines(R.header(lines, "minutes")) == (
+        "---\ntitle: Minutes\nsubtitle: Kickoff\ndate: 2026-09-10 \ntoc: true\ntoc-depth: 2\n" + PREAMBLE)
+    assert R.join_lines(R.header(lines, "agenda")) == (
+        "---\ntitle: Agenda\nsubtitle: Kickoff\ndate: 2026-09-10 \ntoc: false\n" + PREAMBLE)
+
+
+def test_pdf_markdown():
+    """Callouts (`!:`) fill the Summary up to its first rule, which takes the
+    `## Minuted Agreements` heading with it, as the bash always did. The
+    action table fills Action Items; everything from `# Timesheet` goes."""
+    body = R.pdf_markdown(KICKOFF, "Riaz Arbi").split(PREAMBLE, 1)[1]
+    assert body == (
+        f"\n# Summary\n\nBudget is tight\n\n{HR}\n\n## Resolutions\n\n{HR}\n\n"
+        f"\\newpage\n## Action Items\n\n{ACTIONS}\n{HR}\n\n\\newpage\n\n"
+        + CONTENT + "### Empty\n\n")
+
+
+def test_minutes_markdown():
+    """Agreements, resolutions and actions are gathered into the Summary; an
+    action with no assignee is the owner's."""
+    body = R.minutes_markdown(KICKOFF, "Riaz Arbi").split(PREAMBLE, 1)[1]
+    assert body == (
+        f"\n# Summary\n\n## Minuted Agreements\n\nShip in May\n\n{HR}\n\n"
+        f"## Resolutions\n\nHire a PM\n\n{HR}\n\n"
+        f"\\newpage\n## Action Items\n\n{ACTIONS}\n{HR}\n\n\\newpage\n\n"
+        + CONTENT + "### Empty\n\n")
+
+
+def test_agenda_markdown():
+    """The Summary sections are emptied, the empty `### Empty` heading is
+    dropped, and the note stops at `# Timesheet`."""
+    body = R.agenda_markdown(KICKOFF).split(PREAMBLE, 1)[1]
+    assert body == (
+        f"\n# Summary\n\n## Minuted Agreements\n\n{HR}\n\n## Resolutions\n\n{HR}\n\n"
+        f"\\newpage\n## Action Items\n\n{HR}\n\n\\newpage\n\n" + CONTENT + "\n")

@@ -92,4 +92,8 @@ def test_note_text_for_a_log_and_a_meeting():
         'timestamp: 2026-09-17-10-00-00\naliases: ["Daily"]\n---\n\n# Content\n\n')
     meeting = N.note_text("2026-09-17-10-00-00", "Meeting", "Kickoff",
                           ["Projects/SGB", "Topics/Zeta"], ["Someone"], "ACME", "")
-    assert "counterparty: ACME\nlocation: \npeople:\n  - \"Someone\"\n---" in meeting
+    # Someone has no people/ file, so they are a plain name, not a wikilink.
+    assert meeting == (
+        '---\ntopic: Kickoff\ntype: Meeting\nthreads:\n  - "[[Projects/SGB]]"\n  - "[[Topics/Zeta]]"\n'
+        'timestamp: 2026-09-17-10-00-00\naliases: ["Kickoff"]\ncounterparty: ACME\nlocation: \n'
+        'people:\n  - "Someone"\n---\n\n# Content\n\n')

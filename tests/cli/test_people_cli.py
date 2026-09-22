@@ -17,7 +17,7 @@ def people(vault, *argv, input=""):
 
 
 @pytest.fixture
-def v(vault):
+def people_vault(vault):
     vault.write_person("Riaz Arbi", category="professional", started="2026-01-02")
     vault.write_person("Bern Sellmeyer", category="personal")
     vault.write_person("Old Contact", status="closed")
@@ -26,8 +26,8 @@ def v(vault):
 
 # ---------- list ----------
 
-def test_list_shows_open_people_in_a_table(v):
-    r = people(v, "list")
+def test_list_shows_open_people_in_a_table(people_vault):
+    r = people(people_vault, "list")
     assert r.returncode == 0
     assert r.stdout == (
         "PERSON                 STATUS    CATEGORY\n"
@@ -35,27 +35,27 @@ def test_list_shows_open_people_in_a_table(v):
         "people/Riaz Arbi       open      professional\n")
 
 
-def test_list_all_includes_closed(v):
-    assert "people/Old Contact     closed    professional" in people(v, "list", "--all").stdout
+def test_list_all_includes_closed(people_vault):
+    assert "people/Old Contact     closed    professional" in people(people_vault, "list", "--all").stdout
 
 
-def test_list_json_fields(v):
-    rows = json.loads(people(v, "list", "--json").stdout)
+def test_list_json_fields(people_vault):
+    rows = json.loads(people(people_vault, "list", "--json").stdout)
     assert rows[1] == {
         "name": "Riaz Arbi", "person": "people/Riaz Arbi",
         "path": "people/Riaz Arbi.md", "status": "open",
         "category": "professional", "started": "2026-01-02", "ended": ""}
 
 
-def test_list_query_ranks_by_similarity(v):
-    rows = json.loads(people(v, "list", "--json", "ra").stdout)
+def test_list_query_ranks_by_similarity(people_vault):
+    rows = json.loads(people(people_vault, "list", "--json", "ra").stdout)
     assert [r["name"] for r in rows] == ["Riaz Arbi"]  # initials match
-    rows = json.loads(people(v, "list", "--json", "people/bern").stdout)
+    rows = json.loads(people(people_vault, "list", "--json", "people/bern").stdout)
     assert [r["name"] for r in rows][0] == "Bern Sellmeyer"
 
 
-def test_list_empty_messages(vault, v):
-    assert people(v, "list", "zzzzzz").stdout == "(no matches)\n"
+def test_list_empty_messages(vault, people_vault):
+    assert people(people_vault, "list", "zzzzzz").stdout == "(no matches)\n"
     for f in (vault.home / "people").iterdir():
         f.unlink()
     assert people(vault, "list").stdout == "(no people)\n"
@@ -63,22 +63,22 @@ def test_list_empty_messages(vault, v):
 
 # ---------- show ----------
 
-def test_show_prints_the_file(v):
-    r = people(v, "show", "Riaz Arbi")
-    assert r.stdout == (v.home / "people" / "Riaz Arbi.md").read_text()
+def test_show_prints_the_file(people_vault):
+    r = people(people_vault, "show", "Riaz Arbi")
+    assert r.stdout == (people_vault.home / "people" / "Riaz Arbi.md").read_text()
 
 
-def test_show_accepts_the_wikilink_form_and_json(v):
-    r = people(v, "show", "people/Riaz Arbi", "--json")
+def test_show_accepts_the_wikilink_form_and_json(people_vault):
+    r = people(people_vault, "show", "people/Riaz Arbi", "--json")
     assert json.loads(r.stdout) == {
         "name": "Riaz Arbi", "path": "people/Riaz Arbi.md", "status": "open",
         "category": "professional", "started": "2026-01-02"}
 
 
-def test_show_missing_person(v):
-    r = people(v, "show", "Nobody")
+def test_show_missing_person(people_vault):
+    r = people(people_vault, "show", "Nobody")
     assert r.returncode == 1
-    assert r.stderr == f"people: error: not found: {v.home / 'people' / 'Nobody.md'}\n"
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'Nobody.md'}\n"
 
 
 # ---------- new ----------
@@ -96,11 +96,15 @@ def test_new_with_flags_writes_the_file(vault):
 
 def test_new_creates_the_people_dir(vault):
     (vault.home / "people").rmdir()
-    assert people(vault, "new", "--name", "A", "--category", "personal").returncode == 0
+    r = people(vault, "new", "--name", "A", "--category", "personal")
+    path = vault.home / "people" / "A.md"
+    assert (r.returncode, r.stdout, r.stderr) == (0, f"created: {path}\n", "")
+    assert path.read_text() == (f"---\nstatus: open\ncategory: personal\n"
+                                f"started: {date.today().isoformat()}\n---\n\n# A\n")
 
 
-def test_new_refuses_an_existing_person(v):
-    r = people(v, "new", "--name", "Riaz Arbi", "--category", "personal")
+def test_new_refuses_an_existing_person(people_vault):
+    r = people(people_vault, "new", "--name", "Riaz Arbi", "--category", "personal")
     assert r.returncode == 1
     assert r.stderr.startswith("people: error: already exists: ")
 
@@ -113,23 +117,19 @@ def test_new_rejects_an_unknown_category(vault):
 
 # ---------- delete ----------
 
-def test_delete_with_yes(v):
-    path = v.home / "people" / "Old Contact.md"
-    r = people(v, "delete", "people/Old Contact", "-y")
+def test_delete_with_yes(people_vault):
+    path = people_vault.home / "people" / "Old Contact.md"
+    r = people(people_vault, "delete", "people/Old Contact", "-y")
     assert r.returncode == 0
     assert r.stdout == f"deleted: {path}\n"
     assert not path.exists()
 
 
-def test_delete_missing_person(v):
-    r = people(v, "delete", "Nobody", "-y")
+def test_delete_missing_person(people_vault):
+    r = people(people_vault, "delete", "Nobody", "-y")
     assert r.returncode == 1
     assert r.stderr.startswith("people: error: not found: ")
 
-
-def test_help_json_lists_subcommands(vault):
-    manifest = json.loads(people(vault, "--help-json").stdout)
-    assert [s["name"] for s in manifest["subcommands"]] == ["list", "show", "new", "delete"]
 
 
 # ---------- no interactivity (fails against the pre-port script) ----------
@@ -148,9 +148,9 @@ def test_new_without_category_fails_instead_of_prompting(vault):
     assert list((vault.home / "people").iterdir()) == []
 
 
-def test_delete_without_yes_refuses_even_if_stdin_says_yes(v):
-    path = v.home / "people" / "Old Contact.md"
-    r = people(v, "delete", "Old Contact", input="y\n")
+def test_delete_without_yes_refuses_even_if_stdin_says_yes(people_vault):
+    path = people_vault.home / "people" / "Old Contact.md"
+    r = people(people_vault, "delete", "Old Contact", input="y\n")
     assert r.returncode == 1
     assert r.stderr == f"people: error: refusing to delete {path} without -y\n"
     assert path.exists()

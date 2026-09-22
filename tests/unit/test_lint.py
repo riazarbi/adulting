@@ -163,10 +163,6 @@ def registry_with(edges):
     return reg
 
 
-def test_rotate_to_min():
-    assert L._rotate_to_min(["c", "a", "b"]) == ["a", "b", "c"]
-    assert L._rotate_to_min([]) == []
-
 
 def test_find_cycles():
     graph = {"a": ["b"], "b": ["c"], "c": ["a"], "d": ["d"], "e": ["zzz"]}

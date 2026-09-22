@@ -372,8 +372,9 @@ def to_pdf(md_path, pdf_path):
         return False, "pandoc is not installed"
     with tempfile.TemporaryDirectory() as scratch:
         proc = subprocess.run(
-            ['pandoc', str(md_path), '--from=markdown+lists_without_preceding_blankline',
-             '-s', '-o', str(pdf_path), '--pdf-engine=xelatex',
+            # Absolute paths: pandoc runs from the scratch directory.
+            ['pandoc', str(Path(md_path).resolve()), '--from=markdown+lists_without_preceding_blankline',
+             '-s', '-o', str(Path(pdf_path).resolve()), '--pdf-engine=xelatex',
              '-V', 'header-includes=\\let\\oldtoc\\tableofcontents'
                    '\\renewcommand{\\tableofcontents}{\\oldtoc\\newpage}',
              '-V', 'header-includes=\\AtBeginEnvironment{quote}{\\itshape}'],

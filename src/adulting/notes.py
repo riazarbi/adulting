@@ -238,7 +238,8 @@ def cmd_render(args):
     """pdf, minutes or agenda: write <stem>.md and <stem>.md.pdf, print both
     paths. The markdown is kept even if pandoc fails."""
     source = note_path(args.stem)
-    out_dir = Path(args.out).expanduser() if args.out else Path.home() / 'Downloads'
+    # Absolute, because pandoc runs from a scratch directory.
+    out_dir = (Path(args.out).expanduser() if args.out else Path.home() / 'Downloads').resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     text = source.read_text(**render.ENCODING)
     owner = render.read_owner(V.vault_home() / '.adulting' / 'config.yaml')

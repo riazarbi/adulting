@@ -98,3 +98,16 @@ def test_help_json_lists_the_renderers(vault):
     assert names[-3:] == ["pdf", "minutes", "agenda"]
     flags = {f["name"] for s in manifest["subcommands"] if s["name"] == "pdf" for f in s["flags"]}
     assert flags == {"--out"}
+
+
+@pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")
+def test_a_relative_out_dir_is_relative_to_where_you_run_it(v, tmp_path):
+    """pandoc runs in a scratch directory, so a relative --out used to point
+    it at a file that wasn't there, and the PDF was never written."""
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    r = subprocess.run([command_path("notes", v.env), "minutes", "with_summary", "--out", "rel"],
+                       capture_output=True, text=True, env=v.env, cwd=cwd)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == f"{cwd / 'rel' / 'with_summary.md'}\n{cwd / 'rel' / 'with_summary.md.pdf'}\n"
+    assert (cwd / "rel" / "with_summary.md.pdf").stat().st_size > 1000

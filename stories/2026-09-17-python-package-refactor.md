@@ -199,10 +199,6 @@ changing that test first. None is a data-loss risk.
 8. **A thread body line like `- 2026-13 — ...` is never checked by `lint`.**
    It does not match `thread_entry`'s `applies_when`, so a malformed date is
    skipped rather than reported.
-9. **Minutes and PDFs list completed actions under Action Items.** `DONE:`
-   lines and `- [x]` checkboxes appear alongside open actions. 42 notes in the
-   vault have them. Whether minutes should list them is a decision, not only a
-   bug.
 10. **The PDF replaces a note's own `# Summary` section.** Its callouts go
     after `# Summary` and everything up to the next rule is dropped, so a
     minutes-style Summary loses its `## Minuted Agreements` heading. 2 notes
@@ -212,6 +208,10 @@ changing that test first. None is a data-loss risk.
 
 Fixed since the port (2026-09-22): minutes inserting a second Summary before
 any line containing `# Content`, and `#  Details` for a note with no type.
+
+Decided 2026-09-22, formerly deferred bug 9: minutes and PDFs list every
+action, open and done, with a Status column saying which. Completed actions
+used to appear with no way to tell them from open ones.
 
 ## Duplication left in place
 

@@ -64,15 +64,35 @@ def test_grep_sed_uniq_drops_adjacent_duplicates():
                            "AGREED:", "AGREED: ") == ["a", "b", "a"]
 
 
-def test_action_rows_dedupes_and_falls_back_to_the_owner():
+def test_action_rows_mark_each_action_open_or_done():
     rows = R.action_rows([
         "ACTION: (Bern) Get quotes <!--due:2026-10-01-->",
         "ACTION: (Bern) Get quotes",
-        "DONE: Book the venue <!--aaaa0001 entry:2026-09-01-->",
-        "- [x] ABC12 (Bob) Old task",
+        "TASK: Circulate minutes <!--abcd1234 entry:2026-09-10-->",
+        "- [ ] ABC12 (Bob) Old open task",
+        "DONE: Book the venue <!--aaaa0001 entry:2026-09-01 end:2026-09-05-->",
+        "- [x] Old done task",
+        "DONE: (Bern) Get quotes <!--aaaa0002 entry:2026-09-01 end:2026-09-06-->",
         "not an action",
     ], owner="Riaz Arbi")
-    assert rows == ["| Bern | Get quotes |", "| Riaz Arbi | Book the venue |", "| Bob | Old task |"]
+    assert rows == [
+        "| Bern | Get quotes | Open |",
+        "| Riaz Arbi | Circulate minutes | Open |",
+        "| Bob | Old open task | Open |",
+        "| Riaz Arbi | Book the venue | Done |",
+        "| Riaz Arbi | Old done task | Done |",
+        # The same task open and done in one note is listed both ways.
+        "| Bern | Get quotes | Done |",
+    ]
+
+
+def test_the_action_table_has_a_status_column():
+    note = "---\ntopic: t\ntype: Meeting\n---\n\n# Action Items\n\n" + "-" * 68 + "\n\n# Content\nDONE: Booked\n"
+    header = "| Assignee | Task | Status |\n|----------|--------------------------------------------------|--------|\n"
+    for rendered in (R.pdf_markdown(note, "Riaz Arbi"), R.minutes_markdown(note, "Riaz Arbi")):
+        assert header + "| Riaz Arbi | Booked | Done |\n" in rendered
+    empty = R.minutes_markdown("---\ntopic: t\ntype: Meeting\n---\n\n# Content\nbody\n", "Riaz Arbi")
+    assert header + "| None | None | None |\n" in empty
 
 
 def test_strip_empty_headers_keeps_h1_h2_and_headed_bodies():
@@ -111,15 +131,7 @@ def test_a_task_with_a_priority_credits_the_owner():
     # the task text and the row is credited to the vault owner.
     rows = R.action_rows(["TASK: [#H] (Bern) Circulate minutes <!--abcd1234 entry:2026-09-10-->"],
                          owner="Riaz Arbi")
-    assert rows == ["| Riaz Arbi | [#H] (Bern) Circulate minutes |"]
-
-
-def test_completed_actions_are_listed_as_action_items():
-    # DEFERRED BUG 9: DONE: lines and `- [x]` checkboxes are listed under
-    # Action Items alongside open ones. 42 notes in the vault have them.
-    rows = R.action_rows(["DONE: Book the venue <!--aaaa0001 entry:2026-09-01 end:2026-09-05-->",
-                          "- [x] Old done task"], owner="Riaz Arbi")
-    assert rows == ["| Riaz Arbi | Book the venue |", "| Riaz Arbi | Old done task |"]
+    assert rows == ["| Riaz Arbi | [#H] (Bern) Circulate minutes | Open |"]
 
 
 def test_the_pdf_replaces_a_notes_own_summary_section():

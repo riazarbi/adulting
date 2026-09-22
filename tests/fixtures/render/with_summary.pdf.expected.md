@@ -30,9 +30,9 @@ old resolution text
 \newpage
 ## Action Items
 
-| Assignee | Task |
-|----------|--------------------------------------------------|
-| Riaz Arbi | Send the notice |
+| Assignee | Task | Status |
+|----------|--------------------------------------------------|--------|
+| Riaz Arbi | Send the notice | Open |
 
 --------------------------------------------------------------------
 

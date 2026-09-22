@@ -37,6 +37,11 @@ MINUTES_SUMMARY = (
 LEGACY_ACTION_RE = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
 ACTION_RE = re.compile(r'^(?:ACTION|TASK|DONE):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
 COMMENT_RE = re.compile(r'\s*<!--[^>]*-->\s*')
+DONE_BOX_RE = re.compile(r'^-\s*\[x\]')
+
+# The action table's heading rows, in pdf and minutes alike.
+ACTION_TABLE = ['| Assignee | Task | Status |',
+                '|----------|--------------------------------------------------|--------|']
 
 
 # ---------- reading like awk ----------
@@ -228,9 +233,10 @@ def grep_sed_uniq(lines, needle, prefix):
 
 
 def action_rows(lines, owner):
-    """The embedded python in the bash scripts: one table row per distinct
-    (assignee, task), from `- [ ]` checkboxes and ACTION/TASK/DONE lines.
-    An action with no assignee is given to the owner."""
+    """One table row per distinct (assignee, task, status), from `- [ ]` /
+    `- [x]` checkboxes and ACTION/TASK/DONE lines. Every action is listed,
+    open or done, and says which. An action with no assignee is given to the
+    owner."""
     rows, seen = [], set()
     for line in lines:
         m = LEGACY_ACTION_RE.match(line) or ACTION_RE.match(line)
@@ -238,10 +244,11 @@ def action_rows(lines, owner):
             continue
         assignee = (m.group(1) or '').strip() or owner
         task = COMMENT_RE.sub(' ', m.group(2)).strip()
-        if (assignee, task) in seen:
+        status = 'Done' if line.startswith('DONE:') or DONE_BOX_RE.match(line) else 'Open'
+        if (assignee, task, status) in seen:
             continue
-        seen.add((assignee, task))
-        rows.append(f"| {assignee} | {task} |")
+        seen.add((assignee, task, status))
+        rows.append(f"| {assignee} | {task} | {status} |")
     return rows
 
 
@@ -316,8 +323,7 @@ def pdf_markdown(note_text, owner):
         body.append(line)
     doc = header(lines, 'pdf') + body
     callouts = [''] + grep_sed_uniq(doc, '!:', '!: ') + ['']
-    actions = (['', '| Assignee | Task |', '|----------|--------------------------------------------------|']
-               + action_rows(doc, owner) + [''])
+    actions = [''] + ACTION_TABLE + action_rows(doc, owner) + ['']
     return joined(pad_rules(fill_sections(doc, {'# Summary': callouts, '# Action Items': actions})))
 
 
@@ -342,14 +348,13 @@ def minutes_markdown(note_text, owner):
                         ('# Timesheet',))
     doc = records(joined(header(lines, 'minutes') + body))
 
-    rows = action_rows(doc, owner) or ['| None | None |']
+    rows = action_rows(doc, owner) or ['| None | None | None |']
     inserts = {
         '# Minuted Agreements': found_block(grep_sed_uniq(doc, 'AGREED:', 'AGREED: '),
                                             "No minutes agreements were made."),
         '# Resolutions': found_block(grep_sed_uniq(doc, 'RESOLVED:', 'RESOLVED: '),
                                      "No Resolutions were passed."),
-        '# Action Items': ['', '| Assignee | Task |',
-                           '|----------|--------------------------------------------------|'] + rows + [''],
+        '# Action Items': [''] + ACTION_TABLE + rows + [''],
     }
     return joined(pad_rules(fill_sections(doc, inserts)))
 

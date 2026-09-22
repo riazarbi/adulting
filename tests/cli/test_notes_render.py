@@ -3,12 +3,14 @@
 tests/fixtures/render/<name>.md are synthetic notes covering every rule the
 three renderers have. Each `<name>.<kind>.expected.md` beside them is the
 markdown the OLD bash renderer produced for that note, captured by feeding
-its picker, and the port reproduces it byte for byte, with two deliberate
-exceptions, both old bugs fixed after the port:
+its picker, and the port reproduces it byte for byte, with three deliberate
+exceptions made after the port:
 
 - no_summary_with_content_twice.minutes: the Summary block is inserted once,
   before the `# Content` heading, not also before `## Content notes`.
 - no_frontmatter.*: a note with no type gets `# Details`, not `#  Details`.
+- every action table has a Status column saying whether each action is
+  Open or Done (decided 2026-09-22).
 
 Old bugs these files still carry are marked DEFERRED BUG in the tests below
 and listed in stories/2026-09-17-python-package-refactor.md.

@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-22 - action tables say whether each action is open or done
+
+Minutes and PDF action tables listed completed actions (`DONE:`, `- [x]`) alongside open ones with nothing to tell them apart. That was deferred bug 9 until it was decided: list every action, open and done, and say which.
+
+- **A Status column**, `Open` for `ACTION:`, `TASK:` and `- [ ]`, `Done` for `DONE:` and `- [x]`. The heading row is `| Assignee | Task | Status |`, and the empty minutes row becomes `| None | None | None |`. The same task open and done in one note is listed both ways, so nothing is hidden.
+- **Tests:** a unit test covers every action form and the both-ways case, another covers the table in `pdf` and `minutes`, and deferred bug 2's pin gains the column. All three failed before the change. Seven fixture expected files changed, and a script confirmed that every changed line is an action-table line.
+- **Verified on the vault copy:** all 348 renders still match the old output except that 109 differ, and in each of those only action-table lines changed. PDF outcomes are unchanged. **689 passing.**
+
 ## 2026-09-22 - review fixes, part A: the bugs
 
 A third-party review of the refactor (`stories/2026-09-22-refactor-review-findings.md`) found bugs the tests missed. Every one in its part A was reproduced on a scratch vault first, then fixed with a test written to fail before the fix. All but A4 predate the refactor, which carried them over faithfully.

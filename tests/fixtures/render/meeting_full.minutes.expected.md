@@ -44,13 +44,13 @@ Levy increases by 5%
 \newpage
 ## Action Items
 
-| Assignee | Task |
-|----------|--------------------------------------------------|
-| Bern Sellmeyer | Get quotes |
-| Riaz Arbi | [#H] (Riaz Arbi) Circulate minutes |
-| Riaz Arbi | Book the venue |
-| Bob | Old style task |
-| Riaz Arbi | Old done task |
+| Assignee | Task | Status |
+|----------|--------------------------------------------------|--------|
+| Bern Sellmeyer | Get quotes | Open |
+| Riaz Arbi | [#H] (Riaz Arbi) Circulate minutes | Open |
+| Riaz Arbi | Book the venue | Done |
+| Bob | Old style task | Open |
+| Riaz Arbi | Old done task | Done |
 
 --------------------------------------------------------------------
 

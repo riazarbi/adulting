@@ -1115,3 +1115,56 @@ Exact assertions on **our** output are right. These pin someone else's:
 - [ ] Every `tests/fixtures/render/*.expected.md` oddity is either fixed or
       labelled `KNOWN-WRONG` and listed in the story.
 - [ ] `dev/ci` is green.
+
+# Round 3: what was done
+
+Commits, in order: `aa8bceb` (A), `ca4c1e0` (C1), `6f105b0` (suggester removed),
+`02994a1` (B1–B3, B5), `56b2712` (B4, B6, B7), `2dd9f35` (C2), `de9e4ed` (C4,
+C5), `f0087c4` (C6), `96928e6` (D1, D4), `3d4ce7f` (B8, B9). Each one has its
+own CHANGELOG entry with the detail. **762 passing, `dev/ci` green.**
+
+## Round 3 done means
+
+- [x] A windowed `payments statement --pdf` shows the same lines as the text
+      view. `test_the_pdf_statement_honours_the_window`.
+- [x] Every write command accepts `--help-json` as data and writes the record
+      (`--help-json` is a real flag now, handled in `vault.parse_command`).
+- [x] A thread with `rate: 1,000` is refused, not billed at 2500, and lint says
+      so (`test_lint_cli.py:701`, `test_hours_cli.py:438`).
+- [x] `lint` on a relative path agrees with `lint` on the absolute one.
+- [x] Changing any `--limit` or truncation default fails a test.
+- [x] Corrupting the statement PDF's bank account number fails a test.
+- [x] `def parse_action` is one function in `vault.py`, used by `tasks`,
+      `buffer` and `lint`.
+- [x] Every render fixture oddity is labelled in `tests/fixtures/render/`
+      `README.md` and listed as a deferred bug (12, 13, 14 are new).
+- [x] `dev/ci` is green, and now runs ruff.
+
+## Owner decisions taken during this round
+
+1. **`set-priority`**: one rule in one place — `vault.PRIORITIES` and
+   `vault.check_priority`, called by `set-priority` and by `list --priority`.
+2. **`fold_case` dropped.** Lookups are case-exact.
+3. **Strict typing at entry and at usage.** No value is implicitly 0:
+   `as_int`/`as_money`/`as_time` name the field and stop. This surfaced a real
+   defect in the vault (a note linking `[[people/Ralph Van Niekerk]]` where the
+   file is `Ralph van Niekerk.md`).
+4. Noted.
+5. Confirmed a bug.
+6. **The suggester is removed**, with its tests and its eval corpus, so R3-C3
+   and the suggester half of R3-B8 are moot.
+7. **ruff added** and wired into `dev/ci lint`.
+8. **Trimmed rather than collapsed** in R3-B7.
+
+## Decisions I made where the finding left a choice
+
+- **Path format (R3-C5).** Commands that walk the vault print vault-relative
+  paths; `lint`, the one command you point at files, keeps absolute ones. This
+  also closed the second half of deferred bug 7.
+- **`tasks ingest` was added** rather than removing the top-level `--dry-run`
+  and `--quiet`, so nothing that works today stops working.
+- **`statement_pdf` has no unit test file of its own** (R3-B8): its functions
+  are asserted in `tests/unit/test_statement.py`, beside the statement they
+  render.
+- **Tests are exempt from ruff's line-length rule**, because they pin vault
+  lines and command output verbatim.

@@ -1,10 +1,11 @@
-"""Tests for `notes pdf|minutes|agenda` (refactor unit 12).
+"""`notes pdf|minutes|agenda`: the markdown each renderer produces.
 
 tests/fixtures/render/<name>.md are synthetic notes covering every rule the
-three renderers have. Each `<name>.<kind>.expected.md` beside them is the
-markdown the OLD bash renderer produced for that note, captured by feeding
-its picker, and the port reproduces it byte for byte, with three deliberate
-exceptions made after the port:
+three renderers have, and each `<name>.<kind>.expected.md` beside them is
+the output pinned byte for byte. tests/fixtures/render/README.md says where
+that output came from and which of it is known to be wrong.
+
+Three differences from the pinned output were decided deliberately:
 
 - no_summary_with_content_twice.minutes: the Summary block is inserted once,
   before the `# Content` heading, not also before `## Content notes`.

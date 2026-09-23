@@ -1,11 +1,6 @@
-"""Tests for `notes new`, driven entirely by flags (refactor unit 11).
-
-The old bash `notes new` asked for everything through prompts. The note it
-wrote, and the buffer REFs, were captured by feeding those prompts on stdin;
-these tests pin the same output for the same answers given as flags.
-
-`notes` is this package's command.
-"""
+"""`notes new`: the note it writes and the buffer REF it leaves behind, for
+every combination of flags. Nothing is asked for; a missing value is an
+error."""
 
 import re
 

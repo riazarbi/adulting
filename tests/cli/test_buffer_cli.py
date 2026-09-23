@@ -283,7 +283,7 @@ def test_flush_empty_and_quiet(buffer_vault):
     assert "TEXT: quiet" in buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
 
 
-# ---------- no interactivity (fails against the pre-port script) ----------
+# ---------- nothing prompts ----------
 
 def test_a_failed_ingest_after_flush_warns_and_keeps_the_flush(vault):
     """The buffer is cleared before the ingest runs, so an ingest failure

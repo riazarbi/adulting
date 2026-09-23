@@ -1,9 +1,5 @@
-"""The `threads` command: list, show, new (with billing defaults) and delete.
-
-The first sections characterise behaviour kept from the pre-port script and
-were run green against it. The last section specifies the removal of
-interactivity and was written to fail against the old script.
-"""
+"""The `threads` command: list, show, new (with billing defaults) and
+delete, each driven entirely by arguments."""
 
 import json
 import re
@@ -171,7 +167,7 @@ def test_delete_not_found_and_ambiguous(threads_vault):
     assert threads_vault.snapshot() == before
 
 
-# ---------- no interactivity (fails against the pre-port script) ----------
+# ---------- nothing prompts ----------
 
 
 def test_new_strips_the_name_and_refuses_a_blank_one(vault):

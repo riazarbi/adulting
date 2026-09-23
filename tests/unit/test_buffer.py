@@ -142,3 +142,19 @@ def test_tend_returns_the_regrouped_lines_and_writes_nothing(buffer_home):
         ("thread 'Topics/B' does not resolve", lines[0]),
         ("UNKNOWN entry must be converted to TEXT, REF, or ACTION before tend can pass", lines[2])]
     assert not (buffer_home / "buffer.md").exists()
+
+
+def test_validate_entry_reports_an_empty_body(vault):
+    """A hand-edited buffer can hold an entry with nothing after the type.
+    `tend` says so instead of flushing an empty log line."""
+    vault.write_thread("Projects", "SGB")
+    text = {"thread": "Projects/SGB", "type": "TEXT", "body": "",
+            "ts": "2026-09-10T15:00:00", "date": "2026-09-10", "attr_tokens": []}
+    assert list(B.validate_entry(text)) == ["TEXT body is empty"]
+    action = {**text, "type": "ACTION"}
+    assert list(B.validate_entry(action)) == ["ACTION description is empty"]
+    named = {**action, "body": "(Riaz Arbi)"}
+    assert list(B.validate_entry(named)) == [
+        "ACTION description after assignee is empty",
+        "ACTION assignee 'Riaz Arbi' does not resolve to people/Riaz Arbi.md",
+    ]

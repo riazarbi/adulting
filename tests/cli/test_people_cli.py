@@ -1,9 +1,5 @@
-"""Tests for the `people` CLI (refactor unit 4).
-
-The first section characterises behaviour kept from the pre-port script and
-was run green against it. The last section specifies the removal of
-interactivity and was written to fail against the old script.
-"""
+"""The `people` command: list, show, new and delete, each driven entirely
+by arguments."""
 
 import json
 from datetime import date
@@ -124,7 +120,7 @@ def test_delete_missing_person(people_vault):
     assert people_vault.snapshot() == before
 
 
-# ---------- no interactivity (fails against the pre-port script) ----------
+# ---------- nothing prompts ----------
 
 
 def test_delete_without_yes_refuses_even_if_stdin_says_yes(people_vault):

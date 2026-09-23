@@ -203,7 +203,7 @@ def test_non_repo_home_fails_cleanly(gitvault, tmp_path):
     assert r.stdout == ""
 
 
-# ---------- characterisation added before the port (refactor unit 1) ----------
+# ---------- the vault repo itself: where it may live, and what it refuses ----------
 
 def test_home_that_is_a_subdirectory_of_a_repo_is_refused(gitvault):
     """`git add -A` from a subdirectory would sweep in files outside the vault."""

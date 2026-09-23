@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, parts R3-B8 and R3-B9: the untested corners, and tests that say what they test
+
+- **R3-B8: `--help-json`'s content is tested, not just its shape.** `tests/unit/test_helpjson.py` asserts a whole manifest — descriptions, `choices`, `required`, `nargs`, `takes_value`, the `add_parser(help=…)` fallback description and the bare-command case — because `MANUAL.md` and `dev/tools/` are generated from exactly those fields. Blanking one description now fails two tests.
+- **`threads.py` has a unit test file**: what `threads new` writes (frontmatter, heading, billing only when given) and the five ways it refuses, including a name already taken in another case. `buffer`'s empty-body branches — `TEXT body is empty`, `ACTION description is empty` and the empty-after-assignee case — are covered in `tests/unit/test_buffer.py`. (`statement_pdf` has no file of its own; its `markdown` and `money` are asserted in `tests/unit/test_statement.py`, which is where the statement it renders is built.)
+- Each new test was checked by breaking the code it covers.
+- **R3-B9: the test docstrings describe behaviour, not the port.** "refactor unit 4", "characterisation added before the port", "fails against the pre-port script" and "the OLD bash renderer" are gone from six files; the section headers say "nothing prompts". Where the provenance still matters — the render fixtures — it is in `tests/fixtures/render/README.md`.
+- **The production-vault tripwire names its likely cause.** It now says Obsidian or a sync client touching the vault is the usual reason, tells you to rerun with the vault closed and sync paused, and only then to treat it as a leaking test.
+- **762 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, part R3-D: the docs that lied, and the scripts ruff could not see
 
 - **R3-D1: `schemas/thread.md` named the wrong config key.** It said a thread's `rate` falls back to `.adulting/config.yaml`'s `time.rate`; `hours.py` reads `hours.rate`, and the README always said so. The schema ships as package data and is harvested, so the wrong key had already reached `MANUAL.md`; both are corrected.

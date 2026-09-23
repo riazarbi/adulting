@@ -1,10 +1,9 @@
-"""Tests for the non-interactive `notes` commands (refactor unit 10).
+"""The `notes` commands that pick a note by name: list, cat, last, copy,
+delete.
 
-The old bash `notes` chose a note through a numbered picker, so these tests
-cannot run against it. What they keep from it was checked by driving that
-picker on the same fixtures: `cat` prints the file verbatim, `copy` appends
-` COPY` to every `topic:` line and keeps the rest, and every subcommand
-ingests ACTION lines first.
+A note is named on the command line; nothing prompts. `cat` prints the file
+verbatim, `copy` appends ` COPY` to every `topic:` line and keeps the rest,
+and every subcommand ingests ACTION lines first.
 
 `notes` is this package's command.
 """

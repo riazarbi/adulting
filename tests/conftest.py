@@ -240,6 +240,9 @@ def pytest_sessionfinish(session, exitstatus):
               f"({PRODUCTION_VAULT}):")
         for k in changed[:20]:
             print(f"  {k}")
-        print("If you (or Obsidian/sync) edited the vault meanwhile, rerun. "
-              "Otherwise a test leaked.")
+        print("The likely cause is Obsidian or a sync client touching the "
+              "vault while the suite ran, not the suite itself: nothing here "
+              "reaches that path. Check the files above, then rerun. If they "
+              "change again with the vault closed and sync paused, a test is "
+              "leaking and that is the bug.")
         session.exitstatus = 1

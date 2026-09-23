@@ -160,17 +160,17 @@ def stream_documents():
 def stream_records():
     """Hours and payments, from their own files at their own times."""
     out = []
-    for path, ref, e in V.load_all('hours', V.HOURS_FENCE):
+    for path, ref, e in V.HOURS.load_all():
         if not e.get('startTime'):
             continue
-        when = V.local(e['startTime'], f"startTime of entry {e.get('id')!r}")
+        when = V.local(e['startTime'], V.HOURS.stamp_name(e))
         out.append(_event('hours', when.strftime('%Y-%m-%d'), ref,
                           f"{V.fmt_duration(V.minutes_of(e))} {e.get('name','')}",
                           str(path), when.strftime('%H:%M')))
-    for path, ref, p in V.load_all('payments', V.PAYMENTS_FENCE, 'payments'):
+    for path, ref, p in V.PAYMENTS.load_all():
         if not p.get('received'):
             continue
-        when = V.local(p['received'], f"received of payment {p.get('id')!r}")
+        when = V.local(p['received'], V.PAYMENTS.stamp_name(p))
         out.append(_event('payment', when.strftime('%Y-%m-%d'), ref,
                           f"{V.fmt_money(V.dec(p.get('amount', 0)), p.get('currency'))} received",
                           str(path), when.strftime('%H:%M')))
@@ -264,13 +264,13 @@ def snippet(body, needle, width=90):
 def hours_in_window(since=None, until=None):
     """Minutes logged per thread ref within the window."""
     mins = defaultdict(int)
-    for _path, ref, rec in V.load_all('hours', V.HOURS_FENCE):
+    for _path, ref, rec in V.HOURS.load_all():
         start, end = rec.get('startTime'), rec.get('endTime')
         if not start or not end:
             continue
         # Mirror `hours` exactly: local date for bucketing, ISO delta for
         # duration. Slicing the UTC string instead would misfile evening work.
-        d = V.as_time(start, f"startTime of entry {rec.get('id')!r}").astimezone().strftime('%Y-%m-%d')
+        d = V.as_time(start, V.HOURS.stamp_name(rec)).astimezone().strftime('%Y-%m-%d')
         minutes = V.minutes_of(rec)
         if not V.in_window(d, since, until):
             continue

@@ -104,11 +104,10 @@ KIND_DIRS = {'project': 'Projects', 'process': 'Processes', 'topic': 'Topics'}
 CLOSE = '```'
 ISO = '%Y-%m-%dT%H:%M:%S.000Z'
 
-# Every record-bearing directory, as (subdir, fence). Used for vault-wide id
-# uniqueness so an id is never reused across tools.
+# The fences of the two record stores; the stores themselves are built below,
+# once the reading and writing they use exists.
 HOURS_FENCE = '```simple-time-tracker'
 PAYMENTS_FENCE = '```adulting-payments'
-RECORD_DIRS = [('hours', HOURS_FENCE), ('payments', PAYMENTS_FENCE)]
 
 
 # ---------- command-line flags ----------
@@ -438,8 +437,96 @@ def client(tpath):
 
 # ---------- record files (JSON in a fenced block) ----------
 
-def record_path(subdir, kind, name):
-    return vault_home() / subdir / KIND_DIRS[kind] / f"{name}.md"
+class Store:
+    """One kind of record file, and everything that reads or writes one.
+
+    `hours` and `payments` keep their records the same way — JSON inside a
+    fenced block, one file per thread — and differ only in the six values
+    below, so the reading and writing is written once, here.
+
+    `stamp` is the field that dates a record and `noun` is what one record is
+    called in a message, which together give every message about a record the
+    same shape: "no entry with id 'x'", "received of payment 'x'".
+    """
+
+    def __init__(self, subdir, fence, key, heading, noun, stamp):
+        self.subdir = subdir      # hours/ or payments/, under the vault
+        self.fence = fence        # the opening fence of the JSON block
+        self.key = key            # the key the records sit under in that JSON
+        self.heading = heading    # appended to the title of a new file
+        self.noun = noun          # one record, in a message
+        self.stamp = stamp        # the field that dates a record
+
+    def path(self, kind, name):
+        return vault_home() / self.subdir / KIND_DIRS[kind] / f"{name}.md"
+
+    def stamp_name(self, record):
+        """How a record's timestamp is named in an error."""
+        return f"{self.stamp} of {self.noun} {record.get('id')!r}"
+
+    def day_of(self, record):
+        """The local day the record falls on, as YYYY-MM-DD. Local, not UTC:
+        evening work belongs to the day it was done, not the next one."""
+        return local(record[self.stamp], self.stamp_name(record)).strftime('%Y-%m-%d')
+
+    def sort_key(self, record):
+        """Files are kept in time order, undated records first."""
+        return record.get(self.stamp) or ''
+
+    def read(self, path):
+        return read_records(path, self)
+
+    def save(self, path, records, ref, currency):
+        write_records(path, records, self, ref, currency)
+
+    def load_all(self):
+        """(path, thread_ref, record) for every record in the store."""
+        return load_all(self)
+
+    def find(self, record_id):
+        """(path, thread_ref, records, record), or stop. `records` is every
+        record in its file, so an edit can be saved with the rest."""
+        found = find_record(self, record_id)
+        if not found:
+            die(f"no {self.noun} with id {record_id!r}")
+        return found
+
+    def collect(self, thread=None, since=None, until=None):
+        """Every dated record, narrowed to one thread and a date window."""
+        want = None
+        if thread:
+            kind, name, _ = resolve_target(thread)
+            want = thread_ref(kind, name)
+        for path, ref, r in self.load_all():
+            if want and ref != want:
+                continue
+            if not r.get(self.stamp):
+                continue
+            if not in_window(self.day_of(r), since, until):
+                continue
+            yield path, ref, r
+
+    def cmd_rm(self, args):
+        """`hours rm` and `payments rm` are the same command."""
+        path, ref, records, target = self.find(args.id)
+        if not args.yes:
+            die(f"refusing to delete {args.id} without -y")
+        # The file exists, so its frontmatter — currency included — is kept.
+        self.save(path, [r for r in records if r is not target], ref, None)
+        print(f"deleted {args.id}")
+        return 0
+
+
+HOURS = Store('hours', HOURS_FENCE, 'entries', ' — hours', 'entry', 'startTime')
+PAYMENTS = Store('payments', PAYMENTS_FENCE, 'payments', ' — payments',
+                 'payment', 'received')
+STORES = (HOURS, PAYMENTS)
+
+
+def as_output(row):
+    """A row as `--json` and `show` print it: the amount as a plain number.
+    Rows keep the Decimal until this point, so text output rounds exactly."""
+    return {**row, 'amount': float(row['amount'])}
 
 
 def find_block(lines, fence):
@@ -453,47 +540,46 @@ def find_block(lines, fence):
     return None
 
 
-def read_records(path, fence, key='entries'):
+def read_records(path, store):
     if not path.exists():
         return []
     lines = path.read_text(encoding='utf-8').split('\n')
-    blk = find_block(lines, fence)
+    blk = find_block(lines, store.fence)
     if blk is None:
         return []
     raw = '\n'.join(lines[blk[0] + 1:blk[1]]).strip()
     if not raw:
         return []
     try:
-        return json.loads(raw).get(key, []) or []
+        return json.loads(raw).get(store.key, []) or []
     except json.JSONDecodeError as e:
         die(f"malformed JSON in {path}: {e}")
 
 
-def write_records(path, records, fence, ref, currency, key='entries',
-                  sort_key=None, heading=''):
+def write_records(path, records, store, ref, currency):
     """Splice records into the file's block, creating the file if needed.
 
     JSON is pretty-printed rather than written on one line, so appends produce
     readable, mergeable git diffs in a vault synced by git.
     """
-    if sort_key:
-        records = sorted(records, key=sort_key)
-    payload = json.dumps({key: records}, indent=2, ensure_ascii=False).split('\n')
+    records = sorted(records, key=store.sort_key)
+    payload = json.dumps({store.key: records}, indent=2,
+                         ensure_ascii=False).split('\n')
     if path.exists():
         lines = path.read_text(encoding='utf-8').split('\n')
-        blk = find_block(lines, fence)
+        blk = find_block(lines, store.fence)
         if blk is None:
-            die(f"{path} has no {fence} block")
+            die(f"{path} has no {store.fence} block")
         out = lines[:blk[0] + 1] + payload + lines[blk[1]:]
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        title = f"# {path.stem}{heading}"
+        title = f"# {path.stem}{store.heading}"
         # currency is omitted for a file that only ever holds unbilled time:
         # money is an overlay on hours, not a precondition for recording them.
         head = ['---', f'thread: "[[{ref}]]"']
         if currency:
             head.append(f'currency: {currency}')
-        out = (head + ['---', '', title, '', fence] + payload + [CLOSE, ''])
+        out = (head + ['---', '', title, '', store.fence] + payload + [CLOSE, ''])
     path.write_text('\n'.join(out), encoding='utf-8')
 
 
@@ -508,12 +594,12 @@ def record_files(subdir):
                 yield Path(root) / f
 
 
-def find_record(subdir, fence, record_id, key='entries'):
+def find_record(store, record_id):
     """(path, thread_ref, records, record) for the record with this id, or
     None. `records` is every record in its file and `record` is the one in
     that list, so an edit to it can be saved with the rest."""
-    for path in record_files(subdir):
-        records = read_records(path, fence, key)
+    for path in record_files(store.subdir):
+        records = read_records(path, store)
         for r in records:
             if r.get('id') == record_id:
                 fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
@@ -521,20 +607,20 @@ def find_record(subdir, fence, record_id, key='entries'):
     return None
 
 
-def load_all(subdir, fence, key='entries'):
-    """Yield (path, thread_ref, record) for every record in a subdir."""
-    for path in record_files(subdir):
+def load_all(store):
+    """Yield (path, thread_ref, record) for every record in a store."""
+    for path in record_files(store.subdir):
         fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
         ref = unwiki(fm.get('thread', '')) or path.stem
-        for r in read_records(path, fence, key):
+        for r in read_records(path, store):
             yield path, ref, r
 
 
 def all_ids():
     """Every record id in the vault, across all tools — ids never collide."""
     ids = set()
-    for subdir, fence in RECORD_DIRS:
-        for _, _, r in load_all(subdir, fence):
+    for store in STORES:
+        for _, _, r in store.load_all():
             if r.get('id'):
                 ids.add(r['id'])
     return ids

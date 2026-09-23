@@ -31,16 +31,7 @@ from adulting import vault as V
 from adulting import statement as S
 from adulting import statement_pdf as P
 
-SUBDIR = 'payments'
-HEADING = ' — payments'
-KEY = 'payments'
-
-# `hours` side, for the statement.
-HOURS_SUBDIR = 'hours'
-
-
-def by_received(p):
-    return p.get('received') or ''
+STORE = V.PAYMENTS
 
 
 # ---------- amounts ----------
@@ -78,27 +69,22 @@ def build_payment(amount, received, currency, account, note, ids):
     return p
 
 
-def save(path, records, ref, currency):
-    V.write_records(path, records, V.PAYMENTS_FENCE, ref, currency, key=KEY,
-                    sort_key=by_received, heading=HEADING)
-
-
 def append_payment(kind, name, payment):
     ref = V.thread_ref(kind, name)
-    path = V.record_path(SUBDIR, kind, name)
-    save(path, V.read_records(path, V.PAYMENTS_FENCE, KEY) + [payment], ref, payment['currency'])
+    path = STORE.path(kind, name)
+    STORE.save(path, STORE.read(path) + [payment], ref, payment['currency'])
     # A REF in the buffer puts this payment in the thread's daily log on the
     # next flush, filed under the day it was received. Best-effort and
     # silent: see buffer.add_ref. `ref` is already the directory form.
     B.add_ref(ref, f"payments/{ref}",
                f"{V.fmt_money(amount_of(payment), payment['currency'])} "
                f"received ({payment['id']})",
-               date=V.local(payment['received'], received_name(payment)).strftime('%Y-%m-%d'))
+               date=V.local(payment['received'], STORE.stamp_name(payment)).strftime('%Y-%m-%d'))
     return path
 
 
 def report_logged(p, ref):
-    when = V.local(p['received'], received_name(p)).strftime('%Y-%m-%d')
+    when = V.local(p['received'], STORE.stamp_name(p)).strftime('%Y-%m-%d')
     acct = f"  {p['account']}" if p.get('account') else ''
     print(f"received {p['id']}  {ref}  {when}  "
           f"{V.fmt_money(amount_of(p), p['currency'])}{acct}")
@@ -125,27 +111,6 @@ def cmd_log(args):
 
 # ---------- query ----------
 
-def collect(thread=None, since=None, until=None):
-    want = None
-    if thread:
-        kind, name, _ = V.resolve_target(thread)
-        want = V.thread_ref(kind, name)
-    for path, ref, p in V.load_all(SUBDIR, V.PAYMENTS_FENCE, KEY):
-        if want and ref != want:
-            continue
-        if not p.get('received'):
-            continue
-        day = V.local(p['received'], received_name(p)).strftime('%Y-%m-%d')
-        if not V.in_window(day, since, until):
-            continue
-        yield path, ref, p
-
-
-def received_name(p):
-    """How a payment's timestamp is named in an error."""
-    return f"received of payment {p.get('id')!r}"
-
-
 def amount_of(p):
     """A payment's amount. Every payment carries one, so a missing or
     unreadable amount is an error, not a zero."""
@@ -156,7 +121,7 @@ def as_row(ref, p):
     return {
         'id': p.get('id', ''),
         'thread': ref,
-        'received': V.local(p['received'], received_name(p)).strftime('%Y-%m-%d'),
+        'received': V.local(p['received'], STORE.stamp_name(p)).strftime('%Y-%m-%d'),
         'amount': amount_of(p),
         'currency': p.get('currency', ''),
         'account': p.get('account', ''),
@@ -164,18 +129,12 @@ def as_row(ref, p):
     }
 
 
-def as_output(row):
-    """A row as `--json` and `show` print it: the amount as a plain number.
-    Rows keep the Decimal until this point, so text output rounds exactly."""
-    return {**row, 'amount': float(row['amount'])}
-
-
 def cmd_list(args):
     rows = [as_row(ref, p) for _, ref, p in
-            collect(args.thread, args.since, args.until)]
+            STORE.collect(args.thread, args.since, args.until)]
     rows.sort(key=lambda r: (r['received'], r['thread']))
     if args.json:
-        print(json.dumps([as_output(r) for r in rows], indent=2))
+        print(json.dumps([V.as_output(r) for r in rows], indent=2))
         return 0
     if not rows:
         print("(no payments)")
@@ -191,17 +150,9 @@ def cmd_list(args):
     return 0
 
 
-def find_payment(pid):
-    """(path, thread_ref, payments, payment): see vault.find_record."""
-    found = V.find_record(SUBDIR, V.PAYMENTS_FENCE, pid, KEY)
-    if not found:
-        V.die(f"no payment with id {pid!r}")
-    return found
-
-
 def cmd_show(args):
-    _, ref, _, p = find_payment(args.id)
-    row = as_output(as_row(ref, p))
+    _, ref, _, p = STORE.find(args.id)
+    row = V.as_output(as_row(ref, p))
     if args.json:
         print(json.dumps(row, indent=2))
         return 0
@@ -211,7 +162,7 @@ def cmd_show(args):
 
 
 def cmd_edit(args):
-    path, ref, records, target = find_payment(args.id)
+    path, ref, records, target = STORE.find(args.id)
 
     if args.amount is not None:
         target['amount'] = amount_json(parse_amount(args.amount))
@@ -224,23 +175,13 @@ def cmd_edit(args):
     if args.date or args.time:
         # Whichever of date and time is not given keeps its current value,
         # as `hours edit` does.
-        was = V.local(target['received'], received_name(target))
+        was = V.local(target['received'], STORE.stamp_name(target))
         target['received'] = V.to_iso(V.when_from_flags(
             args.date or was.strftime('%Y-%m-%d'),
             args.time or was.strftime('%H:%M')))
 
-    save(path, records, ref, None)  # the file exists; its frontmatter is kept
+    STORE.save(path, records, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
-    return 0
-
-
-def cmd_rm(args):
-    path, ref, records, target = find_payment(args.id)
-    if not args.yes:
-        V.die(f"refusing to delete {args.id} without -y")
-    records = [x for x in records if x is not target]
-    save(path, records, ref, None)  # the file exists; its frontmatter is kept
-    print(f"deleted {args.id}")
     return 0
 
 
@@ -250,7 +191,7 @@ def billed(thread=None, since=None, until=None):
     """Sum the `hours` side, each entry rounded to the cent as the statement
     and `hours report` do, so all three agree exactly."""
     out = {}
-    for _, ref, e in H.collect(thread, since, until):
+    for _, ref, e in V.HOURS.collect(thread, since, until):
         # Unbilled time carries no currency and can never be charged for, so
         # it has no place on a statement of account.
         if not e.get('endTime') or not e.get('currency'):
@@ -278,7 +219,7 @@ def one_thread_statement(thread_arg, as_of, since=None, until=None):
     currency = V.resolve_currency(tpath, ref, None)
 
     entries = []
-    for _, r, e in H.collect(thread_arg, since, until):
+    for _, r, e in V.HOURS.collect(thread_arg, since, until):
         if r != ref or not e.get('endTime'):
             continue
         # Only time billed in the statement's currency is charged. Unbilled
@@ -286,16 +227,16 @@ def one_thread_statement(thread_arg, as_of, since=None, until=None):
         # on a statement in that currency, as the text statement has it.
         if e.get('currency') != currency:
             continue
-        entries.append({'on': V.local(e['startTime'], H.start_name(e)).date(),
+        entries.append({'on': V.local(e['startTime'], V.HOURS.stamp_name(e)).date(),
                         'description': e.get('name', ''),
                         'minutes': V.minutes_of(e),
                         'rate': H.rate_of(e)})
 
     paid = []
-    for _, r, pm in collect(thread_arg, since, until):
+    for _, r, pm in STORE.collect(thread_arg, since, until):
         if r != ref:
             continue
-        paid.append({'on': V.local(pm['received'], received_name(pm)).date(),
+        paid.append({'on': V.local(pm['received'], STORE.stamp_name(pm)).date(),
                      'amount': V.cents(amount_of(pm)),
                      'account': pm.get('account', '')})
 
@@ -334,7 +275,7 @@ def cmd_statement(args):
     until = args.until or (args.as_of if args.as_of else None)
     bill = billed(args.thread, args.since, until)
     recv = {}
-    for _, ref, p in collect(args.thread, args.since, until):
+    for _, ref, p in STORE.collect(args.thread, args.since, until):
         key = (ref, p.get('currency', ''))
         recv.setdefault(key, V.dec(0))
         recv[key] += V.cents(amount_of(p))
@@ -423,7 +364,7 @@ def main():
     p.add_argument('id', help="The payment's 8-character id, from `payments list`.")
     p.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
-    p.set_defaults(func=cmd_rm)
+    p.set_defaults(func=STORE.cmd_rm)
 
     args = V.parse_command(parser)
     return args.func(args)

@@ -464,10 +464,10 @@ ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 # What each kind of record file holds, and the words its messages use.
 # currency is optional on an hours entry: absent means unbilled time.
 RECORD_KINDS = {
-    'hours_file': {'fence': V.HOURS_FENCE, 'key': 'entries', 'block': 'tracker',
+    'hours_file': {'fence': V.HOURS.fence, 'key': V.HOURS.key, 'block': 'tracker',
                    'json': 'tracker JSON', 'fields': ('name', 'startTime', 'endTime', 'id', 'rate'),
                    'times': ('startTime', 'endTime')},
-    'payments_file': {'fence': V.PAYMENTS_FENCE, 'key': 'payments', 'block': 'payments',
+    'payments_file': {'fence': V.PAYMENTS.fence, 'key': V.PAYMENTS.key, 'block': 'payments',
                       'json': 'JSON', 'fields': ('id', 'received', 'amount', 'currency'),
                       'times': ('received',)},
 }

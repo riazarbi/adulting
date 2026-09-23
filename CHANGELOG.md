@@ -2,6 +2,17 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-C2: one record store, not two copies of one
+
+`hours` and `payments` keep their records the same way and differed only in a
+fence, a subdir and a noun, so every function that read or wrote a record file
+existed twice — `as_output` byte for byte, `cmd_rm` but for a variable name.
+
+- **`vault.Store`** carries the six values that differ (subdir, fence, JSON key, file heading, the noun for messages, the field that dates a record) and owns `path`, `read`, `save`, `load_all`, `find`, `collect` and `cmd_rm`. `V.HOURS` and `V.PAYMENTS` are the two of them; `hours rm` and `payments rm` are now literally the same function.
+- Deleted as duplicates: `save`, `collect`, `as_output`, `find_entry`/`find_payment`, `cmd_rm`, `by_start`/`by_received`, `start_name`/`received_name`, and the `SUBDIR`/`HEADING`/`KEY` constants in both modules.
+- **`write_records` went from 8 parameters to 5**, and `read_records`, `find_record` and `load_all` take a store instead of a `(subdir, fence, key)` triple, so a caller can no longer pair the wrong fence with the wrong key. `search` and `lint` read the same store values rather than repeating the fences and the `"startTime of entry …"` wording.
+- **Verified on the vault copy:** `hours list`, `hours report`, `payments list`, `payments statement`, `search stream` and `lint` print byte-identical output before and after. **745 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, part R3-B (2 of 2): tests that say what they pin, and fewer of them
 
 - **R3-B4: the pinned renderer output says where it is wrong.** `tests/fixtures/render/README.md` explains that the `.expected.md` files were captured from the bash renderers, lists the six known-wrong things they pin, and points at the deferred bugs. **Deferred bugs 12, 13 and 14** are new: an empty action table prints `| None | None | None |`; the minutes summary says `No minutes agreements were made.` beside `No Resolutions were passed.`; headers carry trailing spaces and an empty `subtitle:`/`date:` when a note has no frontmatter. `test_render.py` carries a `# DEFERRED BUG 12` marker.

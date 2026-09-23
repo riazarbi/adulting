@@ -43,23 +43,13 @@ from adulting import buffer as B
 from adulting import statement as S
 from adulting import vault as V
 
-SUBDIR = 'hours'
-HEADING = ' — hours'
+STORE = V.HOURS
 
 DEFAULT_MINUTES = 60
 DEFAULT_RATE = 2500
 
 
-def by_start(e):
-    return e.get('startTime') or ''
-
-
 # ---------- entries ----------
-
-def start_name(e):
-    """How an entry's start time is named in an error."""
-    return f"startTime of entry {e.get('id')!r}"
-
 
 def rate_of(e):
     """An entry's rate. Every entry carries one: `hours log` writes 0 for
@@ -116,16 +106,10 @@ def build_entry(desc, when, minutes, rate, currency, ids):
     return entry
 
 
-def save(path, entries, ref, currency):
-    V.write_records(path, entries, V.HOURS_FENCE, ref, currency,
-                    sort_key=by_start, heading=HEADING)
-
-
 def append_entry(kind, name, entry):
     ref = V.thread_ref(kind, name)
-    path = V.record_path(SUBDIR, kind, name)
-    save(path, V.read_records(path, V.HOURS_FENCE) + [entry], ref,
-         entry.get('currency'))
+    path = STORE.path(kind, name)
+    STORE.save(path, STORE.read(path) + [entry], ref, entry.get('currency'))
     # A REF in the buffer puts this entry in the thread's daily log on the
     # next flush, filed under the day the work happened. Best-effort and
     # silent: see buffer.add_ref. `ref` is already the directory form
@@ -133,12 +117,12 @@ def append_entry(kind, name, entry):
     B.add_ref(ref, f"hours/{ref}",
                f"{V.fmt_duration(V.minutes_of(entry))} {entry['name']} "
                f"({entry['id']})",
-               date=V.local(entry['startTime'], start_name(entry)).strftime('%Y-%m-%d'))
+               date=V.local(entry['startTime'], STORE.stamp_name(entry)).strftime('%Y-%m-%d'))
     return path
 
 
 def report_logged(entry, ref):
-    when = V.local(entry['startTime'], start_name(entry)).strftime('%Y-%m-%d %H:%M')
+    when = V.local(entry['startTime'], STORE.stamp_name(entry)).strftime('%Y-%m-%d %H:%M')
     if entry.get('currency'):
         tail = (f"@ {entry['rate']} {entry['currency']} = "
                 f"{V.fmt_money(money_of(entry), entry['currency'])}")
@@ -172,28 +156,12 @@ def cmd_log(args):
 
 # ---------- query ----------
 
-def collect(thread=None, since=None, until=None):
-    want = None
-    if thread:
-        kind, name, _ = V.resolve_target(thread)
-        want = V.thread_ref(kind, name)
-    for path, ref, e in V.load_all(SUBDIR, V.HOURS_FENCE):
-        if want and ref != want:
-            continue
-        if not e.get('startTime'):
-            continue
-        day = V.local(e['startTime'], start_name(e)).strftime('%Y-%m-%d')
-        if not V.in_window(day, since, until):
-            continue
-        yield path, ref, e
-
-
 def as_row(ref, e):
     return {
         'id': e.get('id', ''),
         'thread': ref,
-        'date': V.local(e['startTime'], start_name(e)).strftime('%Y-%m-%d'),
-        'time': V.local(e['startTime'], start_name(e)).strftime('%H:%M'),
+        'date': V.local(e['startTime'], STORE.stamp_name(e)).strftime('%Y-%m-%d'),
+        'time': V.local(e['startTime'], STORE.stamp_name(e)).strftime('%H:%M'),
         'minutes': V.minutes_of(e),
         'rate': rate_of(e),
         'currency': e.get('currency', ''),
@@ -202,18 +170,12 @@ def as_row(ref, e):
     }
 
 
-def as_output(row):
-    """A row as `--json` and `show` print it: the amount as a plain number.
-    Rows keep the Decimal until this point, so text output rounds exactly."""
-    return {**row, 'amount': float(row['amount'])}
-
-
 def cmd_list(args):
     rows = [as_row(ref, e) for _, ref, e in
-            collect(args.thread, args.since, args.until)]
+            STORE.collect(args.thread, args.since, args.until)]
     rows.sort(key=lambda r: (r['date'], r['time']))
     if args.json:
-        print(json.dumps([as_output(r) for r in rows], indent=2))
+        print(json.dumps([V.as_output(r) for r in rows], indent=2))
         return 0
     if not rows:
         print("(no entries)")
@@ -229,7 +191,7 @@ def cmd_list(args):
 
 def cmd_report(args):
     buckets = {}
-    for _, ref, e in collect(args.thread, args.since, args.until):
+    for _, ref, e in STORE.collect(args.thread, args.since, args.until):
         key = (ref, e.get('currency', ''))
         b = buckets.setdefault(key, {'thread': ref, 'currency': key[1],
                                      'minutes': 0, 'amount': V.dec(0), 'entries': 0})
@@ -267,17 +229,9 @@ def cmd_report(args):
     return 0
 
 
-def find_entry(entry_id):
-    """(path, thread_ref, entries, entry): see vault.find_record."""
-    found = V.find_record(SUBDIR, V.HOURS_FENCE, entry_id)
-    if not found:
-        V.die(f"no entry with id {entry_id!r}")
-    return found
-
-
 def cmd_show(args):
-    _, ref, _, e = find_entry(args.id)
-    row = as_output(as_row(ref, e))
+    _, ref, _, e = STORE.find(args.id)
+    row = V.as_output(as_row(ref, e))
     if args.json:
         print(json.dumps(row, indent=2))
         return 0
@@ -288,7 +242,7 @@ def cmd_show(args):
 
 
 def cmd_edit(args):
-    path, ref, entries, target = find_entry(args.id)
+    path, ref, entries, target = STORE.find(args.id)
 
     if args.description is not None:
         target['name'] = ' '.join(args.description).strip()
@@ -307,7 +261,7 @@ def cmd_edit(args):
               f"pass --currency, or --rate 0 to leave it unbilled")
 
     if args.date or args.time:
-        start = V.local(target['startTime'], start_name(target))
+        start = V.local(target['startTime'], STORE.stamp_name(target))
         mins = V.minutes_of(target)
         when = V.when_from_flags(args.date or start.strftime('%Y-%m-%d'),
                                  args.time or start.strftime('%H:%M'))
@@ -319,18 +273,8 @@ def cmd_edit(args):
         target['endTime'] = V.to_iso(
             V.from_iso(target['startTime']) + timedelta(minutes=args.minutes))
 
-    save(path, entries, ref, None)  # the file exists; its frontmatter is kept
+    STORE.save(path, entries, ref, None)  # the file exists; its frontmatter is kept
     report_logged(target, ref)
-    return 0
-
-
-def cmd_rm(args):
-    path, ref, entries, target = find_entry(args.id)
-    if not args.yes:
-        V.die(f"refusing to delete {args.id} without -y")
-    entries = [e for e in entries if e is not target]
-    save(path, entries, ref, None)  # the file exists; its frontmatter is kept
-    print(f"deleted {args.id}")
     return 0
 
 
@@ -385,7 +329,7 @@ def main():
     p.add_argument('id', help="The entry's 8-character id, from `hours list`.")
     p.add_argument('-y', '--yes', action='store_true',
                     help="Required: confirms the permanent delete.")
-    p.set_defaults(func=cmd_rm)
+    p.set_defaults(func=STORE.cmd_rm)
 
     args = V.parse_command(parser)
     return args.func(args)

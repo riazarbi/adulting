@@ -86,27 +86,27 @@ def appended(billing_threads, utc):
 
 
 def test_append_keeps_the_file_sorted_by_start(appended):
-    assert [e["id"] for _, _, e in H.collect()] == ["aaaa0002", "aaaa0001"]
+    assert [e["id"] for _, _, e in H.STORE.collect()] == ["aaaa0002", "aaaa0001"]
 
 
 def test_collect_filters_by_date(appended):
-    assert [e["id"] for _, _, e in H.collect(since="2026-08-03")] == ["aaaa0001"]
-    assert [e["id"] for _, _, e in H.collect(until="2026-08-02")] == ["aaaa0002"]
+    assert [e["id"] for _, _, e in H.STORE.collect(since="2026-08-03")] == ["aaaa0001"]
+    assert [e["id"] for _, _, e in H.STORE.collect(until="2026-08-02")] == ["aaaa0002"]
 
 
 def test_find_entry_returns_its_file_and_thread(appended):
-    path, ref, _, e = H.find_entry("aaaa0001")
+    path, ref, _, e = H.STORE.find("aaaa0001")
     assert (path.name, ref, e["id"]) == ("SANA.md", "Projects/SANA", "aaaa0001")
 
 
 def test_find_entry_refuses_an_unknown_id(appended, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["hours"])
     with pytest.raises(SystemExit) as exc:
-        H.find_entry("deadbeef")
+        H.STORE.find("deadbeef")
     assert exc.value.code == 1
     assert capsys.readouterr().err == "hours: error: no entry with id 'deadbeef'\n"
 
 
 def test_as_row_charges_the_entry(appended):
-    _, ref, _, e = H.find_entry("aaaa0001")
+    _, ref, _, e = H.STORE.find("aaaa0001")
     assert H.as_row(ref, e)["amount"] == Decimal("3750.00")

@@ -80,6 +80,7 @@ def test_fuzzy_score_ranks_closer_matches_first():
 # ---------- record blocks ----------
 
 FENCE = "```simple-time-tracker"
+STORE = V.HOURS
 
 
 def test_find_block_locates_fence_and_close():
@@ -95,15 +96,15 @@ def test_find_block_unclosed_or_missing_is_none():
 def test_write_then_read_records_round_trips(tmp_path):
     path = tmp_path / "hours" / "Projects" / "SGB.md"
     records = [{"name": 'semi;colon, "quote" [[link]]', "id": "abcd1234", "rate": 0}]
-    V.write_records(path, records, FENCE, "Projects/SGB", "ZAR", heading=" — hours")
+    V.write_records(path, records, STORE, "Projects/SGB", "ZAR")
     text = path.read_text(encoding="utf-8")
     assert text.startswith('---\nthread: "[[Projects/SGB]]"\ncurrency: ZAR\n---\n\n# SGB — hours\n')
-    assert V.read_records(path, FENCE) == records
+    assert V.read_records(path, STORE) == records
 
 
 def test_write_records_without_currency_omits_it(tmp_path):
     path = tmp_path / "SGB.md"
-    V.write_records(path, [], FENCE, "Projects/SGB", None)
+    V.write_records(path, [], STORE, "Projects/SGB", None)
     assert "currency" not in path.read_text(encoding="utf-8")
 
 
@@ -111,25 +112,26 @@ def test_write_records_replaces_only_the_block(tmp_path):
     path = tmp_path / "SGB.md"
     path.write_text(f"---\nthread: x\n---\n\nKeep me.\n\n{FENCE}\n{{}}\n```\n\nAfter.\n",
                     encoding="utf-8")
-    V.write_records(path, [{"id": "1"}], FENCE, "Projects/SGB", "ZAR")
+    V.write_records(path, [{"id": "1"}], STORE, "Projects/SGB", "ZAR")
     text = path.read_text(encoding="utf-8")
     assert "Keep me." in text and "After." in text
-    assert V.read_records(path, FENCE) == [{"id": "1"}]
+    assert V.read_records(path, STORE) == [{"id": "1"}]
 
 
 def test_write_records_json_is_pretty_printed(tmp_path):
     path = tmp_path / "SGB.md"
-    V.write_records(path, [{"id": "1"}], FENCE, "Projects/SGB", "ZAR")
+    V.write_records(path, [{"id": "1"}], STORE, "Projects/SGB", "ZAR")
     lines = path.read_text(encoding="utf-8").split("\n")
     i, j = V.find_block(lines, FENCE)
     assert lines[i + 1:j] == ["{", '  "entries": [', "    {", '      "id": "1"', "    }", "  ]", "}"]
 
 
-def test_write_records_sorts_when_asked(tmp_path):
+def test_write_records_sorts_by_the_stores_stamp(tmp_path):
     path = tmp_path / "SGB.md"
-    V.write_records(path, [{"id": "b"}, {"id": "a"}], FENCE, "P/S", "ZAR",
-                    sort_key=lambda r: r["id"])
-    assert [r["id"] for r in V.read_records(path, FENCE)] == ["a", "b"]
+    V.write_records(path, [{"id": "b", "startTime": "2026-08-03T06:00:00.000Z"},
+                           {"id": "a", "startTime": "2026-08-02T06:00:00.000Z"},
+                           {"id": "undated"}], STORE, "P/S", "ZAR")
+    assert [r["id"] for r in V.read_records(path, STORE)] == ["undated", "a", "b"]
 
 
 def test_read_records_of_a_missing_file_is_empty(tmp_path):
@@ -403,11 +405,11 @@ def test_vault_file_needs_the_exact_spelling_and_stays_in_the_vault():
 
 def test_find_record_returns_the_record_inside_its_files_list():
     path = V.vault_home() / "hours" / "Projects" / "SGB.md"
-    V.write_records(path, [{"id": "aaaa0001"}, {"id": "aaaa0002"}], V.HOURS_FENCE, "Projects/SGB", None)
-    found_path, ref, records, record = V.find_record("hours", V.HOURS_FENCE, "aaaa0002")
+    V.write_records(path, [{"id": "aaaa0001"}, {"id": "aaaa0002"}], STORE, "Projects/SGB", None)
+    found_path, ref, records, record = V.find_record(STORE, "aaaa0002")
     assert (found_path, ref, record) == (path, "Projects/SGB", {"id": "aaaa0002"})
     assert record is records[1]
-    assert V.find_record("hours", V.HOURS_FENCE, "deadbeef") is None
+    assert V.find_record(STORE, "deadbeef") is None
 
 
 def test_parse_action_reads_the_assignee_body_and_attributes():

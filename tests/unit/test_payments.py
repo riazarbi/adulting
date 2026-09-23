@@ -43,15 +43,15 @@ def vault_with_records():
          "endTime": "2026-07-01T07:20:00.000Z", "id": "aaaa0001", "rate": 2500, "currency": "ZAR"},
         {"name": "Later", "startTime": "2026-08-01T07:00:00.000Z",
          "endTime": "2026-08-01T08:00:00.000Z", "id": "aaaa0002", "rate": 1000, "currency": "ZAR"},
-    ], P.V.HOURS_FENCE, "Projects/SANA", "ZAR")
+    ], P.V.HOURS, "Projects/SANA", "ZAR")
     P.V.write_records(home / "hours" / "Topics" / "Wellness.md", [
         {"name": "Run", "startTime": "2026-07-01T05:00:00.000Z",
          "endTime": "2026-07-01T06:00:00.000Z", "id": "aaaa0003", "rate": 0},
-    ], P.V.HOURS_FENCE, "Topics/Wellness", None)
+    ], P.V.HOURS, "Topics/Wellness", None)
     P.V.write_records(home / "payments" / "Projects" / "SANA.md", [
         {"id": "bbbb0001", "received": "2026-07-10T08:00:00.000Z", "amount": 500.5,
          "currency": "ZAR", "account": "FNB"},
-    ], P.V.PAYMENTS_FENCE, "Projects/SANA", "ZAR", key=P.KEY)
+    ], P.V.PAYMENTS, "Projects/SANA", "ZAR")
     return home
 
 
@@ -61,14 +61,14 @@ def test_billed_rounds_each_entry_and_skips_unbilled_time(vault_with_records):
 
 
 def test_collect_and_find_payment(vault_with_records):
-    [(_, ref, p)] = list(P.collect("SANA"))
+    [(_, ref, p)] = list(P.STORE.collect("SANA"))
     assert (ref, p["id"]) == ("Projects/SANA", "bbbb0001")
-    assert list(P.collect(since="2026-07-11")) == []
+    assert list(P.STORE.collect(since="2026-07-11")) == []
     assert P.as_row(ref, p)["amount"] == 500.5
-    path, ref, _, found = P.find_payment("bbbb0001")
+    path, ref, _, found = P.STORE.find("bbbb0001")
     assert (path.name, ref, found["amount"]) == ("SANA.md", "Projects/SANA", 500.5)
     with pytest.raises(SystemExit):
-        P.find_payment("deadbeef")
+        P.STORE.find("deadbeef")
 
 
 def test_one_thread_statement(vault_with_records):
@@ -85,13 +85,13 @@ def test_the_pdf_statement_charges_only_the_threads_currency(vault_with_records)
     ZAR statement of account. The PDF used to list both and charge the USD
     entry as ZAR."""
     path = vault_with_records / "hours" / "Projects" / "SANA.md"
-    records = P.V.read_records(path, P.V.HOURS_FENCE) + [
+    records = P.V.read_records(path, P.V.HOURS) + [
         {"name": "Unbilled reading", "startTime": "2026-07-02T07:00:00.000Z",
          "endTime": "2026-07-02T08:00:00.000Z", "id": "aaaa0004", "rate": 0},
         {"name": "USD work", "startTime": "2026-07-03T07:00:00.000Z",
          "endTime": "2026-07-03T08:00:00.000Z", "id": "aaaa0005", "rate": 100, "currency": "USD"},
     ]
-    P.V.write_records(path, records, P.V.HOURS_FENCE, "Projects/SANA", "ZAR")
+    P.V.write_records(path, records, P.V.HOURS, "Projects/SANA", "ZAR")
     st = P.one_thread_statement("SANA", date(2026, 7, 31))
     assert [line["description"] for line in st["lines"]] == ["Work", "Payment received — FNB"]
     assert st["charges"] == Decimal("833.33")

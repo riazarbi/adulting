@@ -67,10 +67,8 @@ def test_a_command_with_nothing_but_its_name_still_answers():
     assert 'args' not in manifest and 'subcommands' not in manifest
 
 
-def test_the_manifest_is_json_and_every_help_string_is_present(vault):
-    """Empty help would serialise happily and leave the manual blank, so the
-    manifest is checked as the text a reader gets, not just as a shape."""
-    text = json.dumps(H.parser_to_dict(sample_parser()))
-    for said in ("A sample command.", "Say less.", "Append an entry.",
-                 "Thread name.", "Optional words.", "How urgent.", "Where to write."):
-        assert said in text
+def test_the_manifest_survives_json(vault):
+    """The manifest is printed as JSON, so it has to be serialisable: a
+    `choices` tuple or a Path in it would raise here and nowhere else."""
+    assert json.loads(json.dumps(H.parser_to_dict(sample_parser()))) == \
+        H.parser_to_dict(sample_parser())

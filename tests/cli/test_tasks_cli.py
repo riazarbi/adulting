@@ -581,8 +581,10 @@ def test_list_resolves_a_bare_thread_name_like_every_other_command(board):
     name printed a plausible empty answer instead of the tasks."""
     bare = board.run("list", "--thread", "SGB", cli="tasks")
     assert (bare.returncode, bare.stderr) == (0, "")
+    assert bare.stdout == (
+        "dddd0001  [#H]  Projects/SGB +1  (Riaz Arbi)  Draft the scope note  due:2026-09-20\n"
+        "aaaa0001  [#L]  Projects/SGB +1  (Charlie)    Existing              due:2026-09-05\n")
     assert bare.stdout == board.run("list", "--thread", "Projects/SGB", cli="tasks").stdout
-    assert bare.stdout.count("\n") == 2
 
 
 def test_list_refuses_a_thread_that_does_not_resolve(board):

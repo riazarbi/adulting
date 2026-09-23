@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 5, parts R5-B3 and R5-B5: tests that prove what they say
+
+- **R5-B3: every subcommand is checked for `--help-json`, not four samples.** The test reads each command's own manifest and asks all 74 subcommands, so one added tomorrow is covered tomorrow. It also asserts the answer is the *subcommand's* manifest, not the whole command's.
+- **R5-B5, the weak tests:**
+  - `commit review`'s whole-output cap asserted `len(lines) <= 3000`, which passes for any output including none. It pins the real count now, and changing `DEFAULT_MAX_LINES` fails it.
+  - `tasks list --thread SGB` compared its output to `--thread Projects/SGB`, which proves neither. The rows are spelled out; the two forms are still compared, as the point is that they agree.
+  - `search`'s path tests asserted `startswith("/")`. They assert the path is resolved and is a file — the thing the contract is about.
+  - `notes cat` compared its output to the file it had just printed, which passes however wrong both are. It pins the note's own text, and *then* compares with the file.
+  - The `--help-json` manifest test repeated an assertion from forty lines above; it now checks the one thing the other does not — that the manifest survives a JSON round trip.
+  - The symlinked-vault test stripped the path prefix before comparing, so it could not see the one thing R5-A3 changed. It compares whole lines, absolute paths included.
+- **857 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 5, part R5-A3: every path a command prints is absolute
 
 Round 3 made `tasks` print vault-relative paths, round 4 extended that to

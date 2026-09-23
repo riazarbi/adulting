@@ -717,15 +717,16 @@ def test_a_vault_reached_through_a_symlink_is_checked_the_same(vault, tmp_path):
     too. The scope check used to resolve the vault but not the file, so every
     file under a symlinked ADULTING_HOME matched no schema and none of its
     rules ran, while the summary still said the file was checked."""
-    vault.write_thread("Projects", "SGB", status="bogus")
-    direct = violations(vault.run(cli="lint"))
-    assert direct, "the fixture must produce a violation for this to prove anything"
+    p = vault.write_thread("Projects", "SGB", status="bogus")
+    expected = [f"{p}:0: status: value 'bogus' not in ['open', 'paused', 'closed']"]
+    assert violations(vault.run(cli="lint")) == expected
 
     link = tmp_path / "linked-vault"
     link.symlink_to(vault.home)
     through = vault.run(cli="lint", env={**vault.env, "ADULTING_HOME": str(link)})
-    assert [v.split(":", 1)[1] for v in violations(through)] == \
-           [v.split(":", 1)[1] for v in direct]
+    # The whole line, path included: the file is named by where it really is,
+    # not by the link it was reached through, so the two runs agree exactly.
+    assert violations(through) == expected
     assert through.returncode == 1
 
 

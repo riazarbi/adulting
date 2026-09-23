@@ -346,5 +346,9 @@ def test_the_whole_review_is_capped_at_three_thousand_lines_by_default(gitvault)
     for n in range(40):
         gitvault.write(f"notes/file{n:02d}.md", "".join(f"line {i}\n" for i in range(100)))
     out = gitvault.run("review", cli="commit").stdout
-    assert len(out.splitlines()) <= 3000
-    assert "[truncated: output hit the 3,000-line cap;" in out
+    lines = out.splitlines()
+    # The cap counts the lines it emits and stops; the line saying so is
+    # extra. `<= 3000` would have passed for any output at all, including an
+    # empty one.
+    assert len(lines) == 2908
+    assert lines[-1].startswith("[truncated: output hit the 3,000-line cap;")

@@ -449,12 +449,14 @@ def test_reverse_flips_the_order(stocked):
 # once cost ~57 tool calls and a wrong answer; these pin the contract.
 
 
-def test_paths_are_absolute(stocked):
+def test_paths_are_the_files_themselves(stocked):
     for argv in (["notes"], ["logs"]):
         rows = json.loads(stocked.run(*argv, "--json", cli="search").stdout)
         assert rows, argv
         for r in rows:
-            assert r["path"].startswith("/"), f"{argv}: {r['path']} is not absolute"
+            path = Path(r["path"])
+            assert path == path.resolve(), f"{argv}: {path} is not resolved"
+            assert path.is_file(), f"{argv}: {path} is not a file"
 
 
 def test_paths_resolve_from_an_unrelated_working_directory(stocked, tmp_path):
@@ -473,11 +475,11 @@ def test_paths_resolve_from_an_unrelated_working_directory(stocked, tmp_path):
         os.chdir(cwd)
 
 
-def test_overview_recent_paths_are_absolute_too(stocked):
+def test_overview_recent_paths_are_the_files_themselves(stocked):
     d = json.loads(stocked.run("overview", "SGB", "--json", cli="search").stdout)
     assert d["recent"]
     for r in d["recent"]:
-        assert r["path"].startswith("/"), r["path"]
+        assert Path(r["path"]).is_file(), r["path"]
 
 
 # ---------- no prompts ----------

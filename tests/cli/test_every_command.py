@@ -147,16 +147,25 @@ def test_depends_help_says_a_whole_uuid(vault, cli, subcommand):
     assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."
 
 
-@pytest.mark.parametrize("cli, subcommand", [("tasks", "list"), ("hours", "log"),
-                                             ("buffer", "add-text"), ("notes", "new")])
-def test_a_subcommand_answers_help_json_too(vault, cli, subcommand):
+@pytest.mark.parametrize("cli", SURFACE)
+def test_every_subcommand_answers_help_json_too(vault, cli):
     """Making --help-json a real flag put it on the top-level parser only, so
-    `tasks list --help-json` started exiting 2. It is on every subcommand."""
-    r = vault.run(subcommand, "--help-json", cli=cli)
-    assert (r.returncode, r.stderr) == (0, "")
-    manifest = json.loads(r.stdout)
-    assert manifest["name"] == subcommand
-    assert "--help-json" in [f["name"] for f in manifest["flags"]]
+    `tasks list --help-json` started exiting 2.
+
+    Driven off the command's own manifest rather than a handful of sampled
+    subcommands, so a subcommand added tomorrow is covered tomorrow.
+    """
+    whole = json.loads(vault.run("--help-json", cli=cli).stdout)
+    names = [s["name"] for s in whole.get("subcommands", [])]
+    assert names == SURFACE[cli][1]      # `lint` has none, and says so
+    for subcommand in names:
+        r = vault.run(subcommand, "--help-json", cli=cli)
+        assert (r.returncode, r.stderr) == (0, ""), subcommand
+        manifest = json.loads(r.stdout)
+        assert manifest["name"] == subcommand
+        assert "--help-json" in [f["name"] for f in manifest["flags"]]
+        # And it is the subcommand's own manifest, not the whole command's.
+        assert "subcommands" not in manifest
 
 
 # ---------- a file nothing can read ----------

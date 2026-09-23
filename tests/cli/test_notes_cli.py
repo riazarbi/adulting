@@ -78,10 +78,17 @@ def test_a_note_without_a_timestamp_sorts_by_its_stem(notes_vault):
 # ---------- cat, last ----------
 
 def test_cat_prints_the_note_after_ingesting_its_actions(notes_vault):
+    """Comparing the output to the file it just printed would pass however
+    wrong both were, so the note's own text is spelled out here."""
     r = notes_vault.run("cat", "2026-09-10-14-30-00", cli="notes")
     assert r.returncode == 0
+    head, anchor, tail = r.stdout.partition("TASK: ingest me")
+    # The note verbatim, up to the anchor the ingest just wrote in place of
+    # its ACTION line — frontmatter, heading, body and all.
+    assert head == KICKOFF.split("ACTION: ingest me")[0]
+    assert anchor and re.fullmatch(r" <!--[0-9a-f]{8} entry:\d{4}-\d\d-\d\d-->  \n", tail)
+    # And the file on disk is what was printed.
     assert r.stdout == notes_vault.read("notes/2026-09-10-14-30-00.md")
-    assert re.search(r"^TASK: ingest me <!--[0-9a-f]{8} entry:", r.stdout, re.M)
 
 
 def test_cat_accepts_a_trailing_md(notes_vault):

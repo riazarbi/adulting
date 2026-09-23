@@ -34,9 +34,6 @@ from pathlib import Path
 from adulting import vault as V
 
 
-ACTION_RE = re.compile(
-    r'^ACTION:\s*(?:\(([^)]+)\)\s*)?(.+?)(?:\s*<!--(.*?)-->)?\s*$'
-)
 # Mirror of schemas/task_anchor.md `shape`. The two regexes are kept in
 # lockstep — if you change one, change the other.
 ANCHOR_RE = re.compile(
@@ -225,15 +222,11 @@ def threads_for(anchor, cache):
 # ---------- ingest ----------
 
 def find_action_lines(text):
-    """Yield (line_no, raw_line, assignee, body, attr_block) for each
-    ACTION: in a source file's text."""
+    """Yield (line_no, action) for each `ACTION:` line in a source file."""
     for i, line in enumerate(text.split('\n')):
-        m = ACTION_RE.match(line)
-        if m:
-            assignee = (m.group(1) or '').strip()
-            body = m.group(2).strip()
-            attr_block = (m.group(3) or '').strip()
-            yield i, line, assignee, body, attr_block
+        action = V.parse_action(line)
+        if action:
+            yield i, action
 
 
 def cmd_default(args):
@@ -258,26 +251,25 @@ def ingest(dry_run=False):
             failed.append((str(path), ["file is not valid UTF-8; skipped"]))
             continue
         threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
-        for i, raw_line, assignee, body, attr_block in find_action_lines(text):
+        for i, action in find_action_lines(text):
             errors = []
-            if not body:
+            if not action.body:
                 errors.append("missing description")
             if not threads:
                 errors.append("note has no threads:")
             else:
-                for t in threads:
-                    if not V.is_thread(t):
-                        errors.append(f"thread {t!r} does not resolve")
-            if assignee and not V.person_exists(assignee):
+                for thread in threads:
+                    if not V.is_thread(thread):
+                        errors.append(f"thread {thread!r} does not resolve")
+            if action.assignee and not V.person_exists(action.assignee):
                 errors.append(
-                    f"assignee {assignee!r} does not resolve to "
-                    f"people/{assignee}.md")
-            attrs, attr_errs = V.parse_action_attrs(attr_block.split())
-            errors.extend(attr_errs)
-            plan.append((path, i, assignee, body, attrs, errors))
+                    f"assignee {action.assignee!r} does not resolve to "
+                    f"people/{action.assignee}.md")
+            errors.extend(action.errors)
+            plan.append((path, i, action, errors))
 
     ingested = []
-    for path, i, assignee, body, attrs, errors in plan:
+    for path, i, action, errors in plan:
         prefix = f"{path}:{i + 1}"
         if errors:
             failed.append((prefix, errors))
@@ -286,14 +278,14 @@ def ingest(dry_run=False):
         existing.add(u)
         anchor = Anchor(
             kind='TASK',
-            priority=attrs.get('priority'),
-            assignee=assignee or None,
-            body=body,
+            priority=action.attrs.get('priority'),
+            assignee=action.assignee or None,
+            body=action.body,
             uuid=u,
             entry=V.today(),
-            due=attrs.get('due'),
-            scheduled=attrs.get('scheduled'),
-            depends=tuple(attrs.get('depends', [])),
+            due=action.attrs.get('due'),
+            scheduled=action.attrs.get('scheduled'),
+            depends=tuple(action.attrs.get('depends', [])),
         )
         new_line = format_anchor(anchor)
         if not dry_run:
@@ -302,7 +294,7 @@ def ingest(dry_run=False):
             tmp = path.with_suffix(path.suffix + '.tmp')
             tmp.write_text('\n'.join(lines), encoding='utf-8')
             os.replace(tmp, path)
-        ingested.append((u, prefix, body, new_line))
+        ingested.append((u, prefix, action.body, new_line))
     return ingested, failed
 
 

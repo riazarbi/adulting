@@ -408,3 +408,37 @@ def test_find_record_returns_the_record_inside_its_files_list():
     assert (found_path, ref, record) == (path, "Projects/SGB", {"id": "aaaa0002"})
     assert record is records[1]
     assert V.find_record("hours", V.HOURS_FENCE, "deadbeef") is None
+
+
+def test_parse_action_reads_the_assignee_body_and_attributes():
+    a = V.parse_action("ACTION: (Riaz Arbi) Draft the scope <!--due:2026-09-20 priority:H-->")
+    assert (a.assignee, a.body) == ("Riaz Arbi", "Draft the scope")
+    assert (a.attrs, a.errors) == ({"depends": [], "due": "2026-09-20", "priority": "H"}, [])
+
+
+def test_parse_action_keeps_the_attributes_of_an_action_with_no_text():
+    """The lazy body used to swallow the comment, so the task's description
+    became `<!--due:2026-01-01-->` and the due date was dropped."""
+    a = V.parse_action("ACTION: <!--due:2026-01-01-->")
+    assert (a.assignee, a.body) == ("", "")
+    assert a.attrs["due"] == "2026-01-01"
+
+
+@pytest.mark.parametrize("line, body", [
+    ("ACTION:", ""), ("ACTION:   ", ""), ("ACTION: (Riaz Arbi)", ""),
+    ("ACTION: a <!-- not closed", "a <!-- not closed"),
+    ("ACTION: read <!--todo--> and file", "read <!--todo--> and file"),
+])
+def test_parse_action_reads_the_body_a_person_would_see(line, body):
+    assert V.parse_action(line).body == body
+
+
+@pytest.mark.parametrize("line", ["TASK: x", "  ACTION: indented", "action: lower"])
+def test_parse_action_returns_nothing_for_another_line(line):
+    assert V.parse_action(line) is None
+
+
+def test_split_assignee():
+    assert V.split_assignee("(Riaz Arbi) Draft it") == ("Riaz Arbi", "Draft it")
+    assert V.split_assignee("Draft it") == ("", "Draft it")
+    assert V.split_assignee("(Riaz Arbi)  ") == ("Riaz Arbi", "")

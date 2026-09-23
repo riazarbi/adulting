@@ -21,7 +21,6 @@ SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
 
 
 WIKILINK_RE = re.compile(r'^\[\[([^\]]+)\]\]$')
-ACTION_RE = re.compile(r'^ACTION:\s*(\([^)]+\)\s*)?(.*?)\s*$')
 
 
 # ---------- helpers ----------
@@ -447,15 +446,15 @@ def validate_file(path, schemas, registry=None):
 
         # ACTION: lines (notes only)
         if is_note:
-            m = ACTION_RE.match(line)
-            if m:
-                assignee_paren, text_rest = m.groups()
-                if not text_rest.strip():
+            action = V.parse_action(line)
+            if action:
+                if not action.body:
                     yield (line_no, "ACTION: missing description")
-                if assignee_paren:
-                    name = assignee_paren.strip()[1:-1].strip()  # strip ( )
-                    if not name or not V.person_exists(name):
-                        yield (line_no, f"ACTION: assignee {name!r} does not resolve to people/{name}.md")
+                if action.assignee and not V.person_exists(action.assignee):
+                    yield (line_no, f"ACTION: assignee {action.assignee!r} does not "
+                                    f"resolve to people/{action.assignee}.md")
+                for err in action.errors:
+                    yield (line_no, f"ACTION: {err}")
 
 
 # ---------- hours_file and payments_file: the JSON record block ----------

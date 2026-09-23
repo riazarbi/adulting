@@ -54,7 +54,6 @@ from adulting.suggester import suggest
 def buffer_file():
     return V.vault_home() / 'buffer.md'
 
-ASSIGNEE_PREFIX_RE = re.compile(r'^\(([^)]+)\)\s*(.*)$')
 WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
 
 # Buffer line shape: thread wikilink, type tag, body, timestamp comment.
@@ -218,18 +217,14 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
     text = text.strip()
     if not text:
         raise ValueError("description is empty")
-    am = ASSIGNEE_PREFIX_RE.match(text)
-    if am:
-        assignee = am.group(1).strip()
-        body = am.group(2).strip()
+    assignee, body = V.split_assignee(text)
+    if assignee:
         if not body:
             raise ValueError("description after assignee is empty")
         if not V.person_exists(assignee):
             raise ValueError(f"assignee {assignee!r} does not resolve to people/{assignee}.md "
                              f"(create the person file first)")
-        body_text = f"({assignee}) {body}"
-    else:
-        body_text = text
+    body_text = f"({assignee}) {body}" if assignee else text
 
     # The same rules the ACTION's attributes meet when they are ingested.
     tokens = [f"{k}:{v}" for k, v in (('due', due), ('scheduled', scheduled),
@@ -358,17 +353,14 @@ def validate_entry(e):
 
     if e['type'] == 'ACTION':
         body = e['body']
-        am = ASSIGNEE_PREFIX_RE.match(body)
-        if am:
-            assignee = am.group(1).strip()
-            rest = am.group(2).strip()
+        assignee, rest = V.split_assignee(body)
+        if assignee:
             if not rest:
                 yield "ACTION description after assignee is empty"
             if not V.person_exists(assignee):
                 yield f"ACTION assignee {assignee!r} does not resolve to people/{assignee}.md"
-        else:
-            if not body:
-                yield "ACTION description is empty"
+        elif not body:
+            yield "ACTION description is empty"
         _attrs, attr_errors = V.parse_action_attrs(e.get('attr_tokens', []))
         for err in attr_errors:
             yield f"ACTION {err}"

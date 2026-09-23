@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-C1: one `ACTION:` parser
+
+There were four: `tasks`' regex, `buffer`'s assignee split, `buffer`'s copy of the same checks in `tend`, and `lint`'s different regex. R3-A5.2 and R3-A5.3 were the consequences.
+
+- **`vault.parse_action(line)`** returns `(assignee, body, attrs, errors)`, taking the trailing `<!--attrs-->` off before reading the body. `vault.split_assignee` is the shared `(Person) text` split. `tasks`, `buffer` and `lint` all use them.
+- **R3-A5.2:** `ACTION: <!--due:2026-01-01-->` used to become a task whose description was the comment, with the due date dropped. It is now an action with attributes and no description, and it is reported, not ingested.
+- **R3-A5.3:** `tasks` and `lint` agree about a bare `ACTION:` line. `tasks` used to skip it silently; both now call it a missing description.
+- **`lint` also reports an ACTION's attribute errors**, which only `tasks` used to check.
+- **Verified on the vault copy:** `tasks --dry-run` and `lint` print exactly what they printed before. **786 passing.**
+
 ## 2026-09-23 - review round 3, part R3-A: the bugs
 
 Each fix has a test written to fail first. Owner decisions are marked.

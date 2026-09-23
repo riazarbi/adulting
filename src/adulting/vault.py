@@ -17,6 +17,7 @@ import re
 import sys
 import uuid as _uuid
 from datetime import datetime, timezone
+from collections import namedtuple
 from decimal import Decimal
 
 from adulting import helpjson
@@ -577,6 +578,40 @@ def person_exists(name):
     if not name:
         return True
     return vault_file(f"people/{name}.md") is not None
+
+
+ASSIGNEE_PREFIX_RE = re.compile(r'^\((?P<assignee>[^)]*)\)\s*(?P<rest>.*)$')
+ACTION_RE = re.compile(r'^ACTION:\s*(?P<rest>.*)$')
+ATTRS_TAIL_RE = re.compile(r'\s*<!--(?P<attrs>[^>]*)-->\s*$')
+
+Action = namedtuple('Action', 'assignee body attrs errors')
+
+
+def split_assignee(text):
+    """('Riaz Arbi', 'Draft it') for '(Riaz Arbi) Draft it', else ('', text)."""
+    m = ASSIGNEE_PREFIX_RE.match(text.strip())
+    if not m:
+        return '', text.strip()
+    return m.group('assignee').strip(), m.group('rest').strip()
+
+
+def parse_action(line):
+    """An `ACTION:` line as (assignee, body, attrs, errors), or None if the
+    line is not one. The trailing `<!--attrs-->` is taken off first, so an
+    ACTION with attributes and no text keeps its attributes and is simply an
+    action with no description. `tasks`, `buffer` and `lint` all read an
+    action this way, so they agree about every line."""
+    m = ACTION_RE.match(line)
+    if not m:
+        return None
+    rest = m.group('rest').strip()
+    tail = ATTRS_TAIL_RE.search(rest)
+    tokens = tail.group('attrs').split() if tail else []
+    if tail:
+        rest = rest[:tail.start()].strip()
+    assignee, body = split_assignee(rest)
+    attrs, errors = parse_action_attrs(tokens)
+    return Action(assignee, body, attrs, errors)
 
 
 def parse_action_attrs(tokens):

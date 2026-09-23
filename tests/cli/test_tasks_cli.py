@@ -595,3 +595,30 @@ def test_list_refuses_a_thread_that_does_not_resolve(board):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "tasks: error: thread 'Nope' does not resolve to a thread file\n"
     assert board.snapshot() == before
+
+
+def test_an_action_with_attributes_but_no_text_is_reported_not_ingested(vault):
+    """It used to become a task whose description was the HTML comment,
+    with the due date dropped."""
+    vault.write_thread("Projects", "SGB")
+    note = vault.write_note("2026-09-10-14-30-00", "ACTION: <!--due:2026-01-01-->",
+                            threads=["Projects/SGB"])
+    before = note.read_text(encoding="utf-8")
+    r = vault.run(cli="tasks")
+    assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
+    assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
+                        f"  {note}:9: missing description\n\n")
+    assert note.read_text(encoding="utf-8") == before
+
+
+def test_a_bare_action_line_is_reported_by_tasks_as_lint_reports_it(vault):
+    """`tasks` used to skip it silently while `lint` called it a missing
+    description; one parser, one answer."""
+    vault.write_thread("Projects", "SGB")
+    note = vault.write_note("2026-09-10-14-30-00", "ACTION:", threads=["Projects/SGB"])
+    r = vault.run(cli="tasks")
+    assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
+    assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
+                        f"  {note}:9: missing description\n\n")
+    lint = vault.run(cli="lint")
+    assert f"{note}:9: ACTION: missing description" in lint.stdout

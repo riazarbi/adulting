@@ -26,7 +26,7 @@ def test_new_writes_the_frontmatter_and_the_heading(capsys):
     text = path.read_text(encoding="utf-8")
     assert text == (f"---\nstatus: open\nkind: project\ncategory: work\n"
                     f"started: {T.V.today()}\n---\n\n# SGB\n")
-    assert capsys.readouterr().out == f"created: {path}\n"
+    assert capsys.readouterr().out == f"created: {path.relative_to(T.V.vault_home())}\n"
 
 
 def test_new_writes_billing_only_when_given(capsys):
@@ -71,9 +71,9 @@ def test_delete_needs_yes(capsys, monkeypatch):
     path = T.threads_dir() / "Projects" / "SGB.md"
     with pytest.raises(SystemExit):
         T.cmd_delete(Args(thread="Projects/SGB", yes=False))
-    assert capsys.readouterr().err == f"threads: error: refusing to delete {path} without -y\n"
+    assert capsys.readouterr().err == f"threads: error: refusing to delete {path.relative_to(T.V.vault_home())} without -y\n"
     assert path.exists()
 
     assert T.cmd_delete(Args(thread="Projects/SGB", yes=True)) == 0
-    assert capsys.readouterr().out == f"deleted: {path}\n"
+    assert capsys.readouterr().out == f"deleted: {path.relative_to(T.V.vault_home())}\n"
     assert not path.exists()

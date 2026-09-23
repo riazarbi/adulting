@@ -107,6 +107,10 @@ class Vault:
             encoding="utf-8")
         return p
 
+    def rel(self, path) -> str:
+        """A vault path as every command prints it: relative to the vault."""
+        return str(Path(path).resolve().relative_to(self.home.resolve()))
+
     def entries(self, kind: str, name: str) -> list:
         """Parse the tracker block out of a time file."""
         text = self.read(f"hours/{kind}/{name}.md")

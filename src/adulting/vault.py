@@ -336,10 +336,22 @@ def file_json(path, **identity):
     return json.dumps({**identity, 'path': str(path.relative_to(vault_home())), **fm}, indent=2)
 
 
+def rel(path):
+    """A vault file, as every command names it: relative to the vault.
+
+    One format everywhere, so the same file reads the same whichever command
+    mentions it. A path outside the vault — `lint` can be pointed at one —
+    keeps its own name, since it has nothing to be relative to.
+    """
+    path = Path(path)
+    home = vault_home().resolve()
+    full = path.resolve()
+    return str(full.relative_to(home)) if full.is_relative_to(home) else str(path)
+
+
 def where(path, line_no):
-    """A place in the vault, as `path:line`. Vault-relative, because every
-    command that points at a line points at one in the same vault."""
-    return f"{path.relative_to(vault_home())}:{line_no + 1}"
+    """A place in the vault, as `path:line`."""
+    return f"{rel(path)}:{line_no + 1}"
 
 
 def print_summary_list(rows, args, column, noun):

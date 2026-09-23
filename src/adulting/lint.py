@@ -570,7 +570,7 @@ def report_duplicates(groups, wording):
         if len(hits) <= 1:
             continue
         for path, ln in hits:
-            others = ', '.join(f"{p}:{n}" for p, n in hits if (p, n) != (path, ln))
+            others = ', '.join(f"{V.rel(p)}:{n}" for p, n in hits if (p, n) != (path, ln))
             yield path, ln, f"{wording} {value!r} duplicated at {others}"
 
 
@@ -732,17 +732,17 @@ def main():
         for line_no, msg in validate_file(f, schemas, registry=registry):
             total += 1
             if not args.quiet:
-                print(f"{f}:{line_no}: {msg}")
+                print(f"{V.rel(f)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_tasks(registry):
         total += 1
         if not args.quiet:
-            print(f"{path}:{line_no}: {msg}")
+            print(f"{V.rel(path)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_record_ids(registry):
         total += 1
         if not args.quiet:
-            print(f"{path}:{line_no}: {msg}")
+            print(f"{V.rel(path)}:{line_no}: {msg}")
 
     if not args.quiet:
         print(f"\n{len(files)} file(s) checked. {total} violation(s).")

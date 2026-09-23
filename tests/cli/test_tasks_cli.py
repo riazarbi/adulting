@@ -629,4 +629,4 @@ def test_a_bare_action_line_is_reported_by_tasks_as_lint_reports_it(vault):
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
                         f"  {note.relative_to(vault.home)}:9: missing description\n\n")
     lint = vault.run(cli="lint")
-    assert f"{note}:9: ACTION: missing description" in lint.stdout
+    assert f"{vault.rel(note)}:9: ACTION: missing description" in lint.stdout

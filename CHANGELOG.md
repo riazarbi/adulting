@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 4, part R4-C1: one path format, finished
+
+Round 3 settled on vault-relative paths for the commands that walk the vault
+and exempted `lint`, on the grounds that it is the command you point at files.
+The exemption was wrong: `lint` and `tasks ingest` print the *same* ACTION
+violation, and that is the one place a user sees both formats at once.
+
+- **`vault.rel(path)`** is the one answer: a file inside the vault is named relative to it, a path outside keeps its own name, and `V.where` builds `path:line` on top of it. Every command uses it — `lint`'s violations and the "duplicated at" half of its cross-file messages, and the `created:`/`deleted:`/`already exists:`/`not found:`/`refusing to delete` lines in `threads`, `people` and `notes`.
+- **`lint`'s output changed**: `/Users/you/vault/notes/x.md:0: …` is now `notes/x.md:0: …`. Verified on the vault copy — the same eight violations, in the same order, named the way every other command names them.
+- The test harness grew `Vault.rel(path)` for the same reason.
+- **781 passing.**
+
 ## 2026-09-23 - review round 4, part R4-B: three tests that could not fail
 
 Each of these defended a round 3 fix without being able to notice its

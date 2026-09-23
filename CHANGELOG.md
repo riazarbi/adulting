@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 4, part R4-B: three tests that could not fail
+
+Each of these defended a round 3 fix without being able to notice its
+removal. Each is now checked by undoing the fix it covers.
+
+- **B1: the windowed PDF only proved `--since`.** `--until 2026-06-30` was past every fixture record, and `--as-of` was the same date — a statement drops anything after `as_of` anyway, so `cmd_pdf` could pass `until=None` and nothing changed. There is now work and a payment on 2026-07-15, with `--as-of 2026-08-31`, so only `--until` excludes them. Dropping either end of the window fails the test.
+- **B2: `scheduled:` was the one ACTION attribute nothing asserted** on an ingested anchor. `test_ingest_with_assignee_and_attrs` now carries all five — assignee, priority, due, scheduled, depends — and dropping `scheduled` from the ingest fails it.
+- **B3: the local-day rule was undefended.** Every fixture timestamp was mid-day, where the local and UTC days agree, so `Store.day_of` could bucket by UTC and stay green — though it decides which log file a record lands in and which statement window it falls in. A new test logs at 09:00 in Australia/Sydney, which stores `2026-06-01T23:00:00.000Z`, and asserts the entry is filed, listed and REF'd under 2026-06-02.
+- **781 passing.**
+
 ## 2026-09-23 - review round 4, part R4-A2: a gate that catches a stale MANUAL.md
 
 `dev/tools/*.json` were gated; the manual was not, and it is what an agent

@@ -425,12 +425,20 @@ def test_the_pdf_statement_honours_the_window(vault):
     """The window used to reach the text view only, so `--pdf` put a period
     on a client document that was never asked for."""
     sana(vault)
+    # One entry before --since, one inside the window, one after --until, so
+    # dropping either end of the window changes the document.
     for day in ("01", "02"):
         vault.run("log", "SANA Partners", f"work {day}", "-m", "60", "-r", "1000",
                   "-d", f"2026-06-{day}", "-t", "09:00", cli="hours")
+    vault.run("log", "SANA Partners", "work later", "-m", "60", "-r", "1000",
+              "-d", "2026-07-15", "-t", "09:00", cli="hours")
     vault.run("log", "SANA Partners", "500", "-d", "2026-06-02", cli="payments")
+    vault.run("log", "SANA Partners", "700", "-d", "2026-07-15", cli="payments")
     out = vault.home / "statement.pdf"
-    windowed = ["--since", "2026-06-02", "--until", "2026-06-30", "--as-of", "2026-06-30"]
+    # --as-of is deliberately after the July records: a statement drops
+    # anything later than `as_of` anyway, so with the two dates equal the
+    # `--until` flag could be dropped from --pdf and nothing would change.
+    windowed = ["--since", "2026-06-02", "--until", "2026-06-30", "--as-of", "2026-08-31"]
 
     text = vault.run("statement", "--thread", "SANA Partners", *windowed, "--json", cli="payments")
     assert json.loads(text.stdout) == [{"thread": "Projects/SANA Partners", "currency": "ZAR",
@@ -438,7 +446,7 @@ def test_the_pdf_statement_honours_the_window(vault):
     r = vault.run("statement", "--thread", "SANA Partners", *windowed, "--pdf", str(out), cli="payments")
     assert r.returncode == 0, r.stderr
     assert r.stdout == (f"{out}: 2 lines, 1.00 h, charges 1000 ZAR, paid 500 ZAR, "
-                        "balance 500 ZAR as at 2026-06-30\n")
+                        "balance 500 ZAR as at 2026-08-31\n")
 
 
 @needs_pdf

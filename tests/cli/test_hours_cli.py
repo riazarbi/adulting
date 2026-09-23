@@ -503,3 +503,27 @@ def test_report_json_buckets_per_thread_and_currency(hours_vault, logged):
         {"thread": "Topics/Wellness", "currency": "", "entries": 1, "minutes": 30,
          "hours": 0.5, "amount": 0.0},
     ]
+
+
+def test_a_record_is_filed_under_its_local_day_not_its_utc_day(vault):
+    """Work logged at 09:00 in Sydney is stored as 23:00 UTC the day before.
+    It belongs to the day it was done: that decides which log file it lands
+    in and which statement window it falls in. Every other fixture is
+    mid-day, where local and UTC agree, so this is the one that can tell.
+    """
+    sydney = {**vault.env, "TZ": "Australia/Sydney"}
+    vault.write_thread("Projects", "SGB", currency="ZAR", rate=1000)
+    r = vault.run("log", "Projects/SGB", "early start", "-m", "60",
+                  "-d", "2026-06-02", "-t", "09:00", cli="hours", env=sydney)
+    assert r.returncode == 0, r.stderr
+
+    [entry] = vault.entries("Projects", "SGB")
+    assert entry["startTime"] == "2026-06-01T23:00:00.000Z"
+
+    listed = vault.run("list", "--since", "2026-06-02", "--until", "2026-06-02",
+                       cli="hours", env=sydney)
+    assert entry["id"] in listed.stdout
+    assert listed.stdout.splitlines()[1].split()[1] == "2026-06-02"
+
+    # And the buffer REF, which decides the log file, carries the same day.
+    assert "<!--2026-06-02T" in vault.read("buffer.md")

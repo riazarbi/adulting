@@ -110,17 +110,22 @@ def test_ingest_appends_markdown_hard_break(vault):
 
 
 def test_ingest_with_assignee_and_attrs(vault):
+    """Every attribute an ACTION can carry reaches the anchor: assignee,
+    priority, due, scheduled and depends. `scheduled:` used to be the one
+    nothing asserted, so it could be dropped with a green suite."""
     setup_vault(vault)
     vault.write_note("2026-05-27-09-15-22",
         "ACTION: (Riaz Arbi) Send report "
-        "<!--2026-05-27T09:15:22 due:2026-05-29 priority:H-->",
+        "<!--2026-05-27T09:15:22 due:2026-05-29 scheduled:2026-05-28 "
+        "priority:H depends:aaaa0001-->",
         threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 0, r.stderr
     note = vault.read("notes/2026-05-27-09-15-22.md")
     assert re.search(
         r"^TASK: \[#H\] \(Riaz Arbi\) Send report "
-        r"<!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2} due:2026-05-29-->  $",
+        r"<!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2} due:2026-05-29 "
+        r"scheduled:2026-05-28 depends:aaaa0001-->  $",
         note, re.MULTILINE), note
 
 

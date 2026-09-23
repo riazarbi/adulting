@@ -22,12 +22,11 @@ from pathlib import Path
 
 from adulting import vault as V
 
-CENT = V.CENT
 
 
 def money(amount, currency):
     """Thousands-separated, always two decimals: this is a money document."""
-    q = Decimal(amount).quantize(CENT)
+    q = Decimal(amount).quantize(V.CENT)
     neg = q < 0
     body = f"{abs(q):,.2f}"
     return f"{currency} ({body})" if neg else f"{currency} {body}"

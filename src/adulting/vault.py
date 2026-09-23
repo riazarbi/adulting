@@ -186,6 +186,9 @@ def parse_block(lines):
             continue
         if text.startswith('- '):
             value = text[2:].strip()
+            # A bare `key:` parsed to '' above; the first indented line under
+            # it says what it really is, so '' is the "not decided yet"
+            # sentinel and is replaced here by a list, or below by a mapping.
             if out[key] == '':
                 out[key] = []
             if not isinstance(out[key], list):
@@ -279,6 +282,33 @@ def file_json(path, **identity):
     where it is, and all of its frontmatter."""
     fm = parse_frontmatter_doc(path.read_text(encoding='utf-8'))[0]
     return json.dumps({**identity, 'path': str(path.relative_to(vault_home())), **fm}, indent=2)
+
+
+def where(path, line_no):
+    """A place in the vault, as `path:line`. Vault-relative, because every
+    command that points at a line points at one in the same vault."""
+    return f"{path.relative_to(vault_home())}:{line_no + 1}"
+
+
+def print_summary_list(rows, args, column, noun):
+    """`threads list` and `people list` are one listing over different files:
+    open ones unless --all, ranked by the query, printed as a column with the
+    status and category beside it, or as JSON."""
+    if not args.all:
+        rows = [r for r in rows if r['status'] == 'open']
+    if args.query:
+        rows = rank_by_query(rows, args.query, 'name', column)
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("(no matches)" if args.query else f"(no {noun})")
+        return 0
+    width = max(len(r[column]) for r in rows)
+    print(f"{column.upper():<{width}}  {'STATUS':<8}  CATEGORY")
+    for r in rows:
+        print(f"{r[column]:<{width}}  {r['status']:<8}  {r['category']}")
+    return 0
 
 
 def rank_by_query(rows, query, *keys):

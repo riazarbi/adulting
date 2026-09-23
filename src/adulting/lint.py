@@ -552,14 +552,21 @@ def validate_record_block(text, path, label, registry=None):
                 (path, fence_line))
 
 
-def cross_check_record_ids(registry):
-    """Hours and payment ids must be unique across the whole vault."""
-    for eid, hits in registry.get('record_ids', {}).items():
+def report_duplicates(groups, wording):
+    """A value that should be unique across the vault, and is not, is
+    reported at every place it occurs, each one pointing at the others.
+    `groups` maps the value to the (path, line) pairs holding it."""
+    for value, hits in groups.items():
         if len(hits) <= 1:
             continue
         for path, ln in hits:
             others = ', '.join(f"{p}:{l}" for p, l in hits if (p, l) != (path, ln))
-            yield path, ln, f"record id {eid!r} duplicated at {others}"
+            yield path, ln, f"{wording} {value!r} duplicated at {others}"
+
+
+def cross_check_record_ids(registry):
+    """Hours and payment ids must be unique across the whole vault."""
+    yield from report_duplicates(registry.get('record_ids', {}), 'record id')
 
 
 # ---------- task_anchor: per-line + vault-wide rules ----------
@@ -597,13 +604,7 @@ def cross_check_tasks(registry):
     Runs after every file has been walked so the registry is complete."""
     by_uuid = registry['by_uuid']
 
-    # Duplicate uuids — report each occurrence pointing at the others.
-    for uuid8, hits in by_uuid.items():
-        if len(hits) <= 1:
-            continue
-        for path, ln in hits:
-            others = ', '.join(f"{p}:{l}" for p, l in hits if (p, l) != (path, ln))
-            yield path, ln, f"task_anchor.uuid: {uuid8!r} duplicated at {others}"
+    yield from report_duplicates(by_uuid, 'task_anchor.uuid:')
 
     # Dependency targets must resolve.
     known = set(by_uuid)

@@ -216,10 +216,12 @@ def test_statement_as_of_bounds_the_text_view(payments_vault, paid):
 
 def test_statement_rejects_a_malformed_as_of(payments_vault, paid):
     """The text view used to compare a bad --as-of as a string, bound
-    nothing, and print the whole statement. It now fails like --pdf does."""
+    nothing, and print the whole statement. It now fails in argparse, in the
+    same words as --since and --until."""
     r = payments_vault.run("statement", "--as-of", "5 July", cli="payments")
-    assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "payments: error: bad --as-of '5 July'; expected YYYY-MM-DD\n"
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.endswith("payments statement: error: argument --as-of: "
+                             "expected a date as YYYY-MM-DD, got '5 July'\n")
 
 
 def test_statement_empty(payments_vault):

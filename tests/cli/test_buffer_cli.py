@@ -248,7 +248,7 @@ def test_flush_writes_logs_clears_the_buffer_and_ingests_actions(buffer_vault):
         "flushed 2 entries -> logs/Topics/Wellness/2026-09-11.md",
         "flushed 4 entries into 2 log file(s); buffer cleared.",
     ]
-    assert re.match(r"ingested: [0-9a-f]{8}  .*/logs/Projects/SGB/2026-09-10\.md:10  Draft scope$", out[3])
+    assert re.match(r"ingested: [0-9a-f]{8}  logs/Projects/SGB/2026-09-10\.md:10  Draft scope$", out[3])
     assert out[4] == "Ingested: 1.  Failed: 0."
     assert buffer_text(buffer_vault) == ""
     sgb = buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
@@ -354,3 +354,33 @@ def test_tend_flags_a_hand_written_wrongly_cased_thread(vault):
                         "    fix: edit via `buffer rm 1` and re-add via the matching `buffer add-*`\n")
 
 
+
+
+def test_list_json_is_the_numbered_lines(vault):
+    """`buffer list --json` gives the same lines the table shows, numbered,
+    so a caller does not have to parse the padding."""
+    vault.write_thread("Projects", "SGB")
+    vault.run("add-text", "Projects/SGB", "first", cli="buffer")
+    vault.run("add-text", "Projects/SGB", "second", cli="buffer")
+    rows = json.loads(vault.run("list", "--json", cli="buffer").stdout)
+    assert [r["line_no"] for r in rows] == [1, 2]
+    assert [r["text"].split("TEXT: ")[1].split(" <!--")[0] for r in rows] == ["first", "second"]
+    filtered = json.loads(vault.run("list", "second", "--json", cli="buffer").stdout)
+    assert [r["line_no"] for r in filtered] == [2]
+
+
+def test_date_files_every_add_under_the_day_it_happened(vault):
+    """`--date` used to be on add-ref alone, though what it does — file the
+    entry under the day the thing happened — is true of every entry."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_note("2026-09-10-14-30-00", "TEXT: something", threads=["Projects/SGB"])
+    vault.run("add-text", "Projects/SGB", "late note", "--date", "2026-09-10", cli="buffer")
+    vault.run("add-action", "Projects/SGB", "late action", "--date", "2026-09-10", cli="buffer")
+    vault.run("add", "late unknown", "--date", "2026-09-10", cli="buffer")
+    vault.run("add-ref", "Projects/SGB", "notes/2026-09-10-14-30-00", "seen",
+              "--date", "2026-09-10", cli="buffer")
+    stamps = [line.split("<!--")[1][:10] for line in vault.lines("buffer.md") if line.strip()]
+    assert stamps == ["2026-09-10"] * 4
+    bad = vault.run("add-text", "Projects/SGB", "x", "--date", "10 Sept", cli="buffer")
+    assert (bad.returncode, bad.stderr) == (
+        1, "buffer: error: --date must be YYYY-MM-DD; got '10 Sept'\n")

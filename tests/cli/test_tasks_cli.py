@@ -63,7 +63,7 @@ def inbox(base):
 
 
 def failures(vault):
-    kick = vault.home / "notes" / "2026-09-10-14-30-00.md"
+    kick = "notes/2026-09-10-14-30-00.md"
     return ("\n5 action(s) NOT ingested (left as ACTION: in source):\n"
             f"  {kick}:10: due must be YYYY-MM-DD; got 'soon'\n"
             f"  {kick}:10: priority must be H, M, or L; got 'X'\n"
@@ -72,8 +72,8 @@ def failures(vault):
             f"  {kick}:10: unknown attr token 'junk'\n"
             f"  {kick}:11: assignee 'Ghost' does not resolve to people/Ghost.md\n"
             f"  {kick}:12: missing description\n"
-            f"  {vault.home / 'notes' / '2026-09-11-09-00-00.md'}:5: note has no threads:\n"
-            f"  {vault.home / 'notes' / '2026-09-12-09-00-00.md'}:7: thread 'Projects/Gone' does not resolve\n"
+            "  notes/2026-09-11-09-00-00.md:5: note has no threads:\n"
+            "  notes/2026-09-12-09-00-00.md:7: thread 'Projects/Gone' does not resolve\n"
             "\n")
 
 
@@ -131,7 +131,7 @@ def test_ingest_unresolved_assignee_fails(vault):
         threads=["Projects/SGB"])
     before = vault.read("notes/2026-05-27-09-15-22.md")
     r = vault.run(cli="tasks")
-    path = vault.home / "notes" / "2026-05-27-09-15-22.md"
+    path = "notes/2026-05-27-09-15-22.md"
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
                         f"  {path}:9: assignee 'Ghost' does not resolve to people/Ghost.md\n\n")
@@ -145,11 +145,28 @@ def test_ingest_unresolved_thread_fails(vault):
         threads=["Projects/Nope"])
     before = vault.read("notes/2026-05-27-09-15-22.md")
     r = vault.run(cli="tasks")
-    path = vault.home / "notes" / "2026-05-27-09-15-22.md"
+    path = "notes/2026-05-27-09-15-22.md"
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
                         f"  {path}:9: thread 'Projects/Nope' does not resolve\n\n")
     assert vault.read("notes/2026-05-27-09-15-22.md") == before
+
+
+def test_ingest_is_also_a_named_subcommand(inbox):
+    """`tasks` with no subcommand ingests, and `tasks ingest` is the same
+    command said out loud, so --dry-run and --quiet belong to both. Either
+    order of the flag and the subcommand means the same thing."""
+    before = inbox.read("notes/2026-09-10-14-30-00.md")
+    bare = inbox.run("--dry-run", cli="tasks")
+    named = inbox.run("ingest", "--dry-run", cli="tasks")
+    before_flag = inbox.run("--dry-run", "ingest", cli="tasks")
+    for r in (named, before_flag):
+        assert r.returncode == bare.returncode
+        assert r.stderr == bare.stderr
+        assert r.stdout.splitlines()[-1] == "Ingested: 0.  Failed: 5."
+    assert inbox.read("notes/2026-09-10-14-30-00.md") == before
+    quiet = inbox.run("ingest", "--dry-run", "--quiet", cli="tasks")
+    assert quiet.stdout == ""
 
 
 def test_ingest_idempotent(vault):
@@ -200,11 +217,11 @@ def test_dry_run_quiet_prints_only_failures(inbox):
 
 def test_ingest_rewrites_good_actions_in_place_and_leaves_the_rest(inbox):
     r = inbox.run(cli="tasks")
-    kick = inbox.home / "notes" / "2026-09-10-14-30-00.md"
+    kick = "notes/2026-09-10-14-30-00.md"
     assert r.returncode == 1
     out = r.stdout.splitlines()
-    assert re.fullmatch(rf"ingested: {UUID}  {re.escape(str(kick))}:8  Draft the scope note", out[0])
-    assert re.fullmatch(rf"ingested: {UUID}  {re.escape(str(kick))}:9  "
+    assert re.fullmatch(rf"ingested: {UUID}  {re.escape(kick)}:8  Draft the scope note", out[0])
+    assert re.fullmatch(rf"ingested: {UUID}  {re.escape(kick)}:9  "
                         r"Long description Long description Long description Long desc\.\.\.", out[1])
     assert out[2] == "Ingested: 2.  Failed: 5."
     assert r.stderr == failures(inbox)
@@ -325,14 +342,28 @@ def test_show(board):
     assert board.run("show", "cccc0001", cli="tasks").stdout.splitlines()[4] == "threads:     -"
 
 
+def test_list_json_carries_the_fields_show_prints(board):
+    """Every other listing command has --json; `tasks list` now does too,
+    with the anchor's own fields rather than the padded table."""
+    rows = json.loads(board.run("list", "--json", "--priority", "H", cli="tasks").stdout)
+    assert rows == [
+        {"uuid": "dddd0001", "priority": "H", "assignee": "Riaz Arbi",
+         "threads": ["Projects/SGB", "Projects/Alpha"],
+         "body": "Draft the scope note",
+         "source": "notes/2026-09-10-14-30-00.md:8", "entry": "2026-09-10",
+         "due": "2026-09-20", "scheduled": None, "depends": ["aaaa0001"],
+         "end": None},
+    ]
+
+
 def test_uuid_prefix_errors(board):
-    # DEFERRED BUG 7: the ambiguous-prefix error names files by basename,
-    # not by vault path.
+    """The ambiguous-prefix error names each file by its vault path, as every
+    other line `tasks` prints does (this was deferred bug 7)."""
     r = board.run("show", "aaaa", cli="tasks")
     assert (r.returncode, r.stderr) == (1, "tasks: error: uuid prefix 'aaaa' is ambiguous: "
-                                           "aaaa0001 (2026-09-10-14-30-00.md:9), "
-                                           "aaaa0002 (2026-09-10-14-30-00.md:10), "
-                                           "aaaa0003 (2026-09-13.md:7)\n")
+                                           "aaaa0001 (notes/2026-09-10-14-30-00.md:9), "
+                                           "aaaa0002 (notes/2026-09-10-14-30-00.md:10), "
+                                           "aaaa0003 (logs/Topics/zeta/2026-09-13.md:7)\n")
     r = board.run("show", "ffff", cli="tasks")
     assert (r.returncode, r.stderr) == (1, "tasks: error: no task found with uuid prefix 'ffff'\n")
 
@@ -506,7 +537,8 @@ def test_ingest_leaves_an_action_under_a_wrongly_cased_thread(vault):
     r = vault.run(cli="tasks")
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
-                        f"  {note}:9: thread 'Projects/sgb' does not resolve\n\n")
+                        f"  {note.relative_to(vault.home)}:9: thread 'Projects/sgb' "
+                        "does not resolve\n\n")
     assert note.read_text(encoding="utf-8") == before
 
 
@@ -530,9 +562,10 @@ def test_ingest_reports_a_file_that_is_not_utf8_and_carries_on(vault):
     good = vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 1
-    assert re.fullmatch(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(good))}:9  do it\nIngested: 1.  Failed: 1.\n", r.stdout)
+    assert re.fullmatch(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(good.relative_to(vault.home)))}"
+                        rf":9  do it\nIngested: 1.  Failed: 1.\n", r.stdout)
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
-                        f"  {bad}: file is not valid UTF-8; skipped\n\n")
+                        f"  {bad.relative_to(vault.home)}: file is not valid UTF-8; skipped\n\n")
     assert vault.run("list", cli="tasks").returncode == 0
 
 
@@ -564,7 +597,7 @@ def test_an_action_with_attributes_but_no_text_is_reported_not_ingested(vault):
     r = vault.run(cli="tasks")
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
-                        f"  {note}:9: missing description\n\n")
+                        f"  {note.relative_to(vault.home)}:9: missing description\n\n")
     assert note.read_text(encoding="utf-8") == before
 
 
@@ -576,6 +609,6 @@ def test_a_bare_action_line_is_reported_by_tasks_as_lint_reports_it(vault):
     r = vault.run(cli="tasks")
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
-                        f"  {note}:9: missing description\n\n")
+                        f"  {note.relative_to(vault.home)}:9: missing description\n\n")
     lint = vault.run(cli="lint")
     assert f"{note}:9: ACTION: missing description" in lint.stdout

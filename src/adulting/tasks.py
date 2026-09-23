@@ -25,6 +25,8 @@ Subcommands:
   show <uuid>                    detail view
 """
 
+import argparse
+import json
 import os
 import re
 import sys
@@ -176,20 +178,25 @@ def find_anchor(uuid_prefix):
     if not hits:
         V.die(f"no task found with uuid prefix {uuid_prefix!r}")
     if len(hits) > 1:
-        joined = ', '.join(f"{a.uuid} ({a.path.name}:{a.line_no + 1})"
+        joined = ', '.join(f"{a.uuid} ({V.where(a.path, a.line_no)})"
                            for a in hits)
         V.die(f"uuid prefix {uuid_prefix!r} is ambiguous: {joined}")
     return hits[0]
 
 
-def write_anchor(anchor, new_line):
-    """Rewrite a single line in the anchor's source file. Atomic via
-    tmp + os.replace."""
-    lines = anchor.path.read_text(encoding='utf-8').split('\n')
-    lines[anchor.line_no] = new_line
-    tmp = anchor.path.with_suffix(anchor.path.suffix + '.tmp')
+def write_line(path, line_no, new_line):
+    """Rewrite a single line of a file. Atomic via tmp + os.replace, so a
+    vault being synced never sees a half-written note."""
+    lines = path.read_text(encoding='utf-8').split('\n')
+    lines[line_no] = new_line
+    tmp = path.with_suffix(path.suffix + '.tmp')
     tmp.write_text('\n'.join(lines), encoding='utf-8')
-    os.replace(tmp, anchor.path)
+    os.replace(tmp, path)
+
+
+def write_anchor(anchor, new_line):
+    """Rewrite the line an anchor came from."""
+    write_line(anchor.path, anchor.line_no, new_line)
 
 
 def mutate_anchor(anchor, **changes):
@@ -229,7 +236,7 @@ def find_action_lines(text):
             yield i, action
 
 
-def cmd_default(args):
+def cmd_ingest(args):
     try:
         ingested, failed = ingest(args.dry_run)
     except OSError as e:
@@ -248,7 +255,8 @@ def ingest(dry_run=False):
     for path in discover_source_files():
         text = read_source(path)
         if text is None:
-            failed.append((str(path), ["file is not valid UTF-8; skipped"]))
+            failed.append((str(path.relative_to(V.vault_home())),
+                           ["file is not valid UTF-8; skipped"]))
             continue
         threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
         for i, action in find_action_lines(text):
@@ -270,7 +278,7 @@ def ingest(dry_run=False):
 
     ingested = []
     for path, i, action, errors in plan:
-        prefix = f"{path}:{i + 1}"
+        prefix = V.where(path, i)
         if errors:
             failed.append((prefix, errors))
             continue
@@ -289,11 +297,7 @@ def ingest(dry_run=False):
         )
         new_line = format_anchor(anchor)
         if not dry_run:
-            lines = path.read_text(encoding='utf-8').split('\n')
-            lines[i] = new_line
-            tmp = path.with_suffix(path.suffix + '.tmp')
-            tmp.write_text('\n'.join(lines), encoding='utf-8')
-            os.replace(tmp, path)
+            write_line(path, i, new_line)
         ingested.append((u, prefix, action.body, new_line))
     return ingested, failed
 
@@ -481,6 +485,17 @@ def _print_table(anchors, cache):
         print('  '.join(c.ljust(widths[i]) for i, c in enumerate(r)).rstrip())
 
 
+def as_row(anchor, cache):
+    """One anchor as `--json` prints it: the fields `show` prints, with
+    nothing padded or abbreviated."""
+    return {'uuid': anchor.uuid, 'priority': anchor.priority,
+            'assignee': anchor.assignee, 'threads': threads_for(anchor, cache),
+            'body': anchor.body, 'source': V.where(anchor.path, anchor.line_no),
+            'entry': anchor.entry, 'due': anchor.due,
+            'scheduled': anchor.scheduled, 'depends': list(anchor.depends),
+            'end': anchor.end}
+
+
 def cmd_list(args):
     if args.priority:
         V.check_priority(args.priority)
@@ -499,6 +514,9 @@ def cmd_list(args):
         anchors = [a for a in anchors if want in threads_for(a, cache)]
     anchors.sort(key=lambda a: (_thread_sort_key(threads_for(a, cache)),
                                 _sort_key(a)))
+    if args.json:
+        print(json.dumps([as_row(a, cache) for a in anchors], indent=2))
+        return 0
     _print_table(anchors, cache)
     return 0
 
@@ -519,8 +537,7 @@ def cmd_show(args):
     print(f"priority:    {anchor.priority or '-'}")
     print(f"assignee:    {anchor.assignee or '-'}")
     print(f"threads:     {', '.join(threads) if threads else '-'}")
-    print(f"source:      "
-          f"{anchor.path.relative_to(V.vault_home())}:{anchor.line_no + 1}")
+    print(f"source:      {V.where(anchor.path, anchor.line_no)}")
     print(f"body:        {anchor.body}")
     print(f"entry:       {anchor.entry}")
     print(f"end:         {anchor.end or '-'}")
@@ -533,17 +550,34 @@ def cmd_show(args):
 
 # ---------- main ----------
 
+UUID_HELP = "The task's uuid, from `tasks list`; any unique prefix will do."
+
+
+def add_ingest_flags(parser, on_subcommand=False):
+    """The ingest flags, which bare `tasks` and `tasks ingest` both take.
+
+    On the subcommand they default to SUPPRESS, so `tasks --dry-run ingest`
+    keeps the flag it was given instead of the subparser's own default
+    overwriting it.
+    """
+    default = {'default': argparse.SUPPRESS} if on_subcommand else {}
+    parser.add_argument('--dry-run', action='store_true', **default,
+                        help="Show what would be ingested without writing.")
+    parser.add_argument('--quiet', action='store_true', **default,
+                        help="Suppress per-action output.")
+
+
 def main():
     parser = V.command_parser(
         'tasks', "Bridge ACTION lines into source TASK anchors; "
                     "expose anchor mutations as subcommands.")
-    parser.add_argument('--dry-run', action='store_true',
-                        help="(default invocation only) Show what would "
-                             "be ingested without writing.")
-    parser.add_argument('--quiet', action='store_true',
-                        help="(default invocation only) Suppress per-action "
-                             "output.")
+    add_ingest_flags(parser)
     sub = parser.add_subparsers(dest='subcommand')
+
+    p = sub.add_parser('ingest',
+        help="Turn ACTION: lines into TASK anchors — what bare `tasks` does.")
+    add_ingest_flags(p, on_subcommand=True)
+    p.set_defaults(func=cmd_ingest)
 
     p = sub.add_parser('add',
         help="Buffer-append a structured ACTION (delegates to `buffer add-action`).")
@@ -554,48 +588,50 @@ def main():
     p.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
     p.add_argument('--priority', help="H, M or L.")
     p.add_argument('--depends', action='append', default=[],
+        # A dependency is stored verbatim, so unlike every other uuid
+        # argument this one is not a prefix.
         help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser('done',
         help="Mark a task complete; rewrites source TASK->DONE and stamps end.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.set_defaults(func=cmd_done)
 
     p = sub.add_parser('set-description', help="Rewrite source body.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('text', help="The new description.")
     p.set_defaults(func=cmd_set_description)
 
     p = sub.add_parser('set-assignee', help="Rewrite the (Assignee) prefix.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('person', help="A person with a file in people/; `people/` before the name is allowed.")
     p.set_defaults(func=cmd_set_assignee)
 
     p = sub.add_parser('set-due', help="Set due date (YYYY-MM-DD).")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('date', help="YYYY-MM-DD.")
     p.set_defaults(func=cmd_set_due)
 
     p = sub.add_parser('set-scheduled', help="Set scheduled date.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('date', help="YYYY-MM-DD.")
     p.set_defaults(func=cmd_set_scheduled)
 
     p = sub.add_parser('set-priority',
         help="Set priority H|M|L; writes [#X] in the visible portion.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('priority', help="H, M or L.")
     p.set_defaults(func=cmd_set_priority)
 
     p = sub.add_parser('add-depends', help="Add a depends entry.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('dep_uuid', metavar='dep-uuid',
         help="The uuid of the task this one waits on; any unique prefix will do.")
     p.set_defaults(func=cmd_add_depends)
 
     p = sub.add_parser('rm-depends', help="Remove a depends entry.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.add_argument('dep_uuid', metavar='dep-uuid',
         help="The dependency to remove; any prefix that picks out one of this task's dependencies.")
     p.set_defaults(func=cmd_rm_depends)
@@ -609,6 +645,7 @@ def main():
         help="Filter to tasks assigned to this person.")
     p.add_argument('--overdue', action='store_true',
         help="Show only tasks whose due date is before today.")
+    p.add_argument('--json', action='store_true', help='JSON output.')
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser('next',
@@ -616,12 +653,12 @@ def main():
     p.set_defaults(func=cmd_next)
 
     p = sub.add_parser('show', help="Detail view of one anchor.")
-    p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
+    p.add_argument('uuid', help=UUID_HELP)
     p.set_defaults(func=cmd_show)
 
     args = V.parse_command(parser, subcommand_required=False)
     if args.subcommand is None:
-        return cmd_default(args)
+        return cmd_ingest(args)
     return args.func(args)
 
 

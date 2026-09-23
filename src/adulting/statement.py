@@ -14,7 +14,6 @@ from decimal import Decimal
 
 from adulting import vault as V
 
-CENT = V.CENT
 AGING_BUCKETS = ('current', '30', '60', '90+')
 
 
@@ -23,12 +22,12 @@ AGING_BUCKETS = ('current', '30', '60', '90+')
 def hours_of(minutes):
     """Whole hundredths of an hour at the line, so the printed lines sum to
     the printed total, as they do for money."""
-    return (Decimal(minutes) / Decimal(60)).quantize(CENT)
+    return (Decimal(minutes) / Decimal(60)).quantize(V.CENT)
 
 
 def charge_of(minutes, rate):
     """Whole cents at the line, so printed lines sum to the printed total."""
-    return (Decimal(minutes) / Decimal(60) * Decimal(rate)).quantize(CENT)
+    return (Decimal(minutes) / Decimal(60) * Decimal(rate)).quantize(V.CENT)
 
 
 def running(entries, payments):

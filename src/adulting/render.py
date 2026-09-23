@@ -168,16 +168,22 @@ def without_frontmatter(lines):
     return lines
 
 
-def cut_sections(lines, headings, stops):
-    """The minutes/agenda body: after a line containing one of `headings`,
-    skip lines until one with eleven or more hyphens; stop entirely at a
-    line containing one of `stops`."""
+def walk_sections(lines, headings, inserts=None, stops=()):
+    """One pass over a note's body, used two ways.
+
+    A line containing one of `headings` opens a section: the note's own lines
+    inside it are dropped until a rule of eleven or more hyphens closes it.
+    `inserts` puts that heading's replacement lines in their place, and a line
+    containing one of `stops` ends the walk.
+    """
     out = []
     printing = True
-    for line in without_frontmatter(lines):
+    for line in lines:
         matched = next((h for h in headings if h in line), None)
         if matched:
             out.append(line)
+            if inserts:
+                out.extend(inserts[matched])
             printing = False
             continue
         if DASHES_RE.search(line) and not printing:
@@ -189,23 +195,16 @@ def cut_sections(lines, headings, stops):
     return out
 
 
+def cut_sections(lines, headings, stops):
+    """The minutes/agenda body: the note's own text under these headings is
+    dropped, because the renderer builds those sections itself."""
+    return walk_sections(without_frontmatter(lines), headings, stops=stops)
+
+
 def fill_sections(lines, inserts):
-    """After a line containing a heading in `inserts`, put that heading's
-    lines, then skip the note's own lines until eleven or more hyphens."""
-    out = []
-    printing = True
-    for line in lines:
-        matched = next((h for h in inserts if h in line), None)
-        if matched:
-            out.append(line)
-            out.extend(inserts[matched])
-            printing = False
-            continue
-        if DASHES_RE.search(line) and not printing:
-            printing = True
-        if printing:
-            out.append(line)
-    return out
+    """The PDF body: each heading's own text is replaced by the lines the
+    renderer built for it."""
+    return walk_sections(lines, inserts, inserts=inserts)
 
 
 def matching_lines(lines, needle, prefix):

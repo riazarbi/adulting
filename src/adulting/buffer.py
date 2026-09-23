@@ -31,7 +31,8 @@ Subcommands:
     add-text   <thread> <text>
     add-ref    <thread> <target> [<summary>]
     add-action <thread> <text>          (also reachable as `tasks add`)
-    list       [<grep>]
+      every add-* takes [--date YYYY-MM-DD]
+    list       [<grep>] [--json]
     rm         <line-number>
     tend                                 (regroup + validate; idempotent)
     flush                                (tend, then write logs/, clear buffer)
@@ -41,6 +42,7 @@ edits to buffer.md are discouraged — `tend` is the way to fix things,
 and individual entries are added/removed via the API.
 """
 
+import json
 import re
 import sys
 from datetime import datetime
@@ -69,6 +71,14 @@ UNKNOWN_LINE_RE = re.compile(
 
 def now_ts():
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def add_date_flag(parser):
+    """--date, on every `add-*`: what it does is true of any entry."""
+    parser.add_argument('--date', metavar='YYYY-MM-DD',
+                        help="File under this day instead of today. Use the "
+                             "date the thing happened, not the date you are "
+                             "recording it.")
 
 
 def stamp(date=None):
@@ -161,11 +171,11 @@ def buffered(add, *args):
 
 
 def cmd_add(args):
-    return buffered(buffer_unknown, args.text)
+    return buffered(buffer_unknown, args.text, args.date)
 
 
 def cmd_add_text(args):
-    return buffered(buffer_text, args.thread, args.text)
+    return buffered(buffer_text, args.thread, args.text, args.date)
 
 
 def cmd_add_ref(args):
@@ -174,24 +184,24 @@ def cmd_add_ref(args):
 
 def cmd_add_action(args):
     return buffered(buffer_action, args.thread, args.text, args.due, args.scheduled,
-                    args.priority, args.depends)
+                    args.priority, args.depends, args.date)
 
 
-def buffer_unknown(text):
+def buffer_unknown(text, date=None):
     text = text.strip()
     if not text:
         raise ValueError("text is empty")
-    line = f"- UNKNOWN: {text} <!--{now_ts()}-->"
+    line = f"- UNKNOWN: {text} <!--{stamp(date)}-->"
     append_line(line)
     return line
 
 
-def buffer_text(thread, text):
+def buffer_text(thread, text, date=None):
     thread = canonical_thread(thread)
     text = text.strip()
     if not text:
         raise ValueError("text is empty")
-    line = f"- [[{thread}]] TEXT: {text} <!--{now_ts()}-->"
+    line = f"- [[{thread}]] TEXT: {text} <!--{stamp(date)}-->"
     append_line(line)
     return line
 
@@ -209,7 +219,8 @@ def buffer_ref(thread, target, summary, date=None):
     return line
 
 
-def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends=None):
+def buffer_action(thread, text, due=None, scheduled=None, priority=None,
+                  depends=None, date=None):
     thread = canonical_thread(thread)
     text = text.strip()
     if not text:
@@ -232,7 +243,7 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None, depends
         raise ValueError(errors[0])
 
     attr_str = format_action_attrs(attrs)
-    comment = now_ts() + (f" {attr_str}" if attr_str else "")
+    comment = stamp(date) + (f" {attr_str}" if attr_str else "")
     line = f"- [[{thread}]] ACTION: {body_text} <!--{comment}-->"
     append_line(line)
     return line
@@ -257,15 +268,15 @@ def add_ref(thread, target, summary, date=None):
 def cmd_list(args):
     lines = read_buffer()
     pattern = (args.filter or '').lower()
-    shown = 0
-    for i, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        if pattern and pattern not in line.lower():
-            continue
-        print(f"{i:4}  {line}")
-        shown += 1
-    if shown == 0:
+    shown = [{'line_no': i, 'text': line}
+             for i, line in enumerate(lines, start=1)
+             if line.strip() and (not pattern or pattern in line.lower())]
+    if args.json:
+        print(json.dumps(shown, indent=2))
+        return 0
+    for row in shown:
+        print(f"{row['line_no']:4}  {row['text']}")
+    if not shown:
         print("(buffer empty)" if not pattern else "(no matching entries)")
     return 0
 
@@ -552,18 +563,17 @@ def main():
 
     p = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
     p.add_argument('text', help="The raw text to capture.")
+    add_date_flag(p)
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser('add-text', help="Append a TEXT entry.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     p.add_argument('text', help="The observation to record.")
+    add_date_flag(p)
     p.set_defaults(func=cmd_add_text)
 
     p = sub.add_parser('add-ref', help="Append a REF entry.")
-    p.add_argument('--date', metavar='YYYY-MM-DD',
-                      help="File under this day instead of today. Use the "
-                           "date the thing happened, not the date you are "
-                           "recording it.")
+    add_date_flag(p)
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
     p.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
                          "hours/<Kind>/<Thread>, payments/<Kind>/<Thread>, "
@@ -579,10 +589,12 @@ def main():
     p.add_argument('--priority', help="H, M or L.")
     p.add_argument('--depends', action='append', default=[],
                       help="A task's 8-character uuid, from `tasks list`; repeatable.")
+    add_date_flag(p)
     p.set_defaults(func=cmd_add_action)
 
     p = sub.add_parser('list', help="Show buffer with line numbers.")
     p.add_argument('filter', nargs='?', default='', help="Only lines containing this text, ignoring case.")
+    p.add_argument('--json', action='store_true', help='JSON output.')
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser('rm', help="Remove a single line by line number.")

@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, parts R3-C4 and R3-C5: one machine each, and the inconsistencies picked
+
+**C4, the duplicated state machines:**
+
+- `render.cut_sections` and `fill_sections` were the same walk twice. There is one `walk_sections(lines, headings, inserts, stops)` now; the two names remain as the two ways it is used, one line each.
+- `tasks` ingest held a literal copy of `write_anchor`'s tmp+rename fifty lines below it. Both call `write_line(path, line_no, new_line)`.
+- `lint` reported a duplicate uuid and a duplicate record id with the same eight lines twice. `report_duplicates(groups, wording)` is the one copy.
+
+**C5, the consistency list — each item decided rather than left:**
+
+- **One path format in `tasks`.** It printed absolute on ingest, vault-relative in `show` and a bare basename in the ambiguity error. Everything it prints is vault-relative now, through `V.where(path, line_no)`, matching `buffer`. **This closes the second half of deferred bug 7.** `lint` keeps absolute paths on purpose: it is the one command you point at files, and its output is read by editors.
+- **`tasks ingest` is a real subcommand**, so `--dry-run` and `--quiet` belong to a command instead of being "(default invocation only)" flags. Bare `tasks` still ingests, and `tasks --dry-run ingest` means what it says (the subparser's copies default to SUPPRESS rather than overwriting the flag).
+- **`tasks list --json` and `buffer list --json`** — the last two listings without it. `tasks` prints each anchor's own fields, `buffer` the numbered lines as `{line_no, text}`.
+- **`--date` is on every `buffer add-*`**, not just `add-ref`: filing an entry under the day the thing happened is true of any entry, and `stamp()` was always generic.
+- **`payments statement --as-of` is an argparse date** like `--since` and `--until`, so a bad one is refused in the same words (exit 2 now, not 1).
+- `threads list` and `people list` are one function, `V.print_summary_list`; the `CENT = V.CENT` aliases are gone; the uuid help string is `UUID_HELP`, said once (`--depends` keeps its own wording, because a dependency is stored verbatim and is not a prefix); `parse_block`'s `out[key] == ''` sentinel is explained where it is used.
+- **Verified on the vault copy:** `threads list`, `people list`, `tasks list`, `tasks --dry-run`, `payments statement` and `lint` print byte-identical output before and after. `dev/tools/{tasks,buffer}.json` describe the new flags. **749 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, part R3-C2: one record store, not two copies of one
 
 `hours` and `payments` keep their records the same way and differed only in a

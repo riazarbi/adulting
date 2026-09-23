@@ -202,12 +202,9 @@ def billed(thread=None, since=None, until=None):
 
 
 def _as_of(raw):
-    if not raw:
-        return date.today()
-    try:
-        return datetime.strptime(raw, '%Y-%m-%d').date()
-    except ValueError:
-        V.die(f"bad --as-of {raw!r}; expected YYYY-MM-DD")
+    """The statement date. Checked by argparse like every other date flag,
+    so an unreadable one is reported in the same words."""
+    return datetime.strptime(raw, '%Y-%m-%d').date() if raw else date.today()
 
 
 def one_thread_statement(thread_arg, as_of, since=None, until=None):
@@ -341,7 +338,8 @@ def main():
     p = sub.add_parser('statement', help="Billed vs received, by thread and currency.")
     p.add_argument('--thread', help="Only this thread: name, 'Kind/Name', or wikilink.")
     V.add_window_flags(p)
-    p.add_argument('--as-of', help="Statement date, YYYY-MM-DD; drives aging (default: today).")
+    p.add_argument('--as-of', metavar='YYYY-MM-DD', type=V.iso_date,
+                   help="Statement date; drives aging (default: today).")
     p.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
     p.set_defaults(func=cmd_statement)
 

@@ -196,8 +196,9 @@ all, and fixing one means changing that test first. None is a data-loss risk.
 6. **`--quiet` is partial in `buffer`.** It does not silence the `add-*`
    commands, and `buffer --quiet flush` still prints the ingest summary.
 7. **Cosmetic:** `tasks set-due`/`set-scheduled` punctuate their date error
-   differently from every other error, and the ambiguous-uuid error names
-   files by basename rather than vault path.
+   differently from every other error. (The second half of this bug — the
+   ambiguous-uuid error naming files by basename — was fixed in round 3 C5,
+   where `tasks` settled on one path format.)
 8. **A thread body line like `- 2026-13 — ...` is never checked by `lint`.**
    It does not match `thread_entry`'s `applies_when`, so a malformed date is
    skipped rather than reported.

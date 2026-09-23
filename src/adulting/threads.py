@@ -68,23 +68,7 @@ def cmd_list(args):
         rows.append({'kind': kind, 'name': name, 'thread': V.thread_ref(kind, name),
                      **V.file_summary(path)})
 
-    if not args.all:
-        rows = [r for r in rows if r['status'] == 'open']
-
-    if args.query:
-        rows = V.rank_by_query(rows, args.query, 'name', 'thread')
-
-    if args.json:
-        print(json.dumps(rows, indent=2))
-        return 0
-    if not rows:
-        print("(no matches)" if args.query else "(no threads)")
-        return 0
-    thread_w = max(len(r['thread']) for r in rows)
-    print(f"{'THREAD':<{thread_w}}  {'STATUS':<8}  CATEGORY")
-    for r in rows:
-        print(f"{r['thread']:<{thread_w}}  {r['status']:<8}  {r['category']}")
-    return 0
+    return V.print_summary_list(rows, args, 'thread', 'threads')
 
 
 def cmd_show(args):

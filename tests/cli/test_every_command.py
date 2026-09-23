@@ -10,7 +10,7 @@ import pytest
 # Every command is built by vault.command_parser, so --help-json comes first.
 SURFACE = {
     "tasks": (["--help-json", "--dry-run", "--quiet"],
-              ["add", "done", "set-description", "set-assignee", "set-due", "set-scheduled",
+              ["ingest", "add", "done", "set-description", "set-assignee", "set-due", "set-scheduled",
                "set-priority", "add-depends", "rm-depends", "list", "next", "show"]),
     "notes": (["--help-json"], ["new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]),
     "search": (["--help-json"], ["notes", "logs", "activity", "overview", "stream"]),

@@ -75,23 +75,7 @@ def cmd_list(args):
         # `person` is the resolvable wikilink form.
         rows.append({'name': name, 'person': f"people/{name}", **V.file_summary(path)})
 
-    if not args.all:
-        rows = [r for r in rows if r['status'] == 'open']
-
-    if args.query:
-        rows = V.rank_by_query(rows, args.query, 'name', 'person')
-
-    if args.json:
-        print(json.dumps(rows, indent=2))
-        return 0
-    if not rows:
-        print("(no matches)" if args.query else "(no people)")
-        return 0
-    person_w = max(len(r['person']) for r in rows)
-    print(f"{'PERSON':<{person_w}}  {'STATUS':<8}  CATEGORY")
-    for r in rows:
-        print(f"{r['person']:<{person_w}}  {r['status']:<8}  {r['category']}")
-    return 0
+    return V.print_summary_list(rows, args, 'person', 'people')
 
 
 def cmd_show(args):

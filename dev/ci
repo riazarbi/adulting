@@ -104,8 +104,11 @@ def stage_lint():
     if not ruff.exists():
         bad("ruff (not installed; re-run the install line at the top of this file)")
     else:
-        found = run(ruff, 'check', REPO / 'src', REPO / 'dev', REPO / 'tests',
-                    capture_output=True, text=True)
+        # The dev scripts have no .py suffix, so they are named one by one:
+        # a directory only brings ruff the files it recognises.
+        targets = [REPO / 'src', REPO / 'tests', REPO / 'dev' / 'commands.py',
+                   REPO / 'dev' / 'ci'] + [REPO / 'dev' / n for n in DEV_TOOLS]
+        found = run(ruff, 'check', *targets, capture_output=True, text=True)
         if found.returncode == 0:
             ok("ruff")
         else:

@@ -35,7 +35,7 @@ against this thread. Both are optional — most threads are never billed.
 
 `hours log` requires a currency and will refuse to write without one, since
 guessing it would silently corrupt cross-thread totals. `rate` falls back to
-`.adulting/config.yaml`'s `time.rate`, then to 2500. Both are resolved at write
+`.adulting/config.yaml`'s `hours.rate`, then to 2500. Both are resolved at write
 time and stored literally on each entry, so changing them here never re-prices
 work already logged.
 

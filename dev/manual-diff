@@ -106,8 +106,8 @@ def main():
     else:
         only_a = [h for h in ha if h not in hb]
         only_b = [h for h in hb if h not in ha]
-        detail = ''.join(f"       only in A: {'#'*l} {t}\n" for l, t in only_a)
-        detail += ''.join(f"       only in B: {'#'*l} {t}\n" for l, t in only_b)
+        detail = ''.join(f"       only in A: {'#'*depth} {head}\n" for depth, head in only_a)
+        detail += ''.join(f"       only in B: {'#'*depth} {head}\n" for depth, head in only_b)
         if not detail:
             detail = "       same headings, different order\n"
         passed &= report("headings", False, detail.rstrip())

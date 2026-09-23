@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-D: the docs that lied, and the scripts ruff could not see
+
+- **R3-D1: `schemas/thread.md` named the wrong config key.** It said a thread's `rate` falls back to `.adulting/config.yaml`'s `time.rate`; `hours.py` reads `hours.rate`, and the README always said so. The schema ships as package data and is harvested, so the wrong key had already reached `MANUAL.md`; both are corrected.
+- **R3-D4: `dev/testbed` is in the repo's own style** — single quotes like every other file (110 strings, converted by tokenising rather than by hand), and its `read = lambda p: ...` is a `def`.
+- **ruff was not seeing the `dev/` scripts at all**, because they have no `.py` suffix and a directory only brings ruff the files it recognises. They are named one by one now, which found two more `l` loop variables in `dev/manual-diff`.
+- `dev/testbed`, `dev/manual-diff` and `dev/ci` were each run after the edits. **749 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, part R3-C6: ruff runs (owner decision)
 
 The `# noqa` markers implied a linter that never ran. There is one now, and

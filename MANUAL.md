@@ -692,7 +692,7 @@ A markdown file for one project, process or topic. Lives in `threads/`.
 | `ended` | no | Date. Required when `status` is `closed`. |
 | `cadences` | no | List of `{key, frequency, description}`; `frequency` is an interval in days. |
 | `currency` | no | Three-letter uppercase ISO code; the default `hours` applies. |
-| `rate` | no | Default hourly rate. Falls back to `.adulting/config.yaml` `time.rate`, then 2500. |
+| `rate` | no | Default hourly rate. Falls back to `.adulting/config.yaml` `hours.rate`, then 2500. |
 | `client_name` | no | The party billed on a statement. Required to render a statement PDF. |
 | `client_address` | no | Pipe-separated, e.g. `Unit 301\|2 Park Road\|Cape Town`. |
 | `client_vat` | no | Client VAT number. |

@@ -54,13 +54,16 @@ def test_log_lines(payments_vault):
     (["SANA", "0"], "payments: error: amount must be positive (got 0)\n"),
     (["SANA"], "payments: error: amount is required\n"),
     (["Wellness", "100"], "payments: error: thread 'Topics/Wellness' has no currency\n"
-                          "  set `currency: ZAR` in threads/Topics/Wellness.md, or pass --currency\n"),
+                          "  set `currency: ZAR` in {home}/threads/Topics/Wellness.md, "
+                          "or pass --currency\n"),
     (["SANA", "10", "-d", "11 July"], "payments: error: bad --date '11 July'; expected YYYY-MM-DD\n"),
     (["Nope", "10"], "payments: error: thread 'Nope' does not resolve to a thread file\n"),
 ])
 def test_log_errors_write_nothing(payments_vault, argv, message):
     r = payments_vault.run("log", *argv, cli="payments")
-    assert (r.returncode, r.stdout, r.stderr) == (1, "", message)
+    # A message naming a file to edit names it absolutely.
+    assert (r.returncode, r.stdout, r.stderr) == (
+        1, "", message.format(home=payments_vault.home))
     assert list((payments_vault.home / "payments").rglob("*.md")) == []
 
 

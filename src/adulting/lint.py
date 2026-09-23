@@ -313,14 +313,11 @@ def wikilink_exists(target):
 
 def find_file_schema(path, fm, schemas):
     """Match by filename + applies_when + (new) directory scope."""
-    # Both sides are resolved: ADULTING_HOME is often reached through a
+    # `V.rel` resolves both sides: ADULTING_HOME is often reached through a
     # symlink (/tmp and /var are symlinks on macOS, and a synced vault is
     # frequently one), and an unresolved file under a resolved home is
     # relative to nothing, which used to match no schema at all.
-    home = V.vault_home().resolve()
-    path = path.resolve()
-    rel = path.relative_to(home) if path.is_relative_to(home) else path
-    rel_str = str(rel)
+    rel_str = V.rel(path)
     for s in schemas.values():
         if s['scope'] != 'file':
             continue
@@ -570,7 +567,7 @@ def report_duplicates(groups, wording):
         if len(hits) <= 1:
             continue
         for path, ln in hits:
-            others = ', '.join(f"{V.rel(p)}:{n}" for p, n in hits if (p, n) != (path, ln))
+            others = ', '.join(f"{V.full(p)}:{n}" for p, n in hits if (p, n) != (path, ln))
             yield path, ln, f"{wording} {value!r} duplicated at {others}"
 
 
@@ -732,17 +729,17 @@ def main():
         for line_no, msg in validate_file(f, schemas, registry=registry):
             total += 1
             if not args.quiet:
-                print(f"{V.rel(f)}:{line_no}: {msg}")
+                print(f"{V.full(f)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_tasks(registry):
         total += 1
         if not args.quiet:
-            print(f"{V.rel(path)}:{line_no}: {msg}")
+            print(f"{V.full(path)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_record_ids(registry):
         total += 1
         if not args.quiet:
-            print(f"{V.rel(path)}:{line_no}: {msg}")
+            print(f"{V.full(path)}:{line_no}: {msg}")
 
     if not args.quiet:
         print(f"\n{len(files)} file(s) checked. {total} violation(s).")

@@ -34,7 +34,7 @@ def test_list_json_fields(people_vault):
     rows = json.loads(people_vault.run("list", "--json", cli="people").stdout)
     assert rows[1] == {
         "name": "Riaz Arbi", "person": "people/Riaz Arbi",
-        "path": "people/Riaz Arbi.md", "status": "open",
+        "path": f"{people_vault.home}/people/Riaz Arbi.md", "status": "open",
         "category": "professional", "started": "2026-01-02", "ended": ""}
 
 
@@ -62,14 +62,15 @@ def test_show_prints_the_file(people_vault):
 def test_show_accepts_the_wikilink_form_and_json(people_vault):
     r = people_vault.run("show", "people/Riaz Arbi", "--json", cli="people")
     assert json.loads(r.stdout) == {
-        "name": "Riaz Arbi", "path": "people/Riaz Arbi.md", "status": "open",
+        "name": "Riaz Arbi", "path": f"{people_vault.home}/people/Riaz Arbi.md",
+        "status": "open",
         "category": "professional", "started": "2026-01-02"}
 
 
 def test_show_missing_person(people_vault):
     r = people_vault.run("show", "Nobody", cli="people")
     assert r.returncode == 1
-    assert r.stderr == "people: error: not found: people/Nobody.md\n"
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'Nobody.md'}\n"
 
 
 # ---------- new ----------
@@ -78,7 +79,7 @@ def test_new_with_flags_writes_the_file(vault):
     r = vault.run("new", "--name", "Igor Novak", "--category", "professional", cli="people")
     path = vault.home / "people" / "Igor Novak.md"
     assert r.returncode == 0
-    assert r.stdout == "created: people/Igor Novak.md\n"
+    assert r.stdout == f"created: {path}\n"
     assert path.read_text() == (
         f"---\nstatus: open\ncategory: professional\nstarted: {date.today().isoformat()}\n"
         "---\n\n# Igor Novak\n")
@@ -89,7 +90,7 @@ def test_new_creates_the_people_dir(vault):
     (vault.home / "people").rmdir()
     r = vault.run("new", "--name", "A", "--category", "personal", cli="people")
     path = vault.home / "people" / "A.md"
-    assert (r.returncode, r.stdout, r.stderr) == (0, "created: people/A.md\n", "")
+    assert (r.returncode, r.stdout, r.stderr) == (0, f"created: {path}\n", "")
     assert path.read_text() == (f"---\nstatus: open\ncategory: personal\n"
                                 f"started: {date.today().isoformat()}\n---\n\n# A\n")
 
@@ -98,7 +99,7 @@ def test_new_refuses_an_existing_person(people_vault):
     before = people_vault.snapshot()
     r = people_vault.run("new", "--name", "Riaz Arbi", "--category", "personal", cli="people")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "people: error: already exists: people/Riaz Arbi.md\n"
+    assert r.stderr == f"people: error: already exists: {people_vault.home / 'people' / 'Riaz Arbi.md'}\n"
     assert people_vault.snapshot() == before
 
 
@@ -108,7 +109,7 @@ def test_delete_with_yes(people_vault):
     path = people_vault.home / "people" / "Old Contact.md"
     r = people_vault.run("delete", "people/Old Contact", "-y", cli="people")
     assert r.returncode == 0
-    assert r.stdout == "deleted: people/Old Contact.md\n"
+    assert r.stdout == f"deleted: {path}\n"
     assert not path.exists()
 
 
@@ -116,7 +117,7 @@ def test_delete_missing_person(people_vault):
     before = people_vault.snapshot()
     r = people_vault.run("delete", "Nobody", "-y", cli="people")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "people: error: not found: people/Nobody.md\n"
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'Nobody.md'}\n"
     assert people_vault.snapshot() == before
 
 
@@ -127,7 +128,7 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(people_vault):
     path = people_vault.home / "people" / "Old Contact.md"
     r = people_vault.run("delete", "Old Contact", input="y\n", cli="people")
     assert r.returncode == 1
-    assert r.stderr == "people: error: refusing to delete people/Old Contact.md without -y\n"
+    assert r.stderr == f"people: error: refusing to delete {path} without -y\n"
     assert path.exists()
 
 
@@ -177,7 +178,7 @@ def test_delete_and_show_need_the_exact_name(people_vault, command):
     before = people_vault.snapshot()
     r = people_vault.run(command[0], "riaz arbi", *command[1:], cli="people")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "people: error: not found: people/riaz arbi.md\n"
+    assert r.stderr == f"people: error: not found: {people_vault.home / 'people' / 'riaz arbi.md'}\n"
     assert people_vault.snapshot() == before
 
 
@@ -190,6 +191,7 @@ def test_show_json_lists_a_persons_cadences(vault):
                 "---\n\n# Bern Sellmeyer\n")
     r = vault.run("show", "Bern Sellmeyer", "--json", cli="people")
     assert json.loads(r.stdout) == {
-        "name": "Bern Sellmeyer", "path": "people/Bern Sellmeyer.md", "status": "open",
+        "name": "Bern Sellmeyer", "path": f"{vault.home}/people/Bern Sellmeyer.md",
+        "status": "open",
         "category": "professional", "started": "2026-01-01",
         "cadences": [{"key": "catch_up", "frequency": "7", "description": "Catch up at least every week"}]}

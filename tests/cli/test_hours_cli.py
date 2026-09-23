@@ -443,7 +443,7 @@ def test_a_thread_rate_that_is_not_a_whole_number_is_refused(vault):
     p.write_text(p.read_text().replace("currency: ZAR\n", "currency: ZAR\nrate: 1,000\n"))
     r = vault.run("log", "Acme", "work", "-m", "60", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == (f"hours: error: rate in {p.relative_to(vault.home)} "
+    assert r.stderr == (f"hours: error: rate in {p} "
                         "must be a whole number; got '1,000'\n")
     assert list((vault.home / "hours").rglob("*.md")) == []
 

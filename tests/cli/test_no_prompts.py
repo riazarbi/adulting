@@ -37,13 +37,13 @@ REFUSALS = [
     ("hours", ["rm", "{hours}"], 1, "hours: error: refusing to delete {hours} without -y"),
     ("payments", ["rm", "{payments}"], 1, "payments: error: refusing to delete {payments} without -y"),
     ("people", ["delete", "Riaz Arbi"], 1,
-     "people: error: refusing to delete people/Riaz Arbi.md without -y"),
+     "people: error: refusing to delete {home}/people/Riaz Arbi.md without -y"),
     ("people", ["delete", "../threads/Projects/SGB", "-y"], 1,
      "people: error: name '../threads/Projects/SGB' cannot contain '/' or start with '.'"),
     ("threads", ["delete", "SGB"], 1,
-     "threads: error: refusing to delete threads/Projects/SGB.md without -y"),
+     "threads: error: refusing to delete {home}/threads/Projects/SGB.md without -y"),
     ("notes", ["delete", "2026-09-10-14-30-00"], 1,
-     "notes: error: refusing to delete notes/2026-09-10-14-30-00.md without -y"),
+     "notes: error: refusing to delete {home}/notes/2026-09-10-14-30-00.md without -y"),
     # A missing argument is argparse's to report, so one row pins its
     # wording and the rest only require the refusal.
     ("hours", ["log"], 2, "hours log: error: the following arguments are required: thread"),

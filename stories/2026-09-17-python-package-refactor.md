@@ -247,3 +247,26 @@ deliberate:
   `SGB`, so a name taken in any case is taken.
 - `search.hours_in_window` keeps one `except`: a hand-edited `startTime` that
   is not ISO reaches it, and without it `search activity` would crash.
+
+## The path rule
+
+A path a command prints is **absolute**, always, and `vault.full(path)` is the
+one place that builds one.
+
+A path in output exists to be opened, and the reader resolves a relative path
+against *its own* working directory, which is not the vault. In the agent's
+container the vault is a bind mount at `/vault` while the process runs in
+`/workspace`, so a vault-relative path silently resolves to nothing. That
+happened: emitting relative paths from `search` once cost about 57 tool calls
+and a wrong answer, and `tests/cli/test_search_cli.py` pins the contract.
+
+Vault-relative strings still appear in output, but as **identifiers, never as
+paths**: a thread ref (`Projects/SGB`), a wikilink target
+(`people/Riaz Arbi`). Those are names the vault resolves, not files to open.
+`vault.rel(path)` builds those and is also what `lint` matches a schema
+against; it is not for printing a path.
+
+This was decided three times before it stuck — relative in round 3, relative
+again in round 4's C1, absolute here — so it is written down rather than
+re-argued. If a future change wants a shorter path in output, the question to
+answer first is how the reader is expected to open it.

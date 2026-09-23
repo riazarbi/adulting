@@ -158,7 +158,7 @@ def cmd_new(args):
     stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     path = notes_dir() / f"{stem}.md"
     if path.exists():
-        V.die(f"{V.rel(path)} already exists; try again in a second")
+        V.die(f"{V.full(path)} already exists; try again in a second")
     notes_dir().mkdir(parents=True, exist_ok=True)
     path.write_text(note_text(stem, args.type, topic, threads, people,
                               (args.counterparty or '').strip(), (args.location or '').strip()),
@@ -224,9 +224,9 @@ def cmd_copy(args):
 def cmd_delete(args):
     path = note_path(args.stem)
     if not args.yes:
-        V.die(f"refusing to delete {V.rel(path)} without -y")
+        V.die(f"refusing to delete {V.full(path)} without -y")
     path.unlink()
-    print(f"deleted: {V.rel(path)}")
+    print(f"deleted: {V.full(path)}")
     return 0
 
 

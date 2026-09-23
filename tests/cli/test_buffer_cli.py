@@ -244,12 +244,13 @@ def test_flush_writes_logs_clears_the_buffer_and_ingests_actions(buffer_vault):
     r = buffer_vault.run("flush", cli="buffer")
     assert r.returncode == 0
     out = r.stdout.splitlines()
+    sgb = buffer_vault.home / "logs" / "Projects" / "SGB" / "2026-09-10.md"
     assert out[:3] == [
-        "flushed 2 entries -> logs/Projects/SGB/2026-09-10.md",
-        "flushed 2 entries -> logs/Topics/Wellness/2026-09-11.md",
+        f"flushed 2 entries -> {sgb}",
+        f"flushed 2 entries -> {buffer_vault.home}/logs/Topics/Wellness/2026-09-11.md",
         "flushed 4 entries into 2 log file(s); buffer cleared.",
     ]
-    assert re.match(r"ingested: [0-9a-f]{8}  logs/Projects/SGB/2026-09-10\.md:10  Draft scope$", out[3])
+    assert re.match(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(sgb))}:10  Draft scope$", out[3])
     assert out[4] == "Ingested: 1.  Failed: 0."
     assert buffer_text(buffer_vault) == ""
     sgb = buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
@@ -300,7 +301,7 @@ def test_a_failed_ingest_after_flush_warns_and_keeps_the_flush(vault):
     finally:
         (vault.home / "notes").chmod(0o755)
     assert (r.returncode, r.stdout) == (0, (
-        f"flushed 1 entry -> logs/Projects/SGB/{today}.md\n"
+        f"flushed 1 entry -> {vault.home}/logs/Projects/SGB/{today}.md\n"
         "flushed 1 entries into 1 log file(s); buffer cleared.\n"))
     assert r.stderr == ("buffer: warning: flushed, but the task ingest failed: [Errno 13] "
                         f"Permission denied: '{vault.home / 'notes' / '2026-09-10-14-30-00.md.tmp'}'\n")

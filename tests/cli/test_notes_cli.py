@@ -130,10 +130,10 @@ def test_delete_needs_yes(notes_vault):
     path = notes_vault.home / "notes" / "2026-09-12-07-00-00.md"
     r = notes_vault.run("delete", "2026-09-12-07-00-00", cli="notes")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "notes: error: refusing to delete notes/2026-09-12-07-00-00.md without -y\n"
+    assert r.stderr == f"notes: error: refusing to delete {path} without -y\n"
     assert path.exists()
     r = notes_vault.run("delete", "2026-09-12-07-00-00", "-y", cli="notes")
-    assert (r.returncode, r.stdout) == (0, "deleted: notes/2026-09-12-07-00-00.md\n")
+    assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")
     assert not path.exists()
 
 

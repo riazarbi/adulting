@@ -35,12 +35,12 @@ def cmd_new(args):
     # Asking the filesystem is right here: on macOS `riaz arbi` would
     # overwrite `Riaz Arbi`, so a name taken in any case is taken.
     if path.exists():
-        V.die(f"already exists: {V.rel(path)}")
+        V.die(f"already exists: {V.full(path)}")
     path.write_text(
         f"---\nstatus: open\ncategory: {args.category}\nstarted: {V.today()}\n---\n\n# {name}\n",
         encoding='utf-8',
     )
-    print(f"created: {V.rel(path)}")
+    print(f"created: {V.full(path)}")
     return 0
 
 
@@ -60,11 +60,11 @@ def cmd_delete(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
     if not V.person_exists(name):
-        V.die(f"not found: {V.rel(path)}")
+        V.die(f"not found: {V.full(path)}")
     if not args.yes:
-        V.die(f"refusing to delete {V.rel(path)} without -y")
+        V.die(f"refusing to delete {V.full(path)} without -y")
     path.unlink()
-    print(f"deleted: {V.rel(path)}")
+    print(f"deleted: {V.full(path)}")
     return 0
 
 
@@ -84,7 +84,7 @@ def cmd_show(args):
     name = _resolve_person(args.person)
     path = people_dir() / f"{name}.md"
     if not V.person_exists(name):
-        V.die(f"not found: {V.rel(path)}")
+        V.die(f"not found: {V.full(path)}")
     if args.json:
         print(V.file_json(path, name=path.stem))
     else:

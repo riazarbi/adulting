@@ -355,7 +355,7 @@ def file_summary(path):
     if text is None:
         return None
     fm = parse_frontmatter_doc(text)[0]
-    return {'path': str(path.relative_to(vault_home())),
+    return {'path': full(path),
             'status': fm.get('status', ''), 'category': fm.get('category', ''),
             'started': fm.get('started', ''), 'ended': fm.get('ended', '')}
 
@@ -364,25 +364,40 @@ def file_json(path, **identity):
     """What `threads show --json` and `people show --json` print: who it is,
     where it is, and all of its frontmatter."""
     fm = parse_frontmatter_doc(read_or_die(path))[0]
-    return json.dumps({**identity, 'path': str(path.relative_to(vault_home())), **fm}, indent=2)
+    return json.dumps({**identity, 'path': full(path), **fm}, indent=2)
+
+
+def full(path):
+    """A vault file, as every command prints it: an absolute path.
+
+    A path in output exists to be opened, and a reader resolves a relative
+    path against its own working directory — which is not the vault. In the
+    agent's container the vault is a bind mount at /vault while the process
+    runs in /workspace, so a vault-relative path silently resolves to
+    nothing. Emitting relative paths once cost ~57 tool calls and a wrong
+    answer; `tests/cli/test_search_cli.py` pins the contract.
+
+    Vault-relative strings do still appear in output, but as identifiers,
+    never as paths: a thread ref (`Projects/SGB`), a wikilink target
+    (`people/Riaz Arbi`). Those are names the vault resolves, not files to
+    open. `rel` below builds those; it is not for printing a path.
+    """
+    return str(Path(path).resolve())
 
 
 def rel(path):
-    """A vault file, as every command names it: relative to the vault.
-
-    One format everywhere, so the same file reads the same whichever command
-    mentions it. A path outside the vault — `lint` can be pointed at one —
-    keeps its own name, since it has nothing to be relative to.
-    """
+    """A vault file's path relative to the vault, for matching and for
+    identifiers. Never for a path in output: see `full`. A path outside the
+    vault keeps its own name, since it has nothing to be relative to."""
     path = Path(path)
     home = vault_home().resolve()
-    full = path.resolve()
-    return str(full.relative_to(home)) if full.is_relative_to(home) else str(path)
+    inside = path.resolve()
+    return str(inside.relative_to(home)) if inside.is_relative_to(home) else str(path)
 
 
 def where(path, line_no):
-    """A place in the vault, as `path:line`."""
-    return f"{rel(path)}:{line_no + 1}"
+    """A place in a file, as `path:line`, for a reader to open."""
+    return f"{full(path)}:{line_no + 1}"
 
 
 def print_summary_list(rows, args, column, noun):
@@ -474,7 +489,7 @@ def thread_meta(path):
     rate = fm.get('rate')
     if rate in (None, ''):
         return fm.get('currency') or None, None
-    return fm.get('currency') or None, as_int(rate, f"rate in {path.relative_to(vault_home())}")
+    return fm.get('currency') or None, as_int(rate, f"rate in {full(path)}")
 
 
 def find_thread(thread_arg):
@@ -500,7 +515,7 @@ def resolve_currency(tpath, ref, flag):
     currency = flag or thread_meta(tpath)[0]
     if not currency:
         die(f"thread {ref!r} has no currency\n"
-            f"  set `currency: ZAR` in {tpath.relative_to(vault_home())}, "
+            f"  set `currency: ZAR` in {full(tpath)}, "
             f"or pass --currency")
     return check_currency(currency)
 

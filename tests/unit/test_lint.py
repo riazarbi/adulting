@@ -180,12 +180,18 @@ def test_each_cycle_is_reported_once_from_its_first_task():
     ]
 
 
+# A bare name in these registries is a file in the working directory; the
+# messages name it absolutely, as a reader would open it.
+HERE = Path.cwd().resolve()
+
+
 def test_cross_check_tasks():
     reg = registry_with([("aaaa0001", ["aaaa0002"]), ("aaaa0002", ["aaaa0001"]),
                          ("aaaa0003", ["deadbeef"]), ("aaaa0003", None)])
     assert list(L.cross_check_tasks(reg)) == [
-        (Path("n.md"), 3, "task_anchor.uuid: 'aaaa0003' duplicated at n.md:4"),
-        (Path("n.md"), 4, "task_anchor.uuid: 'aaaa0003' duplicated at n.md:3"),
+        # The path in the message is absolute: it is there to be opened.
+        (Path("n.md"), 3, f"task_anchor.uuid: 'aaaa0003' duplicated at {HERE / 'n.md'}:4"),
+        (Path("n.md"), 4, f"task_anchor.uuid: 'aaaa0003' duplicated at {HERE / 'n.md'}:3"),
         (Path("n.md"), 3, "task_anchor.depends: 'deadbeef' does not resolve to any anchor"),
         (Path("n.md"), 1, "task_anchor.depends: cycle: aaaa0001 -> aaaa0002 -> aaaa0001"),
     ]
@@ -203,8 +209,8 @@ def test_cross_check_record_ids_points_each_duplicate_at_the_others():
     reg = {"record_ids": {"abcd1234": [(Path("a.md"), 7), (Path("b.md"), 9)],
                          "unique00": [(Path("a.md"), 7)]}}
     assert list(L.cross_check_record_ids(reg)) == [
-        (Path("a.md"), 7, "record id 'abcd1234' duplicated at b.md:9"),
-        (Path("b.md"), 9, "record id 'abcd1234' duplicated at a.md:7"),
+        (Path("a.md"), 7, f"record id 'abcd1234' duplicated at {HERE / 'b.md'}:9"),
+        (Path("b.md"), 9, f"record id 'abcd1234' duplicated at {HERE / 'a.md'}:7"),
     ]
 
 

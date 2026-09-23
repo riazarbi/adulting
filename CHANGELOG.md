@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 5, part R5-A3: every path a command prints is absolute
+
+Round 3 made `tasks` print vault-relative paths, round 4 extended that to
+`lint`, and both were wrong for a reason already in the repo: a reader
+resolves a relative path against its own working directory, which is not the
+vault. In the agent's container the vault is a bind mount at `/vault` while
+the process runs in `/workspace`. Emitting relative paths from `search` once
+cost about 57 tool calls and a wrong answer.
+
+- **`vault.full(path)`** builds every path in output: `lint` violations and its "duplicated at" messages, `tasks` ingest failures, `tasks show`'s `source:` and `list --json`, `threads`/`people`/`notes` `created:`/`deleted:`/`already exists:`/`not found:`/`refusing to delete`, `buffer flush`'s log lines, the `path` field of `threads`/`people` `list --json` and `show --json`, and the errors naming a thread file to fix a `rate:` or `currency:` in.
+- **`vault.rel(path)` stays for identifiers and for matching** — thread refs, wikilink targets, and `lint`'s schema scope check, which used to re-implement it two screens away (**R5-C2**).
+- **The rule is written into the story** (`stories/2026-09-17-python-package-refactor.md`, "The path rule") with the container reason and the note that it has now been decided three times, so the next reader does not re-argue it.
+- **Verified on the vault copy:** `lint` prints the same eight violations as before, each named absolutely, and `tasks --dry-run` is unchanged. **851 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 5, parts R5-A1, R5-A2, R5-C3: one reader for the whole vault
 
 Round 4 fixed `search`'s own walks and the CHANGELOG claimed more than that.

@@ -532,8 +532,7 @@ def cmd_flush(args):
 
     if not args.quiet:
         for path, n in written_files:
-            rel = path.relative_to(V.vault_home())
-            print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {rel}")
+            print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {V.full(path)}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
         # Flush now so these lines come out ahead of anything the ingest
         # below writes to stderr: stdout is block-buffered when piped.

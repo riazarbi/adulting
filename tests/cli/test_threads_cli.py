@@ -38,7 +38,8 @@ def test_list_json_fields(threads_vault):
     rows = json.loads(threads_vault.run("list", "--json", cli="threads").stdout)
     assert rows[0] == {
         "kind": "project", "name": "SGB", "thread": "Projects/SGB",
-        "path": "threads/Projects/SGB.md", "status": "open",
+        "path": str(threads_vault.home / "threads" / "Projects" / "SGB.md"),
+        "status": "open",
         "category": "professional", "started": "2026-01-05", "ended": ""}
 
 
@@ -66,7 +67,8 @@ def test_show_prints_the_file(threads_vault):
 def test_show_json_resolves_every_reference_form(threads_vault, ref):
     r = threads_vault.run("show", ref, "--json", cli="threads")
     assert json.loads(r.stdout) == {
-        "kind": "project", "name": "SGB", "path": "threads/Projects/SGB.md",
+        "kind": "project", "name": "SGB",
+        "path": str(threads_vault.home / "threads" / "Projects" / "SGB.md"),
         "status": "open", "category": "professional", "started": "2026-01-05"}
 
 
@@ -91,7 +93,7 @@ def test_new_writes_the_file(vault):
     r = vault.run("new", *FLAGS, "--name", "AXA DORA", cli="threads")
     path = vault.home / "threads" / "Projects" / "AXA DORA.md"
     assert r.returncode == 0
-    assert r.stdout == "created: threads/Projects/AXA DORA.md\n"
+    assert r.stdout == f"created: {path}\n"
     assert path.read_text() == (
         f"---\nstatus: open\nkind: project\ncategory: professional\n"
         f"started: {date.today().isoformat()}\n---\n\n# AXA DORA\n")
@@ -134,7 +136,7 @@ def test_new_refuses_an_existing_thread(threads_vault):
     before = path.read_text()
     r = threads_vault.run("new", *FLAGS, "--name", "SGB", cli="threads")
     assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "threads: error: already exists: threads/Projects/SGB.md\n"
+    assert r.stderr == f"threads: error: already exists: {path}\n"
     assert path.read_text() == before
 
 
@@ -153,7 +155,7 @@ def test_new_error_messages(vault):
 def test_delete_with_yes(threads_vault):
     path = threads_vault.home / "threads" / "Topics" / "Old Idea.md"
     r = threads_vault.run("delete", "[[Topics/Old Idea]]", "-y", cli="threads")
-    assert (r.returncode, r.stdout) == (0, "deleted: threads/Topics/Old Idea.md\n")
+    assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")
     assert not path.exists()
 
 
@@ -183,7 +185,7 @@ def test_delete_without_yes_refuses_even_if_stdin_says_yes(threads_vault):
     path = threads_vault.home / "threads" / "Projects" / "SGB.md"
     r = threads_vault.run("delete", "SGB", input="y\n", cli="threads")
     assert r.returncode == 1
-    assert r.stderr == "threads: error: refusing to delete threads/Projects/SGB.md without -y\n"
+    assert r.stderr == f"threads: error: refusing to delete {path} without -y\n"
     assert path.exists()
 
 

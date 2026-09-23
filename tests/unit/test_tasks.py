@@ -86,9 +86,9 @@ def test_ingest_returns_what_it_did_and_prints_nothing(tasks_home, capsys):
     note.write_text('---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: (Riaz Arbi) Draft it\nACTION:  \n')
     ingested, failed = T.ingest()
     [(uuid, where, body, line)] = ingested
-    assert (where, body) == ("notes/2026-01-05-00-00-00.md:6", "Draft it")
+    assert (where, body) == (f"{note}:6", "Draft it")
     assert line == f"TASK: (Riaz Arbi) Draft it <!--{uuid} entry:{T.V.today()}-->  "
-    assert failed == [("notes/2026-01-05-00-00-00.md:7", ["missing description"])]
+    assert failed == [(f"{note}:7", ["missing description"])]
     assert note.read_text().split("\n")[5] == line
     assert capsys.readouterr() == ("", "")
 

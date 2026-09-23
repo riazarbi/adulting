@@ -36,7 +36,7 @@ def cmd_new(args):
     # Asking the filesystem is right here: on macOS `sgb` would overwrite
     # `SGB`, so a name taken in any case is taken.
     if path.exists():
-        V.die(f"already exists: {V.rel(path)}")
+        V.die(f"already exists: {V.full(path)}")
     billing = ''
     if currency:
         billing += f"currency: {currency}\n"
@@ -47,16 +47,16 @@ def cmd_new(args):
         f"started: {V.today()}\n{billing}---\n\n# {name}\n",
         encoding='utf-8',
     )
-    print(f"created: {V.rel(path)}")
+    print(f"created: {V.full(path)}")
     return 0
 
 
 def cmd_delete(args):
     kind, name, path = V.resolve_target(args.thread)
     if not args.yes:
-        V.die(f"refusing to delete {V.rel(path)} without -y")
+        V.die(f"refusing to delete {V.full(path)} without -y")
     path.unlink()
-    print(f"deleted: {V.rel(path)}")
+    print(f"deleted: {V.full(path)}")
     return 0
 
 

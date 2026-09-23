@@ -81,7 +81,7 @@ def cmd_show(args):
 
 def main():
     parser = V.command_parser('threads', "Manage thread files.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('list', help="List thread files (open by default).")
     p.add_argument('query', nargs='?', default=None,

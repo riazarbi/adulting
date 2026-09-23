@@ -510,7 +510,7 @@ def cmd_stream(args):
 def main():
     parser = V.command_parser(
         'search', "Search notes and logs, and summarise thread activity.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
     p.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")

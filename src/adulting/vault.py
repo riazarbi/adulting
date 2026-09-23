@@ -35,27 +35,65 @@ def vault_home():
 _program = None
 
 
+class HelpJsonAction(argparse.Action):
+    """`--help-json`: print this parser's manifest and stop.
+
+    An action rather than a flag the command reads afterwards, for two
+    reasons. Argparse decides what is a flag and what is data, so after `--`
+    or as another flag's value the word stays data and the command writes the
+    record. And the action is handed the parser it was parsed by, so a
+    subcommand prints its own manifest.
+    """
+
+    def __init__(self, option_strings, dest, **options):
+        super().__init__(option_strings, dest, nargs=0,
+                         default=argparse.SUPPRESS, **options)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        # `prog` is "tasks" at the top level and "tasks list" below it; the
+        # manifest names the subcommand as the tree above it does.
+        print(json.dumps(helpjson.parser_to_dict(parser, name=parser.prog.split()[-1]),
+                         indent=2))
+        parser.exit(0)
+
+
+def add_help_json(parser):
+    parser.add_argument('--help-json', action=HelpJsonAction,
+                        help="Print this command's arguments as JSON, and exit.")
+
+
 def command_parser(prog, description, **options):
     """The argument parser for a command. Its name is also the one errors
     and warnings start with, however the command was started."""
     global _program
     _program = prog
     parser = argparse.ArgumentParser(prog=prog, description=description, **options)
-    # A real flag, so argparse decides what is a flag and what is data: as a
-    # value (`--topic --help-json`) or after `--`, it is the data it looks
-    # like, and the command writes the record.
-    parser.add_argument('--help-json', action='store_true',
-                        help="Print this command's arguments as JSON, and exit.")
+    add_help_json(parser)
     return parser
 
 
+class Subcommands:
+    """A command's subcommand table. Every subcommand answers `--help-json`
+    too, so `tasks list --help-json` describes `list`."""
+
+    def __init__(self, parser, dest='subcommand'):
+        self._sub = parser.add_subparsers(dest=dest)
+
+    def add_parser(self, name, **options):
+        # A subcommand's one-line help is its description too, so asking the
+        # subcommand itself — `tasks list --help-json`, `tasks list --help` —
+        # says what it does, as the whole-command manifest already did.
+        options.setdefault('description', options.get('help', ''))
+        parser = self._sub.add_parser(name, **options)
+        add_help_json(parser)
+        return parser
+
+
 def parse_command(parser, subcommand_required=True):
-    """A command's arguments: print the JSON manifest and stop if asked,
-    check the vault, and require a subcommand unless told otherwise."""
+    """A command's arguments: check the vault, and require a subcommand
+    unless told otherwise. `--help-json` has already printed and exited by
+    the time this is reached."""
     args = parser.parse_args()
-    if args.help_json:
-        print(json.dumps(helpjson.parser_to_dict(parser), indent=2))
-        raise SystemExit(0)
     require_vault()
     if subcommand_required and getattr(args, 'subcommand', '') is None:
         parser.error('the following arguments are required: subcommand')

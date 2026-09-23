@@ -242,7 +242,7 @@ def main():
             "`review` is read-only and truncates long diffs (see its --max-*\n"
             "flags). `save` can only ever add a commit — it never amends,\n"
             "rebases, resets, or pushes."))
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser(
         'review',

@@ -2,6 +2,14 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 4, parts R4-A4 and R4-C6: flags that lied about what they do
+
+- **R4-A4: `tasks --dry-run done <uuid>` wrote to disk.** The flag is top-level so that bare `tasks --dry-run` works, and argparse took it before any subcommand, where it did nothing — the anchor flipped to `DONE:` and nothing said otherwise. Round 3 made this worse by removing the "(default invocation only)" caveat from the help. `tasks` now refuses the flag rather than ignoring it: `tasks: error: --dry-run applies to ingest only, not to 'done'`, exit 2, nothing written. `tasks ingest --dry-run`, `tasks --dry-run ingest` and bare `tasks --dry-run` are unaffected.
+- **R4-C6: `tasks list --help-json` exited 2.** Making `--help-json` a real flag in round 3 put it on the top-level parser only. It is an argparse **action** now, so it is handed the parser that parsed it and every subcommand answers with its own manifest. Argparse still decides what is data: after `--`, or as another flag's value, `--help-json` is written as the record it looks like.
+- **A subcommand's one-line help is now its description**, so `tasks list --help-json` and `tasks list --help` say what the subcommand does. The whole-command manifest is unchanged — it already filled that in from `add_parser(help=…)`.
+- `helpjson` decides `takes_value` from `nargs == 0` rather than by naming two argparse classes, so a custom action is described correctly.
+- **Verified on the vault copy:** `tasks list`, `tasks --dry-run` and `hours report` print byte-identical output. **775 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 4, parts R4-A1 and R4-A3: files a walker cannot read, and a vault behind a symlink
 
 Both are collateral from round 3, and both were reproduced before being fixed.

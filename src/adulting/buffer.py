@@ -560,7 +560,7 @@ def main():
     parser = V.command_parser(
         'buffer', "Buffer queue operations: capture, regroup, validate, flush.")
     parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
     p.add_argument('text', help="The raw text to capture.")

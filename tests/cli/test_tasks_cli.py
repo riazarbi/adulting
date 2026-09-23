@@ -169,6 +169,19 @@ def test_ingest_is_also_a_named_subcommand(inbox):
     assert quiet.stdout == ""
 
 
+@pytest.mark.parametrize("flag", ["--dry-run", "--quiet"])
+def test_the_ingest_flags_are_refused_on_another_subcommand(board, flag):
+    """`tasks --dry-run done <uuid>` used to flip the anchor to DONE: on disk
+    and say nothing. A flag that quietly does nothing is worse than one that
+    errors, so it is refused."""
+    before = board.read("logs/Topics/zeta/2026-09-13.md")
+    r = board.run(flag, "done", "bbbb0001", cli="tasks")
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.endswith(
+        f"tasks: error: {flag} applies to ingest only, not to 'done'\n")
+    assert board.read("logs/Topics/zeta/2026-09-13.md") == before
+
+
 def test_ingest_idempotent(vault):
     """Re-running ingest on a vault with no ACTION lines is a no-op."""
     setup_vault(vault)

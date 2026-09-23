@@ -564,7 +564,7 @@ def main():
         'tasks', "Bridge ACTION lines into source TASK anchors; "
                     "expose anchor mutations as subcommands.")
     add_ingest_flags(parser)
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('ingest',
         help="Turn ACTION: lines into TASK anchors — what bare `tasks` does.")
@@ -649,6 +649,15 @@ def main():
     p.set_defaults(func=cmd_show)
 
     args = V.parse_command(parser, subcommand_required=False)
+    # The ingest flags are top-level so that bare `tasks --dry-run` works, and
+    # argparse would take them before any subcommand. They do nothing there,
+    # and a flag that silently does nothing is worse than one that errors:
+    # `tasks --dry-run done <uuid>` used to flip the anchor and say nothing.
+    if args.subcommand not in (None, 'ingest'):
+        for flag, name in (('dry_run', '--dry-run'), ('quiet', '--quiet')):
+            if getattr(args, flag, False):
+                parser.error(f"{name} applies to ingest only, "
+                             f"not to {args.subcommand!r}")
     if args.subcommand is None:
         return cmd_ingest(args)
     return args.func(args)

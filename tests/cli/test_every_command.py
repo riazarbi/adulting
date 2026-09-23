@@ -145,3 +145,15 @@ def test_depends_help_says_a_whole_uuid(vault, cli, subcommand):
     [sub] = [s for s in manifest["subcommands"] if s["name"] == subcommand]
     [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
     assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."
+
+
+@pytest.mark.parametrize("cli, subcommand", [("tasks", "list"), ("hours", "log"),
+                                             ("buffer", "add-text"), ("notes", "new")])
+def test_a_subcommand_answers_help_json_too(vault, cli, subcommand):
+    """Making --help-json a real flag put it on the top-level parser only, so
+    `tasks list --help-json` started exiting 2. It is on every subcommand."""
+    r = vault.run(subcommand, "--help-json", cli=cli)
+    assert (r.returncode, r.stderr) == (0, "")
+    manifest = json.loads(r.stdout)
+    assert manifest["name"] == subcommand
+    assert "--help-json" in [f["name"] for f in manifest["flags"]]

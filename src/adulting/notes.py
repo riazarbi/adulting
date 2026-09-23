@@ -260,7 +260,7 @@ def cmd_render(args):
 def main():
     parser = V.command_parser(
         'notes', "Create, list, print, copy and delete notes, named by stem.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('new', help="Create a note and print its path.")
     p.add_argument('--type', required=True, choices=NOTE_TYPES, help="Kind of note.")

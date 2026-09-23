@@ -67,7 +67,8 @@ def test_flag_shaped_message_in_separated_form_is_refused(gitvault):
 
     r = gitvault.run("save", "--message", "--amend", cli="commit")
     assert (r.returncode, r.stdout) == (2, "")
-    assert r.stderr == ("usage: commit save [-h] --message MESSAGE [--body BODY] [--dry-run]\n"
+    assert r.stderr == ("usage: commit save [-h] [--help-json] --message MESSAGE [--body BODY]\n"
+                        "                   [--dry-run]\n"
                         "commit save: error: argument --message: expected one argument\n")
     assert len(log_subjects(gitvault)) == before_count
     assert git(gitvault, "diff", "--cached", "--name-only") == ""

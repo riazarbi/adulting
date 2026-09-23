@@ -318,7 +318,7 @@ def cmd_statement(args):
 def main():
     parser = V.command_parser(
         'payments', "Record money received against threads.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('log', help="Record a receipt.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")

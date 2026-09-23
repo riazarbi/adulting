@@ -32,10 +32,9 @@ def _action_to_flag(action):
     }
     if action.choices:
         out["choices"] = list(action.choices)
-    if isinstance(action, argparse._StoreTrueAction) or isinstance(action, argparse._StoreFalseAction):
-        out["takes_value"] = False
-    else:
-        out["takes_value"] = True
+    # nargs == 0 covers both the store_true/false flags and any custom
+    # action that takes no value, such as --help-json.
+    out["takes_value"] = action.nargs != 0
     if action.required:
         out["required"] = True
     return out

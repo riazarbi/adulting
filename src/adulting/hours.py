@@ -284,7 +284,7 @@ def cmd_edit(args):
 def main():
     parser = V.command_parser(
         'hours', "Track consulting hours in the adulting vault.")
-    sub = parser.add_subparsers(dest='subcommand')
+    sub = V.Subcommands(parser)
 
     p = sub.add_parser('log', help="Append an entry.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")

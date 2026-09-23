@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 5, part R5-B1: MANUAL.md regenerated, and the gate that checks it is itself checked
+
+- **The manual is regenerated** (owner ran `dev/ci manual`) and the gate passes. `buffer suggest`, the `notes` picker subcommands (`edit`, `nano`, `strip`), `hours log --all` and `payments log --all` are gone from it; `tasks ingest`, `notes list` and the three `--json` flags are in it.
+- **The gate only knew one way to write a heading.** The regenerated manual writes `### tasks`, the previous one `### `tasks``, so every command came back as "no section" and the real comparison never ran. Both spellings are read now — how the heading is written is the manual writer's choice.
+- **R5-B4: a flag is matched by name, not by substring.** `--json` was satisfied by `--json-lines`, which would leave the flag it is about undocumented while naming one that exists.
+- **R5-B1: the gate is gated.** `problems()` and `main()` never ran in a test, so either comparison could be deleted with a green suite. There are tests for all of it now: the empty case, every kind of drift, the `--json-lines` case, and `main` both ways. Checked by disabling each comparison in turn and watching a test fail.
+- `tests/dev/test_manual_check.py` loads the script as a module rather than with `runpy`, so a test can replace `manifest()` and drive the comparison from a stub instead of the real CLI.
+- **787 passing, `dev/ci` green — manual gate included.**
+
 ## 2026-09-23 - review round 4, part R4-C1: one path format, finished
 
 Round 3 settled on vault-relative paths for the commands that walk the vault

@@ -74,12 +74,14 @@ def real_names(m):
 
 
 def sections(manual_text):
-    """{command: its section's text}, from the `### \\`name\\`` headings.
+    """{command: its section's text}, from the per-command headings.
 
-    A section ends at the next heading of any level, so the last command does
+    The backticks are optional: how the heading is written is the manual
+    writer's choice and has changed between generations of the manual. A
+    section ends at the next heading of any level, so the last command does
     not swallow the chapters that follow it.
     """
-    parts = re.split(r'^### `([a-z]+)`$', manual_text, flags=re.M)
+    parts = re.split(r'^### `?([a-z]+)`?$', manual_text, flags=re.M)
     out = {}
     for i in range(1, len(parts), 2):
         body = re.split(r'^#{1,3} ', parts[i + 1], maxsplit=1, flags=re.M)[0]
@@ -113,6 +115,13 @@ def claimed_names(text):
     return subs, flags - EXEMPT_FLAGS
 
 
+def names(flag, text):
+    """Whether the text names this flag, whole. `--json` is not documented
+    by `--json-lines`: that would leave the flag it is about undocumented
+    while naming one that exists."""
+    return re.search(rf'(?<![\w-]){re.escape(flag)}(?![\w-])', text) is not None
+
+
 def problems(tool, text):
     subs, flags = real_names(manifest(tool))
     said_subs, said_flags = claimed_names(text)
@@ -125,7 +134,7 @@ def problems(tool, text):
     for name in sorted(said_flags - every_spelling):
         out.append(f"documents the flag `{name}`, which does not exist")
     for spelt in sorted(flags):
-        if not any(s in text for s in spelt):
+        if not any(names(s, text) for s in spelt):
             out.append(f"does not document the flag `{spelt[0]}`")
     return sorted(out)
 

@@ -1380,3 +1380,159 @@ fixed, and each fix is defended by a test that fails when the fix is undone.
 - R4-B's "weak tests worth tightening" (about 15 of 781).
 - R4-C2, C3, C4, C5, C7, C8 — cleanup, for `main`.
 - The deferred bugs, and the merge itself.
+
+---
+---
+
+# Round 5: finish round 4, then merge
+
+Branch `refactor2` at `0a09845`. Reviewed 2026-09-23.
+
+## Round 4: most of it is done
+
+Verified independently: 781 tests pass, 97% coverage, every `dev/ci` gate
+green except the new manual gate, which is red on purpose and whose output is
+specific and useful.
+
+**Done and defended by a test that fails when the fix is undone:** A1 (the
+symlinked vault, reproduced both ways), A4 (the ingest flags, with no
+legitimate usage broken), A2 (the gate reports a flag added just to see
+whether it would), C6 (`--help-json` on all 74 subcommands), and B1-B3 (all
+three previously unfalsifiable tests now fail for the right reason).
+
+**The two judgement calls stand**, with one correction each:
+
+- Refusing the ingest flags rather than scoping them is right.
+- Keeping `search` quiet **for the agent** is right, but the precedent is
+  overstated: `notes.py:100` warns when `sys.stderr.isatty()`. See R5-A2.
+
+The owner has decided two things this round; they are not open questions:
+
+1. **`lint` goes back to absolute paths** (R5-A3).
+2. **`search` adopts the `notes` pattern** — silent for the agent, a warning
+   for a human (R5-A2).
+
+| Part | What | Estimate |
+|---|---|---|
+| R5-A | Finish round 4 | ~2 hours |
+| R5-B | Test the gate, and the skip | ~1 hour |
+| R5-C | Cleanup carried forward | ~2 hours |
+
+**Merge after R5-A and the manual regeneration.** R5-B and R5-C can follow on
+main.
+
+## R5-A. Finish round 4
+
+### R5-A1. The UTF-8 fix reached `search` only
+
+- **Reproduced** with one bad-bytes file in `notes/`: `search notes` is clean,
+  but **`notes list` dies with a raw `UnicodeDecodeError` traceback**. So do
+  `hours list`, `hours report`, `threads list`, `people list`, `search stream`
+  and `search activity`.
+- **Where:** `notes.py:61`, `vault.py:326` (`file_summary`), `vault.py:699`
+  (`find_record`) and `vault.py:707` (`load_all`) still call `read_text`
+  directly. `V.read_utf8` exists and is not used there.
+- **The CHANGELOG says otherwise** — it claims the fix covers "notes, logs,
+  threads, people and the buffer" and that `search stream` is byte-identical.
+  Correct the entry along with the code.
+- **Fix:** route every vault read through `V.read_utf8`. `grep -rn
+  'read_text' src/adulting/` should find only that one helper.
+- **Test:** one parametrised test that puts a bad file in each store and
+  asserts every listing command still succeeds, with the good rows intact.
+
+### R5-A2. `search` warns a human, like `notes` already does
+
+Adopt `notes.py:100`'s pattern exactly: skip the file, and warn on stderr only
+when `sys.stderr.isatty()`. The agent's stdout stays clean, and a person
+running `search` by hand is told a file was dropped. Pin both halves, as the
+notes tests do.
+
+### R5-A3. `lint` goes back to absolute paths
+
+The round 4 concession was wrong, and the evidence was already in the repo:
+`tests/cli/test_search_cli.py:445-449` records that in the agent's container
+the vault is mounted at `/vault` while the process runs in `/workspace`, so a
+vault-relative path resolves to nothing — "emitting relative paths once cost
+~57 tool calls and a wrong answer".
+
+**The rule to apply, so this stops oscillating:**
+
+- **A path the reader is expected to open** — a lint violation, an ingest
+  failure, an error naming the file to fix — is **absolute**.
+- **A path that is an identifier in a listing** — `tasks list`, `notes list`,
+  `search` rows — stays **vault-relative**.
+
+So: revert `lint` to absolute, and make `tasks ingest`'s failure lines
+absolute to match, which is the pair that started this. Keep `V.rel` for the
+listings. Write the rule into the story next to `V.rel`, with the container
+reason, so the next reviewer does not re-argue it.
+
+Also: `V.rel`'s docstring says a path outside the vault keeps its own name, but
+`lint.py:725` resolves its arguments first, so `lint /tmp/x.md` prints
+`/private/tmp/x.md`. Make the docstring match, or stop resolving.
+
+### R5-A4. Regenerate the manual (owner step)
+
+`dev/ci manual` needs `claude`. The gate is red for real reasons, and it found
+more than round 4 knew about: the entire `notes` section still describes the
+pre-port interactive picker (`edit`, `nano`, `strip`, "an agent must never
+call them"), `hours`/`payments` `--all`, `buffer suggest`, the missing
+`tasks ingest`, `notes list`, and the three `--json` flags.
+
+## R5-B. Test the gate, and the skip
+
+1. **The manual gate can be switched off silently.** `dev/manual-check`'s
+   parsing helpers are tested, but `problems()` and `main()` never run in a
+   test. Deleting the flag comparison, or the subcommand comparison, leaves the
+   suite green — the gate that catches drift is not itself gated. Feed a
+   hand-written manual and a stub manifest through `problems()` and assert the
+   exact message list, including the empty case.
+2. **The `search` UTF-8 test only proves "no crash".** Making `search` read the
+   junk with replacement characters still passes it. Assert the result rows:
+   the good note present, the bad file absent. Drop the
+   `"Traceback" not in stderr` line that sits next to `stderr == ""`.
+3. **`dev/ci`'s help-json contract still only calls each command at top
+   level** (`dev/ci:130-131`), so C6's real guarantee rests on 4 sampled
+   subcommands in `test_every_command.py:151`. Drive that test off each
+   command's own top-level manifest, so a new subcommand is covered the day it
+   is added.
+4. **`manual-check` counts a flag as documented if its spelling appears
+   anywhere in the section's prose** (`dev/manual-check:131`), so `--json` is
+   satisfied by `--json-lines`. Compare whole names.
+5. **The five weak tests from R4-B are still open**, as the round 4 record
+   says: `unit/test_helpjson.py:70`, `cli/test_commit_cli.py:345`,
+   `cli/test_tasks_cli.py:591`, `cli/test_search_cli.py:452/476`,
+   `cli/test_notes_cli.py:80`. Add two more found since:
+   `tests/dev/test_manual_check.py:111` (`isinstance(x, set)` can never fail)
+   and `cli/test_lint_cli.py:715` (strips the path prefix before comparing, so
+   it does not pin what a symlinked vault prints — which R5-A3 changes).
+
+## R5-C. Cleanup carried forward
+
+R4-C2 to C5, C7 and C8 were deferred to main; they still stand. New since:
+
+1. **Dead fallback in `helpjson.py:60, 63-64`.** `Subcommands.add_parser` now
+   sets `description` from `help`, so the `help_map` fallback can never fire
+   for any of the ten commands. It is still tested, which makes it dead but
+   green.
+2. **The scope check is written twice.** `lint.py:322` re-implements what
+   `V.rel` (`vault.py:339`) now does, two screens apart. One should call the
+   other.
+3. **`tasks` counts a skipped file as a failed action** — "2 action(s) NOT
+   ingested" for 1 action and 1 unreadable file (`tasks.py:249-251`).
+   Pre-existing, not a round 4 regression.
+4. **`ACTION: () do x` still loses the `()`** on ingest while `buffer
+   add-action` keeps it (R4-C5, `vault.py:702`).
+
+## Round 5 done means
+
+- [ ] `grep -rn 'read_text' src/adulting/` finds only `V.read_utf8`, and a bad
+      file in any store leaves every listing command working.
+- [ ] `search` warns on a terminal and says nothing to a pipe, like `notes`.
+- [ ] `lint` and `tasks ingest` both print absolute paths for a violation;
+      listings stay vault-relative; the rule and its container reason are
+      written down.
+- [ ] Deleting `dev/manual-check`'s flag or subcommand comparison fails a test.
+- [ ] Making `search` read a non-UTF-8 file instead of skipping it fails a
+      test.
+- [ ] `dev/ci` is green, manual gate included.

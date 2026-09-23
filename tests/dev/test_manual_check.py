@@ -8,17 +8,29 @@ committed manual is in.
 
 from __future__ import annotations
 
-import runpy
+import importlib.util
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-CHECK = runpy.run_path(str(REPO / "dev" / "manual-check"))
 
-sections = CHECK["sections"]
-claimed_names = CHECK["claimed_names"]
-real_names = CHECK["real_names"]
-spellings = CHECK["spellings"]
+
+def load(path):
+    """Import a dev script that has no .py suffix, as a module, so a test can
+    replace one of its functions."""
+    spec = importlib.util.spec_from_loader(
+        "manual_check", importlib.machinery.SourceFileLoader("manual_check", str(path)))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CHECK = load(REPO / "dev" / "manual-check")
+
+sections = CHECK.sections
+claimed_names = CHECK.claimed_names
+real_names = CHECK.real_names
+spellings = CHECK.spellings
 
 MANUAL = """# Manual
 
@@ -108,14 +120,101 @@ def test_a_flags_spellings_are_one_flag():
     assert flags == [("--minutes", "-m")]
 
 
-def test_the_real_manual_is_read_without_error():
-    """Whatever the manual currently says, reading it must not blow up: the
-    gate has to report drift, not crash on it."""
+def test_a_heading_is_found_with_or_without_backticks():
+    """How the heading is written is the manual writer's choice, and it
+    changed between two generations of the manual. A gate that only knows one
+    spelling reports every command as missing and says nothing about drift."""
+    plain = MANUAL.replace("### `tasks`", "### tasks").replace("### `lint`", "### lint")
+    assert sorted(sections(plain)) == ["lint", "tasks"]
+    assert sections(plain)["tasks"] == sections(MANUAL)["tasks"]
+
+
+def test_the_real_manual_has_a_section_for_every_command():
     found = sections((REPO / "MANUAL.md").read_text(encoding="utf-8"))
     sys.path.insert(0, str(REPO / "dev"))
     from commands import COMMANDS
 
     assert set(COMMANDS) <= set(found)
-    for command in COMMANDS:
-        subs, flags = claimed_names(found[command])
-        assert isinstance(subs, set) and isinstance(flags, set)
+    # Each section is the command's own, not the whole rest of the manual.
+    assert "Everyday procedures" not in found[COMMANDS[-1]]
+
+
+# ---------- the comparison itself ----------
+
+TASKS = {
+    "name": "tasks",
+    "flags": [{"name": "--help-json"}, {"name": "--dry-run"}],
+    "subcommands": [
+        {"name": "list", "flags": [{"name": "--priority"}, {"name": "--json"}]},
+        {"name": "ingest", "flags": []},
+    ],
+}
+
+
+def problems(monkeypatch, manifest=TASKS, text=None):
+    monkeypatch.setattr(CHECK, "manifest", lambda tool: manifest)
+    return CHECK.problems("tasks", sections(MANUAL)["tasks"] if text is None else text)
+
+
+def test_a_manual_that_matches_the_cli_has_no_problems(monkeypatch):
+    """The empty case: without it, a comparison that always reports
+    something would still look like it was working."""
+    manifest = {
+        "name": "tasks",
+        "flags": [{"name": "--help-json"}, {"name": "--dry-run"}],
+        "subcommands": [{"name": "list", "flags": [{"name": "--priority"}]},
+                        {"name": "suggest", "flags": []}],
+    }
+    assert problems(monkeypatch, manifest) == []
+
+
+def test_every_kind_of_drift_is_reported(monkeypatch):
+    """A subcommand or flag in the manual that the CLI does not have, and one
+    the CLI has that the manual does not. Deleting either comparison from
+    `problems()` drops lines from this list."""
+    assert problems(monkeypatch) == [
+        "documents `tasks suggest`, which does not exist",
+        "does not document the flag `--json`",
+        "does not document the subcommand `ingest`",
+    ]
+
+
+def test_a_flag_is_not_documented_by_a_longer_flag_that_starts_with_it(monkeypatch):
+    """`--json` is not documented by `--json-lines`: the manual would name a
+    flag that exists while leaving the one it is about undocumented."""
+    text = ("**Subcommands**\n\n| Subcommand | What |\n|---|---|\n"
+            "| `list` | List them. |\n| `ingest` | Ingest. |\n\n"
+            "**Options**\n\n| Option | Effect |\n|---|---|\n"
+            "| `--dry-run` | Write nothing. |\n"
+            "| `list --priority H` | Filter. |\n"
+            "| `list --json-lines` | One object per line. |\n")
+    assert problems(monkeypatch, text=text) == [
+        "documents the flag `--json-lines`, which does not exist",
+        "does not document the flag `--json`",
+    ]
+
+
+def test_main_reports_a_stale_manual_and_exits_1(monkeypatch, tmp_path, capsys):
+    """`main` is what `dev/ci` runs: it has to return non-zero and name the
+    command whose section is missing."""
+    manual = tmp_path / "MANUAL.md"
+    manual.write_text("# Manual\n\n### `tasks`\n\nNothing here.\n", encoding="utf-8")
+    monkeypatch.setattr(CHECK, "manifest", lambda tool: TASKS)
+    monkeypatch.setattr(sys, "argv", ["manual-check", "--manual", str(manual)])
+    assert CHECK.main() == 1
+    out = capsys.readouterr().out
+    assert "notes: no `### `notes`` section in the manual" in out
+    assert "tasks: does not document the subcommand `list`" in out
+    assert "Regenerate it with `dev/ci manual`" in out
+
+
+def test_main_is_quiet_and_exits_0_when_nothing_has_drifted(monkeypatch, tmp_path, capsys):
+    empty = {"name": "x", "flags": [{"name": "--help-json"}]}
+    manual = tmp_path / "MANUAL.md"
+    manual.write_text("# Manual\n\n" + "".join(
+        f"### `{c}`\n\nNothing to document.\n\n" for c in CHECK.COMMANDS),
+        encoding="utf-8")
+    monkeypatch.setattr(CHECK, "manifest", lambda tool: empty)
+    monkeypatch.setattr(sys, "argv", ["manual-check", "--manual", str(manual)])
+    assert CHECK.main() == 0
+    assert capsys.readouterr().out == ""

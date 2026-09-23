@@ -18,7 +18,7 @@ SURFACE = {
     "people": (["--help-json"], ["list", "show", "new", "delete"]),
     "hours": (["--help-json"], ["log", "list", "report", "show", "edit", "rm"]),
     "payments": (["--help-json"], ["log", "list", "statement", "show", "edit", "rm"]),
-    "buffer": (["--help-json", "--quiet"], ["add", "suggest", "add-text", "add-ref", "add-action",
+    "buffer": (["--help-json", "--quiet"], ["add", "add-text", "add-ref", "add-action",
                              "list", "rm", "tend", "flush"]),
     "lint": (["--help-json", "--schemas", "--quiet"], []),
     "commit": (["--help-json"], ["review", "save"]),
@@ -77,16 +77,6 @@ def test_errors_name_the_command_even_under_python_m(vault, tmp_path, cli):
     assert r.returncode == 1
     assert r.stderr == f"{cli}: error: ADULTING_HOME is not a directory: {tmp_path / 'missing'}\n"
 
-
-def test_the_suggester_reports_a_bad_date_instead_of_a_traceback(vault):
-    r = subprocess.run([sys.executable, "-m", "adulting.suggester", "call mum", "--today", "5 Aug"],
-                       capture_output=True, text=True, env=vault.env)
-    assert (r.returncode, r.stdout) == (1, "")
-    assert r.stderr == "suggester: error: bad --today '5 Aug'; expected YYYY-MM-DD\n"
-    r = subprocess.run([sys.executable, "-m", "adulting.suggester", "asdf"],
-                       capture_output=True, text=True, env=vault.env)
-    assert (r.returncode, r.stderr) == (0, "")
-    assert json.loads(r.stdout)["subcmd"] == "add"
 
 
 @pytest.mark.parametrize("cli, argv", [

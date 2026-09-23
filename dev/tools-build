@@ -39,11 +39,6 @@ REPO = Path(__file__).resolve().parent.parent
 HARVEST = REPO / 'dev' / 'manual-harvest'
 PROMPT = REPO / 'dev' / 'tools-prompt.md'
 
-# Fields the agent's loader accepts. It calls DisallowUnknownFields, so
-# anything else here is a hard load error on the agent side.
-ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
-                  'prepend_args', 'forbidden_args', 'allow_user_args'}
-
 API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
 
 # Safety policy. Deliberately hand-maintained: these fields are the blast
@@ -56,13 +51,9 @@ API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
 #                   the same word used as a filter, which is an acceptable
 #                   trade for not letting an agent delete a note.
 POLICY = {
-    # Interactive paths that CANNOT be expressed here, because forbidden_args
-    # matches an argv element and these turn on an argument being *absent*:
-    #   hours log / payments log  with no thread -> interactive capture
-    #   threads new / people new  with fields missing -> prompts per field
-    # All four are needed non-interactively, so blocking the subcommand would
-    # remove the capability. They fail cleanly on EOF ("aborted"), and the
-    # generated descriptions state the requirement instead.
+    # No command prompts: a missing argument is an argparse usage error, and
+    # tests/cli/test_no_prompts.py runs every create and delete command on a
+    # terminal to prove it. So the only blocks here are destructive ones.
     'tasks': {},
     # notes no longer prompts or opens applications: a note is named by its
     # stem and every subcommand runs from flags, so the agent can use them.
@@ -78,9 +69,7 @@ POLICY = {
     # enough to be worth doing by hand.
     'hours': {'forbidden_args': ['rm']},
     'payments': {'forbidden_args': ['rm']},
-    # suggest prompts for accept/reject unless -y is passed. Nothing routes
-    # through it, so block it rather than rely on the flag being remembered.
-    'buffer': {'forbidden_args': ['suggest']},
+    'buffer': {},
     'lint': {'read_only': True},
     'commit': {},
 }

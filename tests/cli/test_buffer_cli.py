@@ -1,9 +1,5 @@
-"""Tests for the `buffer` CLI (refactor unit 8).
-
-The first sections characterise behaviour kept from the pre-port script and
-were run green against it. The last section specifies the removal of the
-`suggest` prompt and was written to fail against the old script.
-"""
+"""The `buffer` command: capture entries, regroup and check them, and flush
+them into the daily logs."""
 
 import json
 import re
@@ -284,35 +280,6 @@ def test_flush_empty_and_quiet(buffer_vault):
     # DEFERRED BUG 6: --quiet silences flush but not the task ingest it runs.
     assert r.stdout == "Ingested: 0.  Failed: 0.\n"
     assert "TEXT: quiet" in buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
-
-
-# ---------- suggest ----------
-
-def test_suggest_with_yes_runs_the_suggestion(buffer_vault):
-    r = buffer_vault.run("suggest", "Draft the SGB scope note by 2026-09-30", "-y", cli="buffer")
-    assert r.returncode == 0
-    lines = r.stdout.splitlines()
-    assert lines[:2] == ["suggested:",
-                         "  buffer add-action Projects/SGB 'Draft the SGB scope note' --due 2026-09-30"]
-    assert re.fullmatch(rf"buffered: - \[\[Projects/SGB\]\] ACTION: Draft the SGB scope note "
-                        rf"<!--{TS} due:2026-09-30-->", lines[2])
-
-
-def test_suggest_without_a_structured_suggestion_stores_unknown(buffer_vault):
-    r = buffer_vault.run("suggest", "zzzz qqqq", "-y", cli="buffer")
-    lines = r.stdout.splitlines()
-    assert lines[0] == "no structured suggestion; storing as UNKNOWN."
-    assert re.fullmatch(rf"buffered: - UNKNOWN: zzzz qqqq <!--{TS}-->", lines[1])
-    assert buffer_vault.run("--quiet", "suggest", "zzzz qqqq", cli="buffer").stdout.startswith("buffered: - UNKNOWN")
-
-
-def test_suggest_without_yes_and_without_a_terminal_stores_unknown(buffer_vault):
-    r = buffer_vault.run("suggest", "Draft the SGB scope note by 2026-09-30", cli="buffer")
-    lines = r.stdout.splitlines()
-    assert lines[1] == "  buffer add-action Projects/SGB 'Draft the SGB scope note' --due 2026-09-30"
-    assert "storing as UNKNOWN." in lines[2]
-    assert "- UNKNOWN: Draft the SGB scope note by 2026-09-30" in buffer_text(buffer_vault)
-    assert "ACTION" not in buffer_text(buffer_vault)
 
 
 # ---------- no interactivity (fails against the pre-port script) ----------

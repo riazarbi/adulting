@@ -93,13 +93,6 @@ def test_edit_changes_the_record_without_asking(one_of_each, cli, argv, printed)
     assert re.fullmatch(printed.format(id=rid), r.stdout)
 
 
-def test_suggest_stores_unknown_on_a_terminal_without_asking(one_of_each):
-    r = one_of_each.run_on_a_terminal("suggest", "Draft the SGB scope note", cli="buffer")
-    assert r.returncode == 0
-    assert "not accepted (pass -y to accept); storing as UNKNOWN." in r.stdout.splitlines()
-    assert re.fullmatch(r"- UNKNOWN: Draft the SGB scope note <!--[0-9T:-]+-->",
-                        one_of_each.lines("buffer.md")[-2])
-
 
 @pytest.mark.parametrize("argv", [["notes"], ["logs"], ["activity"], ["overview", "SGB"], ["stream"]])
 def test_search_completes_on_a_terminal(one_of_each, argv):

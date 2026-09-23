@@ -31,7 +31,6 @@ Subcommands:
     add-text   <thread> <text>
     add-ref    <thread> <target> [<summary>]
     add-action <thread> <text>          (also reachable as `tasks add`)
-    suggest    <text> [-y]               (rules suggester; -y runs it, else UNKNOWN)
     list       [<grep>]
     rm         <line-number>
     tend                                 (regroup + validate; idempotent)
@@ -43,12 +42,10 @@ and individual entries are added/removed via the API.
 """
 
 import re
-import shlex
 import sys
 from datetime import datetime
 
 from adulting import vault as V
-from adulting.suggester import suggest
 
 
 def buffer_file():
@@ -545,61 +542,6 @@ def cmd_flush(args):
     return 0
 
 
-# ---------- subcommand: suggest ----------
-
-def format_suggestion(proposal):
-    """Render a proposal dict as the shell command a user would type."""
-    sub = proposal['subcmd']
-    if sub == 'add':
-        return f"buffer add {shlex.quote(proposal['body'])}"
-    if sub == 'add-text':
-        return f"buffer add-text {shlex.quote(proposal['thread'])} {shlex.quote(proposal['body'])}"
-    if sub == 'add-action':
-        parts = ['buffer', 'add-action', shlex.quote(proposal['thread']), shlex.quote(proposal['body'])]
-        if proposal.get('due'):
-            parts += ['--due', proposal['due']]
-        if proposal.get('scheduled'):
-            parts += ['--scheduled', proposal['scheduled']]
-        if proposal.get('priority'):
-            parts += ['--priority', proposal['priority']]
-        return ' '.join(parts)
-    return f"buffer add {shlex.quote(proposal.get('body', ''))}"
-
-
-def dispatch_proposal(proposal, raw_text):
-    """Buffer the entry a proposal describes."""
-    sub = proposal['subcmd']
-    if sub == 'add':
-        return buffer_unknown(raw_text)
-    if sub == 'add-text':
-        return buffer_text(proposal['thread'], proposal['body'])
-    if sub == 'add-action':
-        return buffer_action(proposal['thread'], proposal['body'],
-                             proposal.get('due'), proposal.get('scheduled'),
-                             proposal.get('priority'))
-    raise ValueError(f"internal error: unknown subcmd {sub!r}")
-
-
-def cmd_suggest(args):
-    """Propose a structured `buffer add-*` for raw text. With -y, run it;
-    without, store the raw text as UNKNOWN. Never prompts."""
-    proposal = suggest(args.text)
-    if proposal['subcmd'] == 'add':
-        if not args.quiet:
-            print("no structured suggestion; storing as UNKNOWN.")
-        return buffered(buffer_unknown, args.text)
-
-    cmd_str = format_suggestion(proposal)
-    print(f"suggested:\n  {cmd_str}")
-
-    if not args.yes:
-        # Safe default: capture the raw text rather than run a suggestion
-        # nobody accepted. The printed command can be run as-is instead.
-        print("not accepted (pass -y to accept); storing as UNKNOWN.")
-        return buffered(buffer_unknown, args.text)
-    return buffered(dispatch_proposal, proposal, args.text)
-
-
 # ---------- main ----------
 
 def main():
@@ -611,11 +553,6 @@ def main():
     p = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
     p.add_argument('text', help="The raw text to capture.")
     p.set_defaults(func=cmd_add)
-
-    p = sub.add_parser('suggest', help="Propose a structured add-* for raw text; run it with -y, else store as UNKNOWN.")
-    p.add_argument('text', help="The raw text to suggest a structured entry for.")
-    p.add_argument('-y', '--yes', action='store_true', help="Accept and run the suggestion.")
-    p.set_defaults(func=cmd_suggest)
 
     p = sub.add_parser('add-text', help="Append a TEXT entry.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")

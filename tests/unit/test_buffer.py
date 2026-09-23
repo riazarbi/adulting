@@ -106,17 +106,6 @@ def test_read_append_write_buffer(buffer_home):
     assert B.buffer_file().read_text() == ""
 
 
-def test_format_suggestion_quotes_for_the_shell():
-    # Paste-safe: a quote in the text cannot end the argument early.
-    assert B.format_suggestion({"subcmd": "add-text", "thread": "Topics/X", "body": "it's here"}) == \
-        "buffer add-text Topics/X 'it'\"'\"'s here'"
-    assert B.format_suggestion({"subcmd": "add-action", "thread": "Projects/SGB",
-                                "body": "Draft scope", "due": "2026-09-30",
-                                "scheduled": None, "priority": "H"}) == \
-        "buffer add-action Projects/SGB 'Draft scope' --due 2026-09-30 --priority H"
-    assert B.format_suggestion({"subcmd": "add-text", "thread": "Topics/X", "body": "hi"}) == \
-        "buffer add-text Topics/X hi"
-
 
 # ---------- the add functions are for other commands too ----------
 

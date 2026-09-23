@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - the rules suggester is removed (owner decision)
+
+`buffer suggest` proposed a structured entry for raw text. It was not routed to by anything and suggested poorly, so it is gone rather than maintained.
+
+- Removed: `src/adulting/suggester.py`, the `buffer suggest` subcommand and its helpers, `tests/unit/test_suggester.py`, the suggest tests in `test_buffer_cli.py`, `test_no_prompts.py` and `test_every_command.py`, and the `eval/suggester/` corpus.
+- `dev/tools/buffer.json` drops the subcommand and its `forbidden_args` block; `dev/tools-build`'s policy no longer names it.
+- **R3-D2 and R3-D3 with it:** the policy block described prompts that no longer exist (`hours log` with no thread, `threads new` with fields missing); it now says that no command prompts and points at the terminal tests. `tools-build`'s unused `ALLOWED_FIELDS` copy is gone.
+- Nothing else referenced the module. **748 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, part R3-C1: one `ACTION:` parser
 
 There were four: `tasks`' regex, `buffer`'s assignee split, `buffer`'s copy of the same checks in `tend`, and `lint`'s different regex. R3-A5.2 and R3-A5.3 were the consequences.

@@ -503,3 +503,32 @@ def test_a_malformed_time_stops_every_walker_the_same_way(search_vault, argv):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == ("search: error: startTime of entry 'aaaa1111' must be "
                         "ISO 8601 UTC; got '9am'\n")
+
+
+# ---------- the defaults, each proved by its effect ----------
+
+def test_notes_and_logs_show_twenty_by_default(vault):
+    vault.write_thread("Projects", "SGB")
+    for i in range(21):
+        vault.write_note(f"2026-09-{i + 1:02d}-09-00-00", "body", threads=["Projects/SGB"])
+    assert len(json.loads(vault.run("notes", "--json", cli="search").stdout)) == 20
+    assert len(json.loads(vault.run("notes", "--limit", "0", "--json", cli="search").stdout)) == 21
+
+
+def test_overview_lists_five_recent_items_by_default(vault):
+    vault.write_thread("Projects", "SGB")
+    for i in range(6):
+        vault.write_note(f"2026-09-{i + 1:02d}-09-00-00", "body", threads=["Projects/SGB"])
+    d = json.loads(vault.run("overview", "SGB", "--json", cli="search").stdout)
+    assert [r["date"] for r in d["recent"]] == [f"2026-09-0{i}" for i in (6, 5, 4, 3, 2)]
+
+
+def test_stream_shows_a_hundred_events_by_default(vault):
+    vault.write_thread("Projects", "SGB")
+    body = "\n".join(f"TEXT: entry {i}" for i in range(101))
+    vault.write("logs/Projects/SGB/2026-09-10.md",
+                '---\nthread: "[[Projects/SGB]]"\ndate: 2026-09-10\ntype: Log\n---\n\n' + body + "\n")
+    r = vault.run("stream", "--since", "2026-01-01", cli="search")
+    # 101 log lines plus the thread-opened event: 100 shown, 2 not.
+    assert r.stdout.splitlines()[-1] == "2 more not shown — raise --limit"
+    assert len([l for l in r.stdout.splitlines() if l.startswith("  log")]) == 100

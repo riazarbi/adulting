@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-B (1 of 2): the coverage the suite was missing
+
+Fresh mutations of the round 2 code were caught 2 times in 11. These are the holes that let that happen; each new test was checked by breaking the code it covers.
+
+- **R3-B1: the client-facing bank details had no test.** Every PDF test ran with incomplete banking, so only the "not yet supplied" branch ever rendered and corrupting the account number changed nothing. The Payment block's exact rows are asserted now, and so is the "Hours written off" line, which was never rendered either.
+- **R3-B2: no default was tested.** `search notes/logs` (20), `search overview` (5), `search stream` (100), `commit review`'s per-file cap (150) and its whole-output cap (3000) each have a test that proves the default's effect; changing any of the five fails one. `commit review`'s tracked-file truncation was never exercised at all, because the fixture's only long file was untracked.
+- **R3-B3: rounding and aging rested on almost nothing.** Every rounding assertion now has a `.666…` twin beside its `.333…` case, so rounding down instead of half-even fails: `charge_of`, `hours_of` and a built statement. The aging buckets are tested at their boundaries (0, 29, 30, 59, 60, 89, 90, 200 days), so moving one fails.
+- **R3-B5: the coverage lost in the round 2 deletions is back:** an unbilled entry's buffer REF, the stored start and end after `hours log`, `hours report --json` per thread and currency, a payment with no account or note end to end, and `threads show Projects/sgb`.
+- **773 passing.**
+
 ## 2026-09-23 - the rules suggester is removed (owner decision)
 
 `buffer suggest` proposed a structured entry for raw text. It was not routed to by anything and suggested poorly, so it is gone rather than maintained.

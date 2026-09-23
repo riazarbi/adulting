@@ -198,3 +198,68 @@ def test_check_refuses_payments_that_do_not_sum(monkeypatch, capsys):
         S.check({**st, "payments": Decimal("9.99")})
     assert capsys.readouterr().err == (
         "payments: error: statement check failed: lines payment 10.00 != payments 9.99\n")
+
+
+def complete_banking():
+    return {"bank_account_name": "Riaz J Arbi", "bank_name": "Capitec Bank",
+            "bank_account_number": "0000000000", "bank_branch_code": "470010",
+            "bank_account_type": "Savings", "complete": True}
+
+
+def test_the_payment_block_prints_the_bank_details_a_client_pays_into():
+    """Never rendered by a test before: every PDF test ran with incomplete
+    banking, so corrupting the account number changed nothing."""
+    st = S.build("Projects/SANA Partners", "ZAR", [entry(D(2026, 6, 1), 60, 100)], [], D(2026, 6, 30))
+    md = P.markdown(st, {"name": "R", "lines": []},
+                    {"name": "C", "lines": [], "reference": "SANA Partners"}, complete_banking())
+    block = md.split("## Payment\n")[1].strip().split("\n")
+    assert block == [
+        "| | |",
+        "|:----------------------------|:-------------------------------------------------|",
+        "| Account name | Riaz J Arbi |",
+        "| Bank | Capitec Bank |",
+        "| Account number | 0000000000 |",
+        "| Branch code | 470010 |",
+        "| Account type | Savings |",
+        "| Reference | SANA Partners |",
+    ]
+
+
+def test_the_summary_shows_hours_written_off_only_when_there_are_some():
+    """The written-off line was never rendered by a test."""
+    billed_only = P.markdown(
+        S.build("T", "ZAR", [entry(D(2026, 6, 1), 60, 100)], [], D(2026, 6, 30)),
+        {"name": "R", "lines": []}, {"name": "C", "lines": []}, complete_banking())
+    assert "Hours written off" not in billed_only
+    with_written_off = P.markdown(
+        S.build("T", "ZAR", [entry(D(2026, 6, 1), 60, 100), entry(D(2026, 6, 2), 30, 0)],
+                [], D(2026, 6, 30)),
+        {"name": "R", "lines": []}, {"name": "C", "lines": []}, complete_banking())
+    assert "| Hours billed | 1.00 |" in with_written_off
+    assert "| Hours written off | 0.50 |" in with_written_off
+
+
+@pytest.mark.parametrize("minutes, rate, charge, hours", [
+    (25, 100, "41.67", "0.42"),    # .666… rounds up, not down
+    (5, 100, "8.33", "0.08"),      # .333… rounds down
+    (50, 100, "83.33", "0.83"),
+])
+def test_money_and_hours_round_to_the_nearest_cent(minutes, rate, charge, hours):
+    """Rounding down instead would still pass a `.333…` case, so each
+    assertion here has a `.666…` twin."""
+    assert S.charge_of(minutes, rate) == Decimal(charge)
+    assert S.hours_of(minutes) == Decimal(hours)
+    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), minutes, rate)], [], D(2026, 1, 31))
+    assert (st["charges"], st["hours_total"]) == (Decimal(charge), Decimal(hours))
+
+
+@pytest.mark.parametrize("days, bucket", [
+    (0, "current"), (29, "current"), (30, "30"), (59, "30"),
+    (60, "60"), (89, "60"), (90, "90+"), (200, "90+"),
+])
+def test_a_charge_ages_into_the_bucket_its_age_falls_in(days, bucket):
+    """The boundaries themselves: 29/30, 59/60 and 89/90 days."""
+    as_of = D(2026, 6, 30)
+    st = S.build("T", "ZAR", [entry(as_of - datetime.timedelta(days=days), 60, 100)], [], as_of)
+    assert st["aging"] == {**{b: Decimal("0.00") for b in S.AGING_BUCKETS},
+                           bucket: Decimal("100.00")}

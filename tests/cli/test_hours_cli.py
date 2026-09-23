@@ -480,3 +480,32 @@ def test_a_stored_rate_that_is_not_a_whole_number_stops_the_command(vault, rate,
     r = vault.run("statement", cli="payments")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"payments: error: rate of entry 'aaaa0001' must be a whole number; got {shown}\n"
+
+
+def test_an_unbilled_entry_writes_a_buffer_ref_too(vault):
+    """The REF is written for every entry, billed or not."""
+    vault.write_thread("Topics", "Wellness")
+    vault.run("log", "Topics/Wellness", "5k run", "-m", "30", cli="hours")
+    assert re.fullmatch(r"- \[\[Topics/Wellness\]\] REF: \[\[hours/Topics/Wellness\]\] "
+                        r"0h 30m 5k run \([0-9a-f]{8}\) <!--\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d-->\n",
+                        vault.read("buffer.md"))
+
+
+def test_log_stores_the_interval_it_reports(hours_vault):
+    """The start and end as they land in the file, not just the printed line."""
+    hours_vault.run("log", "SANA", "Finance pack review", "-m", "90",
+                    "-d", "2026-08-04", "-t", "09:15", cli="hours")
+    [e] = hours_vault.entries("Projects", "SANA")
+    # 09:15 in Johannesburg is 07:15 UTC; 90 minutes later is 08:45.
+    assert (e["startTime"], e["endTime"]) == ("2026-08-04T07:15:00.000Z", "2026-08-04T08:45:00.000Z")
+
+
+def test_report_json_buckets_per_thread_and_currency(hours_vault, logged):
+    assert json.loads(hours_vault.run("report", "--json", cli="hours").stdout) == [
+        {"thread": "Processes/Trust", "currency": "BWP", "entries": 1, "minutes": 45,
+         "hours": 0.75, "amount": 1350.0},
+        {"thread": "Projects/SANA", "currency": "ZAR", "entries": 1, "minutes": 90,
+         "hours": 1.5, "amount": 3750.0},
+        {"thread": "Topics/Wellness", "currency": "", "entries": 1, "minutes": 30,
+         "hours": 0.5, "amount": 0.0},
+    ]

@@ -208,3 +208,9 @@ def test_new_refuses_a_name_that_is_not_a_plain_filename(vault, name):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == f"threads: error: name {name!r} cannot contain '/' or start with '.'\n"
     assert sorted(p.relative_to(vault.home).as_posix() for p in vault.home.rglob("*.md")) == []
+
+
+def test_show_needs_the_exact_case_of_a_qualified_name(threads_vault):
+    r = threads_vault.run("show", "Projects/sgb", cli="threads")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "threads: error: thread 'Projects/sgb' does not resolve to a thread file\n"

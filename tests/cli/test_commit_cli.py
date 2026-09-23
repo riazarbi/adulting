@@ -314,3 +314,28 @@ def test_a_failing_git_commit_is_reported(gitvault):
     assert r.stderr.startswith("commit: error: git commit failed:")
     assert "hook says no" in r.stderr
     assert len(log_subjects(gitvault)) == before
+
+
+def test_a_long_file_is_truncated_at_a_hundred_and_fifty_lines_by_default(gitvault):
+    gitvault.write("notes/long.md", "".join(f"line {i}\n" for i in range(200)))
+    out = gitvault.run("review", cli="commit").stdout
+    # 200 body lines plus the diff's own header lines.
+    assert "[truncated: notes/long.md — showing 150 of 206 lines; re-run with --max-file-lines]" in out
+    assert "+line 143\n" in out and "+line 144\n" not in out
+
+
+def test_a_long_tracked_diff_is_truncated_too(gitvault):
+    """Only untracked files used to reach the cap in the tests, so the
+    tracked branch went unexercised."""
+    gitvault.write("notes/seed.md", "".join(f"line {i}\n" for i in range(200)))
+    out = gitvault.run("review", cli="commit").stdout
+    assert "Changes to tracked files:" in out
+    assert "[truncated: notes/seed.md — showing 150 of " in out
+
+
+def test_the_whole_review_is_capped_at_three_thousand_lines_by_default(gitvault):
+    for n in range(40):
+        gitvault.write(f"notes/file{n:02d}.md", "".join(f"line {i}\n" for i in range(100)))
+    out = gitvault.run("review", cli="commit").stdout
+    assert len(out.splitlines()) <= 3000
+    assert "[truncated: output hit the 3,000-line cap;" in out

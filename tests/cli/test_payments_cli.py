@@ -467,3 +467,12 @@ def test_a_stored_amount_that_is_not_a_number_stops_the_command(vault):
         r = vault.run(*argv, cli="payments")
         assert (r.returncode, r.stdout) == (1, ""), argv
         assert r.stderr == "payments: error: amount of payment 'cccc0001' must be a number; got 'lots'\n"
+
+
+def test_a_payment_without_an_account_or_note_stores_neither(vault):
+    """End to end: the blank fields are left out of the record entirely."""
+    vault.write_thread("Projects", "Acme", currency="ZAR")
+    vault.run("log", "Acme", "100", cli="payments")
+    [p] = vault.payments("Projects", "Acme")
+    assert "account" not in p and "note" not in p
+    assert sorted(p) == ["amount", "currency", "id", "received"]

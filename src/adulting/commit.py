@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 
 DEFAULT_MAX_FILE_LINES = 150
@@ -243,7 +242,7 @@ def main():
             "`review` is read-only and truncates long diffs (see its --max-*\n"
             "flags). `save` can only ever add a commit — it never amends,\n"
             "rebases, resets, or pushes."))
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser(
         'review',
@@ -265,9 +264,7 @@ def main():
                         help="Report what would be staged and committed; change nothing.")
     p.set_defaults(func=cmd_save)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

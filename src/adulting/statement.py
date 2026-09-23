@@ -20,6 +20,12 @@ AGING_BUCKETS = ('current', '30', '60', '90+')
 
 # ---------- line construction ----------
 
+def hours_of(minutes):
+    """Whole hundredths of an hour at the line, so the printed lines sum to
+    the printed total, as they do for money."""
+    return (Decimal(minutes) / Decimal(60)).quantize(CENT)
+
+
 def charge_of(minutes, rate):
     """Whole cents at the line, so printed lines sum to the printed total."""
     return (Decimal(minutes) / Decimal(60) * Decimal(rate)).quantize(CENT)
@@ -48,7 +54,7 @@ def running(entries, payments):
             lines.append({
                 'on': on,
                 'description': event['description'],
-                'hours': Decimal(event['minutes']) / Decimal(60),
+                'hours': hours_of(event['minutes']),
                 'rate': Decimal(event['rate']),
                 'charge': amount,
                 'payment': None,
@@ -130,9 +136,12 @@ def build(thread, currency, entries, payments, as_of):
         'minutes_total': minutes,
         'minutes_billable': billable,
         'minutes_written_off': minutes - billable,
-        'hours_total': Decimal(minutes) / Decimal(60),
-        'hours_billable': Decimal(billable) / Decimal(60),
-        'hours_written_off': Decimal(minutes - billable) / Decimal(60),
+        # Rounded per line, as charges are, so the printed column adds up.
+        'hours_total': sum((hours_of(e['minutes']) for e in entries), Decimal('0.00')),
+        'hours_billable': sum((hours_of(e['minutes']) for e in entries
+                               if Decimal(e['rate']) > 0), Decimal('0.00')),
+        'hours_written_off': sum((hours_of(e['minutes']) for e in entries
+                                  if Decimal(e['rate']) <= 0), Decimal('0.00')),
         'aging': aging(entries, payments, as_of),
     }
     check(statement)
@@ -155,3 +164,11 @@ def check(statement):
     charged = sum((ln['charge'] or Decimal('0.00') for ln in lines), Decimal('0.00'))
     if charged != statement['charges']:
         V.die(f"statement check failed: lines charge {charged} != charges {statement['charges']}")
+    received = sum((ln['payment'] or Decimal('0.00') for ln in lines), Decimal('0.00'))
+    if received != statement['payments']:
+        V.die(f"statement check failed: lines payment {received} "
+              f"!= payments {statement['payments']}")
+    worked = sum((ln['hours'] or Decimal('0.00') for ln in lines), Decimal('0.00'))
+    if worked != statement['hours_total']:
+        V.die(f"statement check failed: lines hours {worked} "
+              f"!= hours {statement['hours_total']}")

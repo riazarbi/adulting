@@ -7,20 +7,21 @@ import sys
 
 import pytest
 
+# Every command is built by vault.command_parser, so --help-json comes first.
 SURFACE = {
-    "tasks": (["--dry-run", "--quiet"],
+    "tasks": (["--help-json", "--dry-run", "--quiet"],
               ["add", "done", "set-description", "set-assignee", "set-due", "set-scheduled",
                "set-priority", "add-depends", "rm-depends", "list", "next", "show"]),
-    "notes": ([], ["new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]),
-    "search": ([], ["notes", "logs", "activity", "overview", "stream"]),
-    "threads": ([], ["list", "show", "new", "delete"]),
-    "people": ([], ["list", "show", "new", "delete"]),
-    "hours": ([], ["log", "list", "report", "show", "edit", "rm"]),
-    "payments": ([], ["log", "list", "statement", "show", "edit", "rm"]),
-    "buffer": (["--quiet"], ["add", "suggest", "add-text", "add-ref", "add-action",
+    "notes": (["--help-json"], ["new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]),
+    "search": (["--help-json"], ["notes", "logs", "activity", "overview", "stream"]),
+    "threads": (["--help-json"], ["list", "show", "new", "delete"]),
+    "people": (["--help-json"], ["list", "show", "new", "delete"]),
+    "hours": (["--help-json"], ["log", "list", "report", "show", "edit", "rm"]),
+    "payments": (["--help-json"], ["log", "list", "statement", "show", "edit", "rm"]),
+    "buffer": (["--help-json", "--quiet"], ["add", "suggest", "add-text", "add-ref", "add-action",
                              "list", "rm", "tend", "flush"]),
-    "lint": (["--schemas", "--quiet"], []),
-    "commit": ([], ["review", "save"]),
+    "lint": (["--help-json", "--schemas", "--quiet"], []),
+    "commit": (["--help-json"], ["review", "save"]),
 }
 
 
@@ -99,3 +100,36 @@ def test_a_window_date_must_be_a_real_date(vault, cli, argv, flag, value):
     assert (r.returncode, r.stdout) == (2, "")
     assert r.stderr.splitlines()[-1] == (
         f"{cli} {argv[0]}: error: argument {flag}: expected a date as YYYY-MM-DD, got {value!r}")
+
+
+# Data that says `--help-json`, written the two ways a flag-shaped value is
+# passed: after `--`, and as `--flag=value`.
+WRITES = [
+    ("buffer", ["add-text", "Projects/SGB", "--", "--help-json"], "buffer.md"),
+    ("buffer", ["add", "--", "--help-json"], "buffer.md"),
+    ("notes", ["new", "--type", "Log", "--thread", "Projects/SGB", "--topic=--help-json"], None),
+    ("commit", ["save", "--message=--help-json"], None),
+]
+
+
+@pytest.mark.parametrize("cli, argv, wrote", WRITES, ids=[" ".join([c, *a]) for c, a, _ in WRITES])
+def test_help_json_as_data_does_not_hijack_a_write(vault, cli, argv, wrote):
+    """It used to be scanned out of sys.argv before parsing, so a command
+    whose data said `--help-json` printed the manifest and exited 0 without
+    writing anything: silent data loss, reported as success."""
+    vault.write_thread("Projects", "SGB")
+    if cli == "commit":
+        subprocess.run(["git", "-C", str(vault.home), "init", "-q"], check=True, env=vault.env)
+        vault.write("notes/seed.md", "seed\n")
+    r = vault.run(*argv, cli=cli)
+    assert r.returncode == 0, r.stderr
+    assert not r.stdout.startswith("{")
+    if wrote:
+        assert "--help-json" in vault.read(wrote)
+
+
+@pytest.mark.parametrize("cli", SURFACE)
+def test_help_json_is_a_documented_flag(vault, cli):
+    manifest = json.loads(vault.run("--help-json", cli=cli).stdout)
+    [flag] = [f for f in manifest["flags"] if f["name"] == "--help-json"]
+    assert flag["description"] == "Print this command's arguments as JSON, and exit."

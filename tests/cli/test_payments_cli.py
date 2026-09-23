@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+from datetime import date
 import sys
 
 import pytest
@@ -421,3 +422,48 @@ def test_receipts_are_rounded_to_the_cent_before_they_are_summed(vault):
     assert [line.split()[3] for line in vault.run("list", cli="payments").stdout.splitlines()[1:]] == ["1", "1"]
     assert vault.run("statement", cli="payments").stdout.splitlines()[1].split() == [
         "Projects/SANA", "2500", "ZAR", "2", "ZAR", "2498", "ZAR"]
+
+
+@needs_pdf
+def test_the_pdf_statement_honours_the_window(vault):
+    """The window used to reach the text view only, so `--pdf` put a period
+    on a client document that was never asked for."""
+    sana(vault)
+    for day in ("01", "02"):
+        vault.run("log", "SANA Partners", f"work {day}", "-m", "60", "-r", "1000",
+                  "-d", f"2026-06-{day}", "-t", "09:00", cli="hours")
+    vault.run("log", "SANA Partners", "500", "-d", "2026-06-02", cli="payments")
+    out = vault.home / "statement.pdf"
+    windowed = ["--since", "2026-06-02", "--until", "2026-06-30", "--as-of", "2026-06-30"]
+
+    text = vault.run("statement", "--thread", "SANA Partners", *windowed, "--json", cli="payments")
+    assert json.loads(text.stdout) == [{"thread": "Projects/SANA Partners", "currency": "ZAR",
+                                        "billed": 1000.0, "received": 500.0, "outstanding": 500.0}]
+    r = vault.run("statement", "--thread", "SANA Partners", *windowed, "--pdf", str(out), cli="payments")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == (f"{out}: 2 lines, 1.00 h, charges 1000 ZAR, paid 500 ZAR, "
+                        "balance 500 ZAR as at 2026-06-30\n")
+
+
+@needs_pdf
+def test_the_pdf_statement_refuses_an_empty_window(vault):
+    sana(vault)
+    vault.run("log", "SANA Partners", "work", "-m", "60", "-r", "1000",
+              "-d", "2026-06-01", "-t", "09:00", cli="hours")
+    out = vault.home / "statement.pdf"
+    r = vault.run("statement", "--thread", "SANA Partners", "--since", "2030-01-01",
+                  "--pdf", str(out), cli="payments")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == ("payments: error: nothing to state for 'Projects/SANA Partners' "
+                        f"as at {date.today().isoformat()}\n")
+    assert not out.exists()
+
+
+def test_a_stored_amount_that_is_not_a_number_stops_the_command(vault):
+    vault.write_thread("Projects", "Acme", currency="ZAR")
+    vault.write_payments_file("Projects", "Acme", payments=[
+        {"id": "cccc0001", "received": "2026-07-20T08:00:00.000Z", "amount": "lots", "currency": "ZAR"}])
+    for argv in (["list"], ["statement"], ["show", "cccc0001"]):
+        r = vault.run(*argv, cli="payments")
+        assert (r.returncode, r.stdout) == (1, ""), argv
+        assert r.stderr == "payments: error: amount of payment 'cccc0001' must be a number; got 'lots'\n"

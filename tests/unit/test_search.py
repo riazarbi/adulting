@@ -29,11 +29,6 @@ def test_snippet():
     assert piece.startswith("…") and piece.endswith("…") and "needle" in piece
 
 
-def test_minutes_between_tolerates_bad_records():
-    e = {"startTime": "2026-08-26T09:00:00.000Z", "endTime": "2026-08-26T10:45:00.000Z"}
-    assert S.minutes_between(e) == 105
-    assert S.minutes_between({"startTime": "nope"}) == 0
-
 
 def test_fmt_hours_and_window_default():
     assert S.fmt_hours(0) == "-"
@@ -120,15 +115,18 @@ def test_stream_pending_parses_and_drops_self_refs(search_home):
 
 
 def test_resolve_thread_arg(search_home):
+    """Exactly as every other command resolves one: no case folding."""
     assert S.resolve_thread_arg(None) is None
-    assert S.resolve_thread_arg("sgb") == "Processes/SGB"
-    with pytest.raises(SystemExit):
-        S.resolve_thread_arg("Nope")
+    assert S.resolve_thread_arg("SGB") == "Processes/SGB"
+    for arg in ("sgb", "Nope"):
+        with pytest.raises(SystemExit):
+            S.resolve_thread_arg(arg)
 
 
-def test_hours_in_window_skips_an_entry_with_a_malformed_time():
-    """A hand-edited startTime that is not ISO would otherwise crash
-    `search activity` with a traceback; lint is what reports it."""
+def test_hours_in_window_stops_on_a_malformed_time(monkeypatch, capsys):
+    """Every walker reads stored times the same way: one command used to
+    under-report hours where the others crashed."""
+    monkeypatch.setattr("sys.argv", ["search"])
     V = S.V
     home = V.vault_home()
     (home / "hours" / "Projects").mkdir(parents=True)
@@ -136,4 +134,8 @@ def test_hours_in_window_skips_an_entry_with_a_malformed_time():
         '---\nthread: "[[Projects/Alpha]]"\n---\n\n```simple-time-tracker\n'
         '{"entries": [{"id": "aaaa0001", "startTime": "9am", "endTime": "2026-08-26T10:00:00.000Z"},\n'
         '{"id": "aaaa0002", "startTime": "2026-08-26T09:00:00.000Z", "endTime": "2026-08-26T10:00:00.000Z"}]}\n```\n')
-    assert dict(S.hours_in_window()) == {"Projects/Alpha": 60}
+    with pytest.raises(SystemExit) as exc:
+        S.hours_in_window()
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
+        "search: error: startTime of entry 'aaaa0001' must be ISO 8601 UTC; got '9am'\n")

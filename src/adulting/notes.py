@@ -32,7 +32,6 @@ from adulting import buffer
 from adulting import render
 from adulting import tasks
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 TIMESTAMP_RE = re.compile(r'^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$')
 NOTE_TYPES = ['Meeting', 'Correspondence', 'Workshop', 'Report', 'Log', 'Research', 'Recipe']
@@ -261,7 +260,7 @@ def cmd_render(args):
 def main():
     parser = V.command_parser(
         'notes', "Create, list, print, copy and delete notes, named by stem.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('new', help="Create a note and print its path.")
     p.add_argument('--type', required=True, choices=NOTE_TYPES, help="Kind of note.")
@@ -309,9 +308,7 @@ def main():
         p.add_argument('--out', metavar='DIR', help="Where to write the files (default ~/Downloads).")
         p.set_defaults(func=cmd_render)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     if args.subcommand != 'new':
         ingest_actions()
     return args.func(args)

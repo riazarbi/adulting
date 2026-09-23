@@ -39,7 +39,6 @@ import json
 import sys
 from datetime import timedelta
 
-from adulting.helpjson import emit_helpjson_if_requested
 from adulting import buffer as B
 from adulting import statement as S
 from adulting import vault as V
@@ -57,10 +56,21 @@ def by_start(e):
 
 # ---------- entries ----------
 
+def start_name(e):
+    """How an entry's start time is named in an error."""
+    return f"startTime of entry {e.get('id')!r}"
+
+
+def rate_of(e):
+    """An entry's rate. Every entry carries one: `hours log` writes 0 for
+    unbilled time, so a missing or unreadable rate is an error."""
+    return V.as_int(e.get('rate'), f"rate of entry {e.get('id')!r}")
+
+
 def money_of(e):
     """Decimal, not float: these figures get invoiced. Rounded to the cent
     per entry, as the statement does, so every total is a sum of the lines."""
-    return S.charge_of(V.minutes_of(e), e.get('rate', 0) or 0)
+    return S.charge_of(V.minutes_of(e), rate_of(e))
 
 
 def resolve_rate(tpath, flag):
@@ -123,12 +133,12 @@ def append_entry(kind, name, entry):
     B.add_ref(ref, f"hours/{ref}",
                f"{V.fmt_duration(V.minutes_of(entry))} {entry['name']} "
                f"({entry['id']})",
-               date=V.local(entry['startTime']).strftime('%Y-%m-%d'))
+               date=V.local(entry['startTime'], start_name(entry)).strftime('%Y-%m-%d'))
     return path
 
 
 def report_logged(entry, ref):
-    when = V.local(entry['startTime']).strftime('%Y-%m-%d %H:%M')
+    when = V.local(entry['startTime'], start_name(entry)).strftime('%Y-%m-%d %H:%M')
     if entry.get('currency'):
         tail = (f"@ {entry['rate']} {entry['currency']} = "
                 f"{V.fmt_money(money_of(entry), entry['currency'])}")
@@ -172,7 +182,7 @@ def collect(thread=None, since=None, until=None):
             continue
         if not e.get('startTime'):
             continue
-        day = V.local(e['startTime']).strftime('%Y-%m-%d')
+        day = V.local(e['startTime'], start_name(e)).strftime('%Y-%m-%d')
         if not V.in_window(day, since, until):
             continue
         yield path, ref, e
@@ -182,10 +192,10 @@ def as_row(ref, e):
     return {
         'id': e.get('id', ''),
         'thread': ref,
-        'date': V.local(e['startTime']).strftime('%Y-%m-%d'),
-        'time': V.local(e['startTime']).strftime('%H:%M'),
+        'date': V.local(e['startTime'], start_name(e)).strftime('%Y-%m-%d'),
+        'time': V.local(e['startTime'], start_name(e)).strftime('%H:%M'),
         'minutes': V.minutes_of(e),
-        'rate': e.get('rate', 0),
+        'rate': rate_of(e),
         'currency': e.get('currency', ''),
         'amount': money_of(e),
         'description': e.get('name', ''),
@@ -297,7 +307,7 @@ def cmd_edit(args):
               f"pass --currency, or --rate 0 to leave it unbilled")
 
     if args.date or args.time:
-        start = V.local(target['startTime'])
+        start = V.local(target['startTime'], start_name(target))
         mins = V.minutes_of(target)
         when = V.when_from_flags(args.date or start.strftime('%Y-%m-%d'),
                                  args.time or start.strftime('%H:%M'))
@@ -329,7 +339,7 @@ def cmd_rm(args):
 def main():
     parser = V.command_parser(
         'hours', "Track consulting hours in the adulting vault.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('log', help="Append an entry.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -377,9 +387,7 @@ def main():
                     help="Required: confirms the permanent delete.")
     p.set_defaults(func=cmd_rm)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

@@ -146,8 +146,10 @@ def test_markdown_says_so_when_banking_details_are_missing():
 def test_check_refuses_a_statement_that_does_not_add_up(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["payments"])
     d = Decimal
-    good = {"lines": [{"balance": d("100.00"), "charge": d("100.00")}],
-            "balance": d("100.00"), "charges": d("100.00"),
+    good = {"lines": [{"balance": d("100.00"), "charge": d("100.00"),
+                       "payment": None, "hours": d("1.00")}],
+            "balance": d("100.00"), "charges": d("100.00"), "payments": d("0.00"),
+            "hours_total": d("1.00"),
             "aging": {"current": d("100.00"), "30": d("0.00"), "60": d("0.00"), "90+": d("0.00")}}
     S.check(good)  # returns without exiting
     for bad, message in (
@@ -159,3 +161,40 @@ def test_check_refuses_a_statement_that_does_not_add_up(monkeypatch, capsys):
             S.check({**good, **bad})
         assert exc.value.code == 1
         assert capsys.readouterr().err == f"payments: error: statement check failed: {message}\n"
+
+
+def test_hours_are_rounded_per_line_so_the_column_adds_up():
+    """As charges are. Three 50-minute entries print 0.83 three times, so
+    the total is 2.49, not the unrounded 2.50."""
+    st = S.build("T", "ZAR", [entry(D(2026, 1, day), 50, 100) for day in (1, 2, 3)],
+                 [], D(2026, 1, 31))
+    assert [ln["hours"] for ln in st["lines"]] == [Decimal("0.83")] * 3
+    assert st["hours_total"] == Decimal("2.49")
+    assert st["hours_billable"] == Decimal("2.49")
+
+
+def test_written_off_hours_are_rounded_the_same_way():
+    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 50, 0), entry(D(2026, 1, 2), 50, 100)],
+                 [], D(2026, 1, 31))
+    assert (st["hours_total"], st["hours_billable"], st["hours_written_off"]) == (
+        Decimal("1.66"), Decimal("0.83"), Decimal("0.83"))
+
+
+def test_check_refuses_lines_whose_hours_do_not_sum(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["payments"])
+    st = S.build("T", "ZAR", [entry(D(2026, 1, 1), 50, 100)], [], D(2026, 1, 31))
+    with pytest.raises(SystemExit):
+        S.check({**st, "hours_total": Decimal("9.99")})
+    assert capsys.readouterr().err == (
+        "payments: error: statement check failed: lines hours 0.83 != hours 9.99\n")
+
+
+def test_check_refuses_payments_that_do_not_sum(monkeypatch, capsys):
+    """The round 2 receipts bug in one assertion, so a future caller cannot
+    reintroduce it in silence."""
+    monkeypatch.setattr("sys.argv", ["payments"])
+    st = S.build("T", "ZAR", [], [payment(D(2026, 1, 1), 10)], D(2026, 1, 31))
+    with pytest.raises(SystemExit):
+        S.check({**st, "payments": Decimal("9.99")})
+    assert capsys.readouterr().err == (
+        "payments: error: statement check failed: lines payment 10.00 != payments 9.99\n")

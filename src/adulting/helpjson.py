@@ -1,11 +1,7 @@
 """Walk an argparse parser tree, emit a structured JSON manifest.
 
-Usage in any tool:
-    from adulting.helpjson import emit_helpjson_if_requested
-    parser = argparse.ArgumentParser(...)
-    ...
-    emit_helpjson_if_requested(parser)  # exits 0 if --help-json was passed
-    args = parser.parse_args()
+Every command is built by vault.command_parser, which adds the --help-json
+flag; vault.parse_command prints this manifest when it is passed.
 
 Output shape:
     {
@@ -19,7 +15,6 @@ Output shape:
 
 import argparse
 import json
-import sys
 
 
 def _action_to_arg(action):
@@ -82,8 +77,4 @@ def parser_to_dict(parser, name=None):
     return out
 
 
-def emit_helpjson_if_requested(parser):
-    """Check sys.argv for --help-json. If present, dump JSON and exit 0."""
-    if '--help-json' in sys.argv:
-        print(json.dumps(parser_to_dict(parser), indent=2))
-        sys.exit(0)
+

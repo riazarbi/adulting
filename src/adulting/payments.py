@@ -25,7 +25,6 @@ import sys
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from adulting.helpjson import emit_helpjson_if_requested
 from adulting import buffer as B
 from adulting import hours as H
 from adulting import vault as V
@@ -92,17 +91,17 @@ def append_payment(kind, name, payment):
     # next flush, filed under the day it was received. Best-effort and
     # silent: see buffer.add_ref. `ref` is already the directory form.
     B.add_ref(ref, f"payments/{ref}",
-               f"{V.fmt_money(V.dec(payment['amount']), payment['currency'])} "
+               f"{V.fmt_money(amount_of(payment), payment['currency'])} "
                f"received ({payment['id']})",
-               date=V.local(payment['received']).strftime('%Y-%m-%d'))
+               date=V.local(payment['received'], received_name(payment)).strftime('%Y-%m-%d'))
     return path
 
 
 def report_logged(p, ref):
-    when = V.local(p['received']).strftime('%Y-%m-%d')
+    when = V.local(p['received'], received_name(p)).strftime('%Y-%m-%d')
     acct = f"  {p['account']}" if p.get('account') else ''
     print(f"received {p['id']}  {ref}  {when}  "
-          f"{V.fmt_money(V.dec(p['amount']), p['currency'])}{acct}")
+          f"{V.fmt_money(amount_of(p), p['currency'])}{acct}")
 
 
 # ---------- log ----------
@@ -136,18 +135,29 @@ def collect(thread=None, since=None, until=None):
             continue
         if not p.get('received'):
             continue
-        day = V.local(p['received']).strftime('%Y-%m-%d')
+        day = V.local(p['received'], received_name(p)).strftime('%Y-%m-%d')
         if not V.in_window(day, since, until):
             continue
         yield path, ref, p
+
+
+def received_name(p):
+    """How a payment's timestamp is named in an error."""
+    return f"received of payment {p.get('id')!r}"
+
+
+def amount_of(p):
+    """A payment's amount. Every payment carries one, so a missing or
+    unreadable amount is an error, not a zero."""
+    return V.as_money(p.get('amount'), f"amount of payment {p.get('id')!r}")
 
 
 def as_row(ref, p):
     return {
         'id': p.get('id', ''),
         'thread': ref,
-        'received': V.local(p['received']).strftime('%Y-%m-%d'),
-        'amount': V.dec(p.get('amount', 0)),
+        'received': V.local(p['received'], received_name(p)).strftime('%Y-%m-%d'),
+        'amount': amount_of(p),
         'currency': p.get('currency', ''),
         'account': p.get('account', ''),
         'note': p.get('note', ''),
@@ -214,7 +224,7 @@ def cmd_edit(args):
     if args.date or args.time:
         # Whichever of date and time is not given keeps its current value,
         # as `hours edit` does.
-        was = V.local(target['received'])
+        was = V.local(target['received'], received_name(target))
         target['received'] = V.to_iso(V.when_from_flags(
             args.date or was.strftime('%Y-%m-%d'),
             args.time or was.strftime('%H:%M')))
@@ -259,33 +269,34 @@ def _as_of(raw):
         V.die(f"bad --as-of {raw!r}; expected YYYY-MM-DD")
 
 
-def one_thread_statement(thread_arg, as_of):
-    """The statement for one thread, built by `statement.build`."""
+def one_thread_statement(thread_arg, as_of, since=None, until=None):
+    """The statement for one thread, built by `statement.build`. The window
+    is the text view's: both walk the records the same way, so a windowed
+    `--pdf` shows the lines the text view shows."""
     kind, name, tpath = V.resolve_target(thread_arg)
     ref = V.thread_ref(kind, name)
     currency = V.resolve_currency(tpath, ref, None)
 
     entries = []
-    for _, r, e in V.load_all(HOURS_SUBDIR, V.HOURS_FENCE):
-        if r != ref or not e.get('startTime') or not e.get('endTime'):
+    for _, r, e in H.collect(thread_arg, since, until):
+        if r != ref or not e.get('endTime'):
             continue
         # Only time billed in the statement's currency is charged. Unbilled
         # time has no currency, and time billed in another currency belongs
         # on a statement in that currency, as the text statement has it.
         if e.get('currency') != currency:
             continue
-        mins = V.minutes_of(e)
-        entries.append({'on': V.local(e['startTime']).date(),
+        entries.append({'on': V.local(e['startTime'], H.start_name(e)).date(),
                         'description': e.get('name', ''),
-                        'minutes': mins,
-                        'rate': e.get('rate', 0) or 0})
+                        'minutes': V.minutes_of(e),
+                        'rate': H.rate_of(e)})
 
     paid = []
-    for _, r, pm in V.load_all(SUBDIR, V.PAYMENTS_FENCE, KEY):
-        if r != ref or not pm.get('received'):
+    for _, r, pm in collect(thread_arg, since, until):
+        if r != ref:
             continue
-        paid.append({'on': V.local(pm['received']).date(),
-                     'amount': V.cents(pm.get('amount', 0)),
+        paid.append({'on': V.local(pm['received'], received_name(pm)).date(),
+                     'amount': V.cents(amount_of(pm)),
                      'account': pm.get('account', '')})
 
     st = S.build(ref, currency, entries, paid, as_of)
@@ -295,7 +306,7 @@ def one_thread_statement(thread_arg, as_of):
 
 def cmd_pdf(args):
     """A statement document is per client, so --pdf needs exactly one thread."""
-    st = one_thread_statement(args.thread, _as_of(args.as_of))
+    st = one_thread_statement(args.thread, _as_of(args.as_of), args.since, args.until)
     if not st['lines']:
         V.die(f"nothing to state for {st['thread']!r} as at {st['as_of']}")
     out, bank = P.render(st, args.pdf)
@@ -326,7 +337,7 @@ def cmd_statement(args):
     for _, ref, p in collect(args.thread, args.since, until):
         key = (ref, p.get('currency', ''))
         recv.setdefault(key, V.dec(0))
-        recv[key] += V.cents(p.get('amount', 0))
+        recv[key] += V.cents(amount_of(p))
 
     rows = []
     for key in sorted(set(bill) | set(recv)):
@@ -369,7 +380,7 @@ def cmd_statement(args):
 def main():
     parser = V.command_parser(
         'payments', "Record money received against threads.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('log', help="Record a receipt.")
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -414,9 +425,7 @@ def main():
                     help="Required: confirms the permanent delete.")
     p.set_defaults(func=cmd_rm)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

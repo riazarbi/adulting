@@ -48,7 +48,6 @@ import sys
 from datetime import datetime
 
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 from adulting.suggester import suggest
 
 
@@ -615,7 +614,7 @@ def main():
     parser = V.command_parser(
         'buffer', "Buffer queue operations: capture, regroup, validate, flush.")
     parser.add_argument('--quiet', action='store_true', help="Suppress info output.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('add', help="Append an UNKNOWN entry (raw quick-capture; fails tend until converted).")
     p.add_argument('text', help="The raw text to capture.")
@@ -667,9 +666,7 @@ def main():
     p = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
     p.set_defaults(func=cmd_flush)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

@@ -256,7 +256,7 @@ def test_list_filters(board):
     assert board.run("list", "--priority", "M", cli="tasks").stdout == \
         "aaaa0003  [#M]  Topics/zeta    second log task\n"
     assert board.run("list", "--assignee", "Charlie", cli="tasks").stdout.startswith("aaaa0001")
-    assert board.run("list", "--thread", "Projects/Nope", cli="tasks").stdout == "(no tasks)\n"
+    assert board.run("list", "--thread", "Topics/zeta", "--priority", "H", cli="tasks").stdout == "(no tasks)\n"
 
 
 def test_list_shows_only_pending(vault):
@@ -578,3 +578,20 @@ def test_depends_help_says_a_whole_uuid(vault):
     [sub] = [s for s in manifest["subcommands"] if s["name"] == "add"]
     [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
     assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."
+
+
+def test_list_resolves_a_bare_thread_name_like_every_other_command(board):
+    """It compared the raw string to the canonical `Kind/Name`, so a bare
+    name printed a plausible empty answer instead of the tasks."""
+    bare = board.run("list", "--thread", "SGB", cli="tasks")
+    assert (bare.returncode, bare.stderr) == (0, "")
+    assert bare.stdout == board.run("list", "--thread", "Projects/SGB", cli="tasks").stdout
+    assert bare.stdout.count("\n") == 2
+
+
+def test_list_refuses_a_thread_that_does_not_resolve(board):
+    before = board.snapshot()
+    r = board.run("list", "--thread", "Nope", cli="tasks")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "tasks: error: thread 'Nope' does not resolve to a thread file\n"
+    assert board.snapshot() == before

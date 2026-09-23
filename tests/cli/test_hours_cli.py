@@ -439,3 +439,44 @@ def test_edit_can_repair_an_entry_with_a_rate_but_no_currency(broken, fix, rate,
     assert (r.returncode, r.stderr) == (0, "")
     e = stored(broken, "bbbb0001")
     assert (e["rate"], e.get("currency"), e["endTime"]) == (rate, currency, "2026-08-06T05:15:00.000Z")
+
+
+# ---------- a rate is a whole number, or the command says so ----------
+
+def test_a_thread_rate_that_is_not_a_whole_number_is_refused(vault):
+    """It used to be swallowed: the thread billed at the built-in 2500."""
+    p = vault.write_thread("Projects", "Acme", currency="ZAR")
+    p.write_text(p.read_text().replace("currency: ZAR\n", "currency: ZAR\nrate: 1,000\n"))
+    r = vault.run("log", "Acme", "work", "-m", "60", cli="hours")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == (f"hours: error: rate in {p.relative_to(vault.home)} "
+                        "must be a whole number; got '1,000'\n")
+    assert list((vault.home / "hours").rglob("*.md")) == []
+
+
+def test_a_config_rate_that_is_not_a_whole_number_is_refused(vault):
+    vault.write_thread("Projects", "Acme", currency="ZAR")
+    vault.write(".adulting/config.yaml", "hours:\n  rate: 2,500\n")
+    r = vault.run("log", "Acme", "work", "-m", "60", cli="hours")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == ("hours: error: hours.rate in .adulting/config.yaml "
+                        "must be a whole number; got '2,500'\n")
+
+
+@pytest.mark.parametrize("rate, shown", [("abc", "'abc'"), (2.5, "2.5"), (None, "None")])
+def test_a_stored_rate_that_is_not_a_whole_number_stops_the_command(vault, rate, shown):
+    """No entry is implicitly unbilled: a rate that cannot be read is an
+    error wherever it is used, not a silent zero."""
+    entry = {"name": "work", "id": "aaaa0001", "currency": "ZAR",
+             "startTime": "2026-08-04T07:00:00.000Z", "endTime": "2026-08-04T08:00:00.000Z"}
+    if rate is not None:
+        entry["rate"] = rate
+    vault.write_thread("Projects", "Acme", currency="ZAR")
+    vault.write_hours_file("Projects", "Acme", [entry])
+    for argv in (["list"], ["report"], ["show", "aaaa0001"]):
+        r = vault.run(*argv, cli="hours")
+        assert (r.returncode, r.stdout) == (1, ""), argv
+        assert r.stderr == f"hours: error: rate of entry 'aaaa0001' must be a whole number; got {shown}\n"
+    r = vault.run("statement", cli="payments")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"payments: error: rate of entry 'aaaa0001' must be a whole number; got {shown}\n"

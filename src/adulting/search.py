@@ -36,7 +36,6 @@ from datetime import date, timedelta
 from adulting import buffer as B
 from adulting import tasks as T
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 
 STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
@@ -71,13 +70,9 @@ def note_records():
     if not notes_dir.is_dir():
         return out
     for path in sorted(notes_dir.glob('*.md')):
-        try:
-            text = path.read_text(encoding='utf-8')
-            fm, body = V.parse_frontmatter_doc(text)
-        except Exception:  # noqa: BLE001 - a bad file must not break the query
-            continue
+        fm, body = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
         if not fm:
-            continue
+            continue   # no frontmatter: not a note this command knows
         out.append({
             'kind': 'note',
             'path': str(path),
@@ -96,11 +91,7 @@ def log_records():
     if not logs_dir.is_dir():
         return out
     for path in sorted(logs_dir.rglob('*.md')):
-        try:
-            text = path.read_text(encoding='utf-8')
-            fm, body = V.parse_frontmatter_doc(text)
-        except Exception:  # noqa: BLE001
-            continue
+        fm, body = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
         if not fm:
             continue
         t = fm.get('thread') or ''
@@ -169,35 +160,21 @@ def stream_documents():
 def stream_records():
     """Hours and payments, from their own files at their own times."""
     out = []
-    for path, ref, e in _safe_load('hours', V.HOURS_FENCE):
+    for path, ref, e in V.load_all('hours', V.HOURS_FENCE):
         if not e.get('startTime'):
             continue
-        when = V.local(e['startTime'])
+        when = V.local(e['startTime'], f"startTime of entry {e.get('id')!r}")
         out.append(_event('hours', when.strftime('%Y-%m-%d'), ref,
-                          f"{V.fmt_duration(minutes_between(e))} {e.get('name','')}",
+                          f"{V.fmt_duration(V.minutes_of(e))} {e.get('name','')}",
                           str(path), when.strftime('%H:%M')))
-    for path, ref, p in _safe_load('payments', V.PAYMENTS_FENCE, 'payments'):
+    for path, ref, p in V.load_all('payments', V.PAYMENTS_FENCE, 'payments'):
         if not p.get('received'):
             continue
-        when = V.local(p['received'])
+        when = V.local(p['received'], f"received of payment {p.get('id')!r}")
         out.append(_event('payment', when.strftime('%Y-%m-%d'), ref,
                           f"{V.fmt_money(V.dec(p.get('amount', 0)), p.get('currency'))} received",
                           str(path), when.strftime('%H:%M')))
     return out
-
-
-def _safe_load(subdir, fence, key='entries'):
-    try:
-        return list(V.load_all(subdir, fence, key))
-    except Exception:  # noqa: BLE001 - an empty or absent store is not an error
-        return []
-
-
-def minutes_between(e):
-    try:
-        return V.minutes_of(e)
-    except Exception:  # noqa: BLE001
-        return 0
 
 
 def stream_entities():
@@ -208,10 +185,7 @@ def stream_entities():
         if not base.is_dir():
             continue
         for path in sorted(base.rglob('*.md')):
-            try:
-                fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
-            except Exception:  # noqa: BLE001
-                continue
+            fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
             started = str(fm.get('started') or '')[:10]
             if not LEADING_DATE_RE.match(started):
                 continue
@@ -251,7 +225,7 @@ def stream_pending():
 
 def resolve_thread_arg(arg):
     """Accept 'SGB', 'Processes/SGB' or a wikilink. Returns the canonical ref."""
-    return V.thread_ref(*V.resolve_target(arg, fold_case=True)[:2]) if arg else None
+    return V.thread_ref(*V.resolve_target(arg)[:2]) if arg else None
 
 
 def apply_filters(records, thread=None, type_=None, since=None, until=None,
@@ -296,11 +270,8 @@ def hours_in_window(since=None, until=None):
             continue
         # Mirror `hours` exactly: local date for bucketing, ISO delta for
         # duration. Slicing the UTC string instead would misfile evening work.
-        try:
-            d = V.local(start).strftime('%Y-%m-%d')
-            minutes = V.minutes_of(rec)
-        except Exception:  # noqa: BLE001 - a malformed entry is skipped, not fatal
-            continue
+        d = V.as_time(start, f"startTime of entry {rec.get('id')!r}").astimezone().strftime('%Y-%m-%d')
+        minutes = V.minutes_of(rec)
         if not V.in_window(d, since, until):
             continue
         if minutes > 0:
@@ -527,7 +498,7 @@ def cmd_stream(args):
 def main():
     parser = V.command_parser(
         'search', "Search notes and logs, and summarise thread activity.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('notes', help="Find notes by thread, type, date or text.")
     p.add_argument('--thread', help="Thread name, 'Kind/Name', or wikilink.")
@@ -574,9 +545,7 @@ def main():
     V.add_window_flags(p)
     p.set_defaults(func=cmd_stream)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

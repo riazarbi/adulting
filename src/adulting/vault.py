@@ -18,6 +18,8 @@ import sys
 import uuid as _uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+
+from adulting import helpjson
 from pathlib import Path
 
 
@@ -37,7 +39,26 @@ def command_parser(prog, description, **options):
     and warnings start with, however the command was started."""
     global _program
     _program = prog
-    return argparse.ArgumentParser(prog=prog, description=description, **options)
+    parser = argparse.ArgumentParser(prog=prog, description=description, **options)
+    # A real flag, so argparse decides what is a flag and what is data: as a
+    # value (`--topic --help-json`) or after `--`, it is the data it looks
+    # like, and the command writes the record.
+    parser.add_argument('--help-json', action='store_true',
+                        help="Print this command's arguments as JSON, and exit.")
+    return parser
+
+
+def parse_command(parser, subcommand_required=True):
+    """A command's arguments: print the JSON manifest and stop if asked,
+    check the vault, and require a subcommand unless told otherwise."""
+    args = parser.parse_args()
+    if args.help_json:
+        print(json.dumps(helpjson.parser_to_dict(parser), indent=2))
+        raise SystemExit(0)
+    require_vault()
+    if subcommand_required and getattr(args, 'subcommand', '') is None:
+        parser.error('the following arguments are required: subcommand')
+    return args
 
 
 def program():
@@ -122,13 +143,12 @@ def read_config():
 
 
 def config_default(section, key, fallback):
+    """A whole-number default from config.yaml, or `fallback` when the file
+    does not set one. A value that cannot be read is an error."""
     val = read_config().get(section, {}).get(key)
     if val is None:
         return fallback
-    try:
-        return int(val)
-    except ValueError:
-        return fallback
+    return as_int(val, f"{section}.{key} in .adulting/config.yaml")
 
 
 # ---------- frontmatter ----------
@@ -282,27 +302,21 @@ def discover_threads():
                 yield kind, f.stem, f
 
 
-def _eq(a, b, fold_case):
-    a, b = a.strip(), b.strip()
-    return a.lower() == b.lower() if fold_case else a == b
-
-
-def resolve_thread(arg, fold_case=False):
+def resolve_thread(arg):
     """Resolve 'SGB' / 'Projects/SGB' / '[[Projects/SGB]]' to (kind, name, path).
 
     Returns None if not found; raises ValueError on ambiguity. Matching is
-    case-sensitive by default: relying on the filesystem would make results
-    differ between macOS (case-insensitive) and Linux. `fold_case` opts into
-    explicit case-insensitive matching for CSV import.
+    exact: relying on the filesystem would make results differ between macOS
+    (case-insensitive) and Linux, so every command matches the same way.
     """
     arg = unwiki(arg)
     threads = list(discover_threads())
     if '/' in arg:
         kind_dir, name = arg.split('/', 1)
         cands = [(k, n, p) for k, n, p in threads
-                 if KIND_DIRS[k] == kind_dir and _eq(n, name, fold_case)]
+                 if KIND_DIRS[k] == kind_dir and n.strip() == name.strip()]
     else:
-        cands = [(k, n, p) for k, n, p in threads if _eq(n, arg, fold_case)]
+        cands = [(k, n, p) for k, n, p in threads if n.strip() == arg.strip()]
     if not cands:
         return None
     if len(cands) > 1:
@@ -329,30 +343,29 @@ def is_thread(ref):
 
 
 def thread_meta(path):
-    """(currency, rate) from a thread file's frontmatter; either may be None."""
+    """(currency, rate) from a thread file's frontmatter; either may be None.
+    A rate that is not a whole number is an error, not a missing rate."""
     fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
     rate = fm.get('rate')
-    try:
-        rate = int(rate) if rate not in (None, '') else None
-    except (TypeError, ValueError):
-        rate = None
-    return fm.get('currency') or None, rate
+    if rate in (None, ''):
+        return fm.get('currency') or None, None
+    return fm.get('currency') or None, as_int(rate, f"rate in {path.relative_to(vault_home())}")
 
 
-def find_thread(thread_arg, fold_case=False):
+def find_thread(thread_arg):
     """(kind, name, path) for a thread given as a name, `Kind/Name` or
     wikilink. Raises ValueError if it names no thread, or threads of two
     kinds."""
-    match = resolve_thread(thread_arg, fold_case=fold_case)
+    match = resolve_thread(thread_arg)
     if not match:
         raise ValueError(f"thread {thread_arg!r} does not resolve to a thread file")
     return match
 
 
-def resolve_target(thread_arg, fold_case=False):
+def resolve_target(thread_arg):
     """find_thread for a command: stop with the error if there is one."""
     try:
-        return find_thread(thread_arg, fold_case)
+        return find_thread(thread_arg)
     except ValueError as e:
         die(str(e))
 
@@ -612,16 +625,30 @@ def from_iso(s):
     return datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
 
 
-def local(s):
-    return from_iso(s).astimezone()
+def as_time(value, what):
+    """A stored timestamp as an aware datetime, or stop. Every walker reads
+    times this way, so a malformed one is reported the same everywhere
+    instead of crashing one command and being skipped by another."""
+    try:
+        return from_iso(str(value))
+    except (TypeError, ValueError):
+        die(f"{what} must be ISO 8601 UTC; got {value!r}")
+
+
+def local(value, what='timestamp'):
+    """A stored timestamp in local time, or stop. `what` names the field, so
+    the message points at the record that needs fixing."""
+    return as_time(value, what).astimezone()
 
 
 def minutes_of(e):
     """Whole minutes between an entry's startTime and endTime; 0 if either
-    is missing."""
+    is missing. A time that cannot be read stops the command."""
     if not e.get('startTime') or not e.get('endTime'):
         return 0
-    return int((from_iso(e['endTime']) - from_iso(e['startTime'])).total_seconds() // 60)
+    start = as_time(e['startTime'], f"startTime of entry {e.get('id')!r}")
+    end = as_time(e['endTime'], f"endTime of entry {e.get('id')!r}")
+    return int((end - start).total_seconds() // 60)
 
 
 def in_window(day, since, until):
@@ -661,6 +688,25 @@ def when_from_flags(date_s, time_s):
 def dec(x):
     """JSON number -> Decimal, via str so float artefacts never enter."""
     return Decimal(str(x))
+
+
+def as_int(value, what):
+    """`value` as a whole number, or stop. Money is never guessed: a rate
+    that cannot be read is an error wherever it is used, not a silent zero."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        text = str(value)
+        if not re.fullmatch(r'-?\d+', text.strip()):
+            die(f"{what} must be a whole number; got {value!r}")
+        return int(text)
+    return value
+
+
+def as_money(value, what):
+    """`value` as a Decimal amount, or stop."""
+    try:
+        return dec(value)
+    except (ArithmeticError, TypeError, ValueError):
+        die(f"{what} must be a number; got {value!r}")
 
 
 CENT = Decimal('0.01')

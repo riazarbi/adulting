@@ -32,7 +32,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 
 ACTION_RE = re.compile(
@@ -500,7 +499,9 @@ def cmd_list(args):
         anchors = [a for a in anchors if a.due and a.due < today]
     cache = build_threads_cache()
     if args.thread:
-        anchors = [a for a in anchors if args.thread in threads_for(a, cache)]
+        kind, name, _ = V.resolve_target(args.thread)
+        want = V.thread_ref(kind, name)
+        anchors = [a for a in anchors if want in threads_for(a, cache)]
     anchors.sort(key=lambda a: (_thread_sort_key(threads_for(a, cache)),
                                 _sort_key(a)))
     _print_table(anchors, cache)
@@ -624,10 +625,7 @@ def main():
     p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
     p.set_defaults(func=cmd_show)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
-
+    args = V.parse_command(parser, subcommand_required=False)
     if args.subcommand is None:
         return cmd_default(args)
     return args.func(args)

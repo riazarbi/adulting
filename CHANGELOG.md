@@ -2,6 +2,24 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-A: the bugs
+
+Each fix has a test written to fail first. Owner decisions are marked.
+
+- **R3-A1: `payments statement --pdf` ignored `--since`/`--until`.** The text view said `(nothing to report)` while the PDF billed the whole thread. `one_thread_statement` now takes the window and walks the records through `hours.collect` and `payments.collect`, so both views read them the same way.
+- **R3-A2: `--help-json` anywhere in the arguments hijacked the command.** It was scanned out of `sys.argv` before parsing, so `buffer add-text -- --help-json` printed the manifest, exited 0 and wrote nothing. It is now a real flag on every command, handled by `vault.parse_command`, so argparse decides what is data: after `--`, or as `--topic=--help-json`, the record is written. The flag is documented in every `--help-json` manifest.
+- **R3-A3 (owner decision: ints only, failing loudly at entry and at usage):**
+  - `vault.as_int` and `vault.as_money` replace every silent fallback. A thread's `rate: 1,000`, a config `hours.rate: 2,500`, a stored rate that is missing, `2.5` or `'abc'`, and an unreadable payment amount now stop the command naming the record: `rate of entry 'aaaa0001' must be a whole number; got 'abc'`.
+  - No entry is implicitly unbilled: `hours.rate_of` and `payments.amount_of` are the only readers.
+  - `lint` enforces the schemas' `type` column, which was parsed and never used: a field typed `int` must hold a whole number. The vault copy is clean: same 8 violations as before.
+- **R3-A4: `lint <relative-path>` invented a violation.** Paths are resolved before they are checked, so a relative path agrees with the absolute one.
+- **R3-A5:**
+  - `tasks list --thread SGB` resolves the name like every other command, instead of comparing the raw string and printing a plausible `(no tasks)`.
+  - The PDF ledger's Hours column adds up: hours are rounded per line, as charges are, so three 50-minute entries print 0.83 three times under 2.49. `statement.check` now also asserts that the lines' payments and hours sum to their totals.
+  - **(owner decision) `search` no longer folds thread-name case:** `search notes --thread acme` is refused, as `hours list acme` always was. `fold_case` and the four functions that threaded it through are gone.
+  - Every walker reads a stored time through `vault.as_time`, so a malformed `startTime` stops each command with the same message. `search`'s five `except Exception` swallows and `_safe_load` are gone; `minutes_between` with them.
+- **Verified on the vault copy:** hours, payments, search, tasks and lint print exactly what they printed before. **773 passing.**
+
 ## 2026-09-22 - review round 2, part R-D: the tests
 
 - **R-D1, tests that could not fail or hid a bug:**

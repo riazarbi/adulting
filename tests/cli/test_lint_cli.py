@@ -697,3 +697,28 @@ def test_links_and_assignees_must_match_the_files_case(vault):
         f"{p}:0: people: wikilink '[[people/riaz arbi]]' does not resolve",
         f"{p}:11: ACTION: assignee 'riaz arbi' does not resolve to people/riaz arbi.md",
     ]
+
+
+@pytest.mark.parametrize("value", ["1,000", "2 500", "2.5", "lots"])
+def test_a_field_typed_int_must_hold_a_whole_number(vault, value):
+    """The schemas' `type` column was read and never used, so a thread with
+    `rate: 1,000` linted clean and billed at the built-in default."""
+    p = vault.write_thread("Projects", "Acme", currency="ZAR")
+    p.write_text(p.read_text().replace("currency: ZAR\n", f"currency: ZAR\nrate: {value}\n"))
+    assert violations(vault.run(cli="lint")) == [f"{p}:0: rate: value {value!r} is not a whole number"]
+
+
+def test_a_field_typed_int_accepts_a_whole_number(vault):
+    vault.write_thread("Projects", "Acme", currency="ZAR", rate=0)
+    assert_clean(vault.run(cli="lint"))
+
+
+def test_a_relative_path_is_checked_like_an_absolute_one(vault, tmp_path):
+    """The caller's own prefix used to survive into the scope check, so a
+    relative path reported `no matching file schema` and exited 1."""
+    p = vault.write_thread("Projects", "Acme", currency="ZAR")
+    absolute = vault.run(str(p), cli="lint")
+    relative = vault.run(p.relative_to(tmp_path).as_posix(), cli="lint", cwd=tmp_path)
+    assert_clean(absolute)
+    assert (relative.returncode, relative.stdout, relative.stderr) == (
+        0, "\n1 file(s) checked. 0 violation(s).\n", "")

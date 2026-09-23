@@ -11,7 +11,6 @@ import json
 import sys
 
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 def threads_dir():
     return V.vault_home() / 'threads'
@@ -99,7 +98,7 @@ def cmd_show(args):
 
 def main():
     parser = V.command_parser('threads', "Manage thread files.")
-    sub = parser.add_subparsers(dest='subcommand', required=True)
+    sub = parser.add_subparsers(dest='subcommand')
 
     p = sub.add_parser('list', help="List thread files (open by default).")
     p.add_argument('query', nargs='?', default=None,
@@ -130,9 +129,7 @@ def main():
                           help="Required: confirms the permanent delete.")
     p.set_defaults(func=cmd_delete)
 
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser)
     return args.func(args)
 
 

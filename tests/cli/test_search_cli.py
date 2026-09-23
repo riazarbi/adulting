@@ -131,10 +131,6 @@ def test_logs_text_match(search_vault):
         "1h 0m Spec (cccc3333) RE…")
 
 
-def test_thread_resolution_folds_case(search_vault):
-    assert search_vault.run("notes", "--thread", "sgb", cli="search").stdout == \
-        f"{path(search_vault, AGENDA)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
-
 
 def test_unresolvable_thread_fails(search_vault):
     r = search_vault.run("notes", "--thread", "Nope", cli="search")
@@ -487,3 +483,23 @@ def test_overview_limit_zero_lists_every_recent_item(vault):
         vault.write_note(f"2026-09-0{day}-09-00-00", "body", threads=["Projects/SGB"])
     d = json.loads(vault.run("overview", "SGB", "--limit", "0", "--json", cli="search").stdout)
     assert [r["date"] for r in d["recent"]] == [f"2026-09-0{day}" for day in range(7, 0, -1)]
+
+
+def test_a_thread_name_must_match_its_case_as_everywhere_else(search_vault):
+    """`search` used to fold case while every other command refused it."""
+    r = search_vault.run("notes", "--thread", "processes/sgb", cli="search")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "search: error: thread 'processes/sgb' does not resolve to a thread file\n"
+
+
+@pytest.mark.parametrize("argv", [["activity"], ["stream"], ["overview", "Projects/Alpha"]])
+def test_a_malformed_time_stops_every_walker_the_same_way(search_vault, argv):
+    """One command used to under-report hours where the others crashed with
+    a traceback; now every walker says the same thing."""
+    search_vault.write_hours_file("Projects", "Alpha", entries=[{
+        "name": "Spec", "id": "aaaa1111", "rate": 1000, "currency": "ZAR",
+        "startTime": "9am", "endTime": "2026-08-26T11:30:00.000Z"}])
+    r = search_vault.run(*argv, "--since", "2026-01-01", cli="search")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == ("search: error: startTime of entry 'aaaa1111' must be "
+                        "ISO 8601 UTC; got '9am'\n")

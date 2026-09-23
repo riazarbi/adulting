@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 from adulting import vault as V
-from adulting.helpjson import emit_helpjson_if_requested
 
 # The schemas ship inside the package, next to this module.
 SCHEMAS_DIR = Path(__file__).resolve().parent / 'schemas'
@@ -255,6 +254,8 @@ def validate_value(name, value, spec):
             if isinstance(item, str):
                 yield from validate_value(f"{name}[{i}]", item, spec)
         return
+    if spec.get('type') == 'int' and not re.fullmatch(r'-?\d+', str(value).strip()):
+        yield f"{name}: value {value!r} is not a whole number"
     constraint = spec.get('constraint', {})
     enum = constraint.get('enum')
     if enum and value not in enum:
@@ -313,8 +314,8 @@ def wikilink_exists(target):
 
 def find_file_schema(path, fm, schemas):
     """Match by filename + applies_when + (new) directory scope."""
-    home = V.vault_home()
-    rel = path.relative_to(home) if home in path.parents or path.parent == home else path
+    home = V.vault_home().resolve()
+    rel = path.relative_to(home) if path.is_relative_to(home) else path
     rel_str = str(rel)
     for s in schemas.values():
         if s['scope'] != 'file':
@@ -705,15 +706,15 @@ def main():
                         help=f'Schemas directory (default: {SCHEMAS_DIR}).')
     parser.add_argument('--quiet', action='store_true',
                         help='Suppress per-violation output.')
-    emit_helpjson_if_requested(parser)
-    args = parser.parse_args()
-    V.require_vault()
+    args = V.parse_command(parser, subcommand_required=False)
 
     schemas = load_schemas(Path(args.schemas))
     if not schemas:
         V.die(f"no schemas loaded from {args.schemas}", code=2)
 
-    files = [Path(p) for p in args.paths] if args.paths else list(discover_files())
+    # Resolved, so a path given relative to the caller's directory is
+    # checked exactly as the same file given absolutely.
+    files = [Path(p).resolve() for p in args.paths] if args.paths else list(discover_files())
 
     registry = {'by_uuid': {}, 'depends_edges': [], 'record_ids': {}}
     total = 0

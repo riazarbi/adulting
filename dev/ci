@@ -3,7 +3,7 @@
 does; run a single stage by name while iterating locally.
 
     dev/ci            lint + test          (the gate; fast, no network, no LLM)
-    dev/ci lint       syntax + ruff + contracts only
+    dev/ci lint       syntax + ruff + contracts + MANUAL.md, only
     dev/ci test       every test, with a coverage report
     dev/ci generate   regenerate MANUAL.md and dev/tools/ (needs `claude`)
     dev/ci manual     regenerate MANUAL.md only            (needs `claude`)
@@ -42,8 +42,8 @@ PY = REPO / '.venv' / 'bin' / 'python'
 # tool that loses it silently breaks the manual.
 sys.path.insert(0, str(REPO / 'dev'))
 from commands import COMMANDS as TOOLS  # noqa: E402
-DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-diff', 'tools-build',
-             'tools-check', 'testbed', 'ci']
+DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-check', 'manual-diff',
+             'tools-build', 'tools-check', 'testbed', 'ci']
 
 BOLD, GREEN, RED, YELLOW, OFF = '\033[1m', '\033[32m', '\033[31m', '\033[33m', '\033[0m'
 failed = []
@@ -135,6 +135,15 @@ def stage_lint():
         bad("--help-json contract")
     else:
         ok("--help-json contract")
+
+    # The committed manual must still describe the commands that exist. It is
+    # model-written, so this cannot regenerate it — it fails when it drifts.
+    stale = run(PY, REPO / 'dev' / 'manual-check', capture_output=True, text=True, env=env)
+    if stale.returncode == 0:
+        ok("MANUAL.md matches the CLI")
+    else:
+        print(stale.stdout, end='')
+        bad("MANUAL.md matches the CLI")
 
     # The committed agent tool definitions must stay loadable and in scope.
     # Deterministic, so it belongs in the gate rather than the generation stage.

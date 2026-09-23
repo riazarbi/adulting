@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 4, part R4-A2: a gate that catches a stale MANUAL.md
+
+`dev/tools/*.json` were gated; the manual was not, and it is what an agent
+reads. **`dev/manual-check`** closes that: it asks every command for its
+`--help-json` manifest — deterministic, no model, no network — and compares
+the names the manual uses with the names the CLI has. `dev/ci lint` runs it.
+
+- It checks three things and ignores prose: every subcommand the manual documents exists, every subcommand is documented, and the same both ways for flags (`--help` and `--help-json` are exempt). A section is read to the next heading, subcommand claims are read from the **Subcommands** table only, and a flag's spellings count as one flag.
+- **`--help-json` now reports a flag's `aliases`**, so `-m/--minutes` is one flag written two ways rather than one documented and one missing.
+- **It is failing, and that is the point.** The committed manual still documents `buffer suggest`, deleted in round 3, and three `notes` subcommands (`edit`, `nano`, `strip`) that have not existed since the port — it still describes `notes` as an interactive picker. It also misses `tasks ingest`, three `--json` flags, and every `notes new` flag, and documents `hours log --all` and `payments log --all`, which do not exist.
+- **Regenerating is `dev/ci manual`, which needs `claude`** and is the owner's step. Nothing here can write the manual; this only refuses to let it drift quietly.
+- `tests/dev/test_manual_check.py` pins how the manual is read, against a manual written in the test rather than the committed one, so the tests say the same thing whatever state the real manual is in. **780 passing.**
+
 ## 2026-09-23 - review round 4, parts R4-A4 and R4-C6: flags that lied about what they do
 
 - **R4-A4: `tasks --dry-run done <uuid>` wrote to disk.** The flag is top-level so that bare `tasks --dry-run` works, and argparse took it before any subcommand, where it did nothing — the anchor flipped to `DONE:` and nothing said otherwise. Round 3 made this worse by removing the "(default invocation only)" caveat from the help. `tasks` now refuses the flag rather than ignoring it: `tasks: error: --dry-run applies to ingest only, not to 'done'`, exit 2, nothing written. `tasks ingest --dry-run`, `tasks --dry-run ingest` and bare `tasks --dry-run` are unaffected.

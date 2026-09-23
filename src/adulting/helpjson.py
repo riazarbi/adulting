@@ -8,7 +8,8 @@ Output shape:
       "name": "tasks",
       "description": "...",
       "args": [{"name": "...", "description": "...", "required": bool, "nargs": str|None}, ...],
-      "flags": [{"name": "--quiet", "description": "...", "choices": [...]|None}, ...],
+      "flags": [{"name": "--quiet", "description": "...", "aliases": [...],
+                 "choices": [...]|None}, ...],
       "subcommands": [ <recursive> ]
     }
 """
@@ -30,6 +31,11 @@ def _action_to_flag(action):
         "name": action.option_strings[0],
         "description": action.help or "",
     }
+    # `-m/--minutes` is one flag with two spellings. Both are usable, so both
+    # are reported; a reader that only sees the first would call the other
+    # one undocumented.
+    if len(action.option_strings) > 1:
+        out["aliases"] = list(action.option_strings[1:])
     if action.choices:
         out["choices"] = list(action.choices)
     # nargs == 0 covers both the store_true/false flags and any custom

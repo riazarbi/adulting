@@ -1335,3 +1335,48 @@ suite is in good shape):
 - [ ] Dropping `--until` from the windowed PDF fails a test; so does dropping
       `scheduled:` from an ingested anchor, and so does bucketing by UTC day.
 - [ ] `dev/ci` is green.
+
+# Round 4: what was done
+
+Commits, in order: `4080134` (A1, A3), `809f2cc` (A4, C6), `91a426a` (A2),
+`9baaeb9` (B1–B3), `d7b24bc` (C1). Each has its own CHANGELOG entry.
+**781 passing.** Every blocker was reproduced in a scratch vault before it was
+fixed, and each fix is defended by a test that fails when the fix is undone.
+
+## Round 4 done means
+
+- [x] A vault reached through a symlink lints identically to the same vault by
+      its real path. `test_a_vault_reached_through_a_symlink_is_checked_the_same`.
+- [ ] **`MANUAL.md` names no command that does not exist** — the gate exists
+      and `dev/ci` fails when the manual drifts, which it currently does.
+      Regenerating is `dev/ci manual`, which needs `claude`: the owner's step.
+- [x] `search` skips a non-UTF-8 file; `lint` reports it as a violation.
+- [x] `tasks --dry-run done <uuid>` is refused, and changes nothing.
+- [x] Dropping `--until` from the windowed PDF fails a test; so does dropping
+      `scheduled:` from an ingested anchor, and so does bucketing by UTC day.
+- [ ] `dev/ci` is green **except** the new MANUAL.md gate, above.
+
+## Decisions taken in this round
+
+- **`search` skips a bad file silently; `lint` reports it.** The round asked
+  for `search` to use the same message `tasks` uses, but a message would have
+  to go to stderr, and the agent harness discards stdout whenever stderr is
+  non-empty — `notes` and `hours log` already refuse to warn for that reason.
+  `search` is read-only and its stdout is data, so reporting the file is left
+  to `lint`, which is the command that reports the vault's health.
+- **`tasks` refuses the ingest flags elsewhere rather than scoping them.**
+  Keeping `tasks --dry-run` working means the flags stay top-level, where
+  argparse accepts them before any subcommand; refusing is the honest answer.
+- **R4-C1 conceded: `lint` prints vault-relative paths too.** The round 3
+  exemption was wrong for the reason the review gives — `lint` and `tasks`
+  print the same ACTION violation. `V.rel` is the one implementation, and a
+  path outside the vault keeps its own name.
+- **The manual gate compares names, not prose**, as the review asked. It found
+  more drift than reported: the whole `notes` section still describes the
+  pre-port interactive picker (`edit`, `nano`, `strip`).
+
+## Still open after this round
+
+- R4-B's "weak tests worth tightening" (about 15 of 781).
+- R4-C2, C3, C4, C5, C7, C8 — cleanup, for `main`.
+- The deferred bugs, and the merge itself.

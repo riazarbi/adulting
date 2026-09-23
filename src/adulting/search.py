@@ -70,7 +70,10 @@ def note_records():
     if not notes_dir.is_dir():
         return out
     for path in sorted(notes_dir.glob('*.md')):
-        fm, body = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+        text = V.read_utf8(path)
+        if text is None:
+            continue   # not readable as UTF-8: skipped, as `tasks` skips it
+        fm, body = V.parse_frontmatter_doc(text)
         if not fm:
             continue   # no frontmatter: not a note this command knows
         out.append({
@@ -91,7 +94,10 @@ def log_records():
     if not logs_dir.is_dir():
         return out
     for path in sorted(logs_dir.rglob('*.md')):
-        fm, body = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+        text = V.read_utf8(path)
+        if text is None:
+            continue
+        fm, body = V.parse_frontmatter_doc(text)
         if not fm:
             continue
         t = fm.get('thread') or ''
@@ -185,7 +191,10 @@ def stream_entities():
         if not base.is_dir():
             continue
         for path in sorted(base.rglob('*.md')):
-            fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+            text = V.read_utf8(path)
+            if text is None:
+                continue
+            fm, _ = V.parse_frontmatter_doc(text)
             started = str(fm.get('started') or '')[:10]
             if not LEADING_DATE_RE.match(started):
                 continue
@@ -209,7 +218,10 @@ def stream_pending():
     if not buffer_file.exists():
         return []
     out = []
-    entries, _, _ = B.parse_buffer_entries(buffer_file.read_text(encoding='utf-8').splitlines())
+    text = V.read_utf8(buffer_file)
+    if text is None:
+        return []
+    entries, _, _ = B.parse_buffer_entries(text.splitlines())
     for e in entries:
         thread, tag, body, date, clock = e['thread'], e['type'], e['body'], e['date'], e['ts'][11:16]
         # A buffered REF back at an hours or payments record is that

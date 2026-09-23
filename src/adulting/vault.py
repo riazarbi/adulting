@@ -211,6 +211,19 @@ def parse_block(lines):
     return out
 
 
+def read_utf8(path):
+    """A vault file's text, or None when it cannot be read as UTF-8.
+
+    Every command walks files it did not write — a stray binary, a
+    sync-conflict copy, something saved in another encoding. A walker skips
+    those and carries on; `lint` is the command that reports them.
+    """
+    try:
+        return path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def parse_frontmatter_doc(text):
     """Return (frontmatter, body) for any vault file. The frontmatter is the
     block between a first-line `---` and the next `---`, read by

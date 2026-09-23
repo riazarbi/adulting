@@ -150,13 +150,17 @@ class Vault:
     # ---- CLI helpers ----
 
     def run(self, *argv: str, cli: str = "tasks", input: str = "",
-            cwd: Path | None = None) -> subprocess.CompletedProcess:
+            cwd: Path | None = None,
+            env: dict | None = None) -> subprocess.CompletedProcess:
         """Run a CLI from the repo against this vault. Returns the
         CompletedProcess; stdout/stderr are text-decoded. stdin is closed
-        (input=""), so a prompt would hit EOF instead of hanging."""
+        (input=""), so a prompt would hit EOF instead of hanging.
+
+        `env` replaces this vault's environment, for the few tests that need
+        to reach the same vault by another path."""
         cmd = [command_path(cli, self.env), *argv]
         return subprocess.run(cmd, capture_output=True, text=True,
-                              env=self.env, input=input, cwd=cwd)
+                              env=env or self.env, input=input, cwd=cwd)
 
     def run_on_a_terminal(self, *argv: str, cli: str, typed: str = "y\n"):
         """Run a CLI with stdin attached to a real pseudo-terminal, with

@@ -1168,3 +1168,170 @@ own CHANGELOG entry with the detail. **762 passing, `dev/ci` green.**
   render.
 - **Tests are exempt from ruff's line-length rule**, because they pin vault
   lines and command output verbatim.
+
+---
+---
+
+# Round 4: round 3 accepted; what is left before merge
+
+Branch `refactor2` at `ac7aaf7`. Reviewed 2026-09-23.
+
+## Round 3 is done. Accept it.
+
+Verified independently: 762 tests pass, 98% coverage, ruff clean, all six
+`dev/ci` gates green. Every R3-A, R3-C and R3-D item was reproduced against a
+real vault and each is defended by a test that fails when the fix is undone.
+
+**The number that matters: the suite's mutation score went from 18% to 89%.**
+All ten breakages that previously slipped through are now caught, including a
+wrong bank account number on a client PDF and every `--limit` default. Of eight
+fresh breakages chosen without reading this file, five were caught.
+
+**Settled, do not reopen:**
+
+- The eight owner decisions and the four judgement calls recorded above are all
+  accepted. The removal of the suggester is confirmed by the owner.
+- The three open choices are sound. One correction only: see R4-C1 on the path
+  format, where the story claims more than the code does.
+
+Everything below is either collateral from a round 3 fix, or something no round
+has looked at yet.
+
+| Part | What | Estimate |
+|---|---|---|
+| R4-A | Merge blockers | ~2 hours |
+| R4-B | Test holes | ~1 hour |
+| R4-C | Cleanup | ~2 hours |
+
+**Merge after R4-A.** R4-B and R4-C can follow on main.
+
+## R4-A. Merge blockers
+
+### R4-A1. `lint` validates nothing when the vault path holds a symlink
+
+- **Where:** `lint.py:316-317` resolves `home` but not the walked paths, and
+  `discover_files()` builds them from the unresolved `V.vault_home()`.
+- **Reproduced:** the same vault, one thread file.
+  - By its real path: 4 violations.
+  - Through a symlink: `no matching file schema`, and nothing else is checked.
+- **Why it blocks:** it still prints `1 file(s) checked`, so it reads like a
+  clean-ish run rather than a broken one, and symlinked paths are ordinary on
+  macOS (`/tmp`, `/var`, a synced vault).
+- **Cause:** collateral from the R3-A4 relative-path fix.
+- **Fix:** resolve the walked paths as well, then compare with
+  `is_relative_to(home)`.
+- **Test:** a vault reached through a symlink reports the same violations as
+  the same vault by its real path.
+
+### R4-A2. `MANUAL.md` documents a command that was deleted this round
+
+- `MANUAL.md:365, 379, 391, 788` still describe `buffer suggest`, including
+  "Never call `suggest` without `-y` — without it, it prompts on stdin". It
+  exits 2.
+- Also stale: `MANUAL.md:86` still says `--dry-run` is "Default invocation
+  only"; there is no `tasks ingest`, no `tasks list --json` or
+  `buffer list --json`, and no `--date` on the other `add-*` subcommands.
+- **The deeper problem:** `dev/tools/*.json` are regenerated and gated by
+  `dev/ci`, but **nothing checks `MANUAL.md` against the real CLI**.
+  `dev/manual-diff` compares two generated manuals. A stale manual is exactly
+  the R3-D failure mode this round was meant to close, and the manual is what
+  an agent reads.
+- **Fix:** run `dev/ci generate`, then add a gate that fails when the committed
+  manual differs from a fresh harvest in the commands, subcommands and flags it
+  names. Comparing prose is not required; comparing the name set is.
+
+### R4-A3. `search` crashes with a raw traceback on a non-UTF-8 file
+
+- **Where:** `search.py:73, 94, 188`. Removing the blanket `except Exception`
+  (R3-A5.6, correctly) also removed the only thing catching `read_text`.
+- **Reproduced:** `search notes` and `search stream` print a Python stack
+  trace. At `c968b38` they printed `(no matches)`.
+- **Fix:** do what `tasks.py:258` already does — skip the file and say
+  `file is not valid UTF-8; skipped`. `lint` has the same hole; it predates
+  this round.
+
+### R4-A4. `tasks --dry-run done <uuid>` writes to disk
+
+- **Reproduced:** the anchor flips `TASK:` → `DONE:` with no complaint.
+- R3-C5 removed the `(default invocation only)` caveat from the help while
+  leaving the trap, so the help is now less truthful than before.
+- **Fix:** scope `--dry-run` and `--quiet` to `ingest`, or refuse them on the
+  other subcommands. A flag that silently does nothing is worse than one that
+  errors.
+
+## R4-B. Test holes
+
+These are three short tests. Each is a case where a fix is real but only
+half-proved.
+
+1. **The windowed PDF only proves `--since`.**
+   `test_payments_cli.py:424 test_the_pdf_statement_honours_the_window` passes
+   `--until 2026-06-30`, which is past every fixture entry, so dropping
+   `until` from `cmd_pdf` changes nothing and the suite stays green. This is
+   the flagship R3-A1 fix. Add an entry after the `--until` date.
+2. **`tasks ingest` never proves it carries `scheduled:` onto the anchor.**
+   `due:`, `priority:` and `depends:` are all asserted; `scheduled:` can be
+   dropped at `tasks.py:296` with a green suite.
+3. **The local-day rule in `Store.day_of` is undefended.** Its docstring says
+   "evening work belongs to the day it was done, not the next one", but every
+   fixture timestamp is mid-day, so switching it to UTC changes nothing. This
+   decides which log file and which statement window a record falls in. Add a
+   record at 23:00 local.
+
+Weak tests worth tightening while you are in there (about 15 of 762 — the
+suite is in good shape):
+
+- `unit/test_helpjson.py:70` duplicates the exact assertion 40 lines above it.
+- `cli/test_commit_cli.py:344`: `len(lines) <= 3000` passes for any output.
+- `cli/test_tasks_cli.py:575` compares one command's output to another's.
+- `cli/test_search_cli.py:452, 476`: `startswith("/")` where `:460` already
+  proves it properly.
+- `cli/test_notes_cli.py:80` compares `cat` to the file it just printed.
+
+## R4-C. Cleanup
+
+1. **The path-format rule is only implemented in `tasks`.** `threads delete`,
+   `people delete/show` and `notes` errors still print absolute paths, and
+   `lint` and `tasks ingest` print the *same* ACTION violation in two different
+   formats — the one place a user sees both. Either finish the rule or amend
+   the story to match the CHANGELOG's narrower claim.
+2. **Dead code from the Store migration.** `payments.py:221` and `:233`:
+   `if r != ref: continue` is unreachable, because `Store.collect` already
+   filtered to that ref. The same function resolves `thread_arg` three times,
+   walking `threads/` each time. `payments.py:268-271` re-validates `--as-of`,
+   which `type=V.iso_date` now guarantees, under a comment describing a hazard
+   that no longer exists.
+3. **New repetition:** `V.local(x, STORE.stamp_name(x))` is written out 13
+   times across `hours`, `payments` and `search`. `Store` already has
+   `day_of`; add `Store.local_of(record)`.
+4. **Dead defaults and unread values:** `vault.py:705` `local(value,
+   what='timestamp')` — all 14 callers pass `what`. `statement.py:135-136`
+   writes `minutes_total` and `minutes_billable`, which nothing reads.
+5. **`ACTION: () do x` silently loses the `()`.** `split_assignee`
+   (`vault.py:702`) widened `[^)]+` to `[^)]*`, so ingest deletes the empty
+   parens from the user's text while `buffer add-action` keeps them. One
+   parser, two answers.
+6. **`--help-json` on a subcommand now exits 2.** `vault.py:47` registers it
+   only on the top-level parser, so `tasks list --help-json` no longer prints a
+   manifest. Harmless for the gate; it is a user-visible change and belongs in
+   the CHANGELOG either way.
+7. **Story hygiene.** Deferred bug 3 is about the deleted suggester and is now
+   moot. The claim that `grep -rn 'DEFERRED BUG' tests/` finds every deferred
+   bug is false for 3, 5, 6, 13 and 14 — the fixture oddities are labelled in
+   `tests/fixtures/render/README.md` instead, which is fine, but then say so.
+8. **Cosmetic leftovers ruff cannot see:** three blank lines at
+   `statement_pdf.py:24-26` where `CENT = V.CENT` was, three at the end of
+   `helpjson.py`, and continuation indents in `threads.py:88-92` /
+   `people.py:96-99` still aligned to a deleted prefix.
+
+## Round 4 done means
+
+- [ ] A vault reached through a symlink lints identically to the same vault by
+      its real path. A test proves it.
+- [ ] `MANUAL.md` names no command that does not exist, and `dev/ci` fails when
+      it drifts from the CLI.
+- [ ] `search` skips a non-UTF-8 file with the same message `tasks` uses.
+- [ ] `tasks --dry-run done <uuid>` changes nothing, or is refused.
+- [ ] Dropping `--until` from the windowed PDF fails a test; so does dropping
+      `scheduled:` from an ingested anchor, and so does bucketing by UTC day.
+- [ ] `dev/ci` is green.

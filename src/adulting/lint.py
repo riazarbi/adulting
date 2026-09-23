@@ -313,7 +313,12 @@ def wikilink_exists(target):
 
 def find_file_schema(path, fm, schemas):
     """Match by filename + applies_when + (new) directory scope."""
+    # Both sides are resolved: ADULTING_HOME is often reached through a
+    # symlink (/tmp and /var are symlinks on macOS, and a synced vault is
+    # frequently one), and an unresolved file under a resolved home is
+    # relative to nothing, which used to match no schema at all.
     home = V.vault_home().resolve()
+    path = path.resolve()
     rel = path.relative_to(home) if path.is_relative_to(home) else path
     rel_str = str(rel)
     for s in schemas.values():
@@ -341,7 +346,12 @@ def validate_file(path, schemas, registry=None):
     if not path.exists():
         yield (0, "file does not exist")
         return
-    text = path.read_text(encoding='utf-8')
+    text = V.read_utf8(path)
+    if text is None:
+        # Every other command skips this file quietly; lint is where the
+        # vault's health is reported, so here it is a violation.
+        yield (0, "file is not valid UTF-8")
+        return
     fm, body_start = parse_frontmatter(text)
 
     schema = find_file_schema(path, fm, schemas)

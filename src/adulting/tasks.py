@@ -140,18 +140,10 @@ def discover_source_files():
                     yield Path(root) / fname
 
 
-def read_source(path):
-    """A note or log's text, or None if it cannot be read as UTF-8."""
-    try:
-        return path.read_text(encoding='utf-8')
-    except (OSError, UnicodeDecodeError):
-        return None
-
-
 def walk_anchors():
     """Yield every parsed Anchor in the vault."""
     for path in discover_source_files():
-        text = read_source(path)
+        text = V.read_utf8(path)
         if text is None:
             continue
         for i, line in enumerate(text.split('\n')):
@@ -213,7 +205,7 @@ def build_threads_cache():
     """Walk all source files once, return {source_relpath: [threads]}."""
     cache = {}
     for f in discover_source_files():
-        text = read_source(f)
+        text = V.read_utf8(f)
         if text is None:
             continue
         rel = str(f.relative_to(V.vault_home()).with_suffix(''))
@@ -253,7 +245,7 @@ def ingest(dry_run=False):
     plan = []
     failed = []
     for path in discover_source_files():
-        text = read_source(path)
+        text = V.read_utf8(path)
         if text is None:
             failed.append((str(path.relative_to(V.vault_home())),
                            ["file is not valid UTF-8; skipped"]))

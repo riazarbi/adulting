@@ -537,3 +537,20 @@ def test_stream_shows_a_hundred_events_by_default(vault):
     # 101 log lines plus the thread-opened event: 100 shown, 2 not.
     assert r.stdout.splitlines()[-1] == "2 more not shown — raise --limit"
     assert len([line for line in r.stdout.splitlines() if line.startswith("  log")]) == 100
+
+
+@pytest.mark.parametrize("argv", [["notes"], ["logs"], ["stream"], ["activity"],
+                                  ["overview", "Projects/SGB"]])
+def test_a_file_that_is_not_utf8_is_skipped_not_a_traceback(vault, argv):
+    """One junk file used to end the whole walk with a Python stack trace.
+    `search` is read-only and reports nothing about the vault's health, so it
+    skips the file; `lint` is the command that reports it."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_note("2026-09-10-14-30-00", "TEXT: readable", threads=["Projects/SGB"])
+    for rel in ("notes/2026-09-12-08-00-00.md", "logs/Projects/SGB/2026-09-12.md"):
+        bad = vault.home / rel
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
+    r = vault.run(*argv, cli="search")
+    assert "Traceback" not in r.stderr
+    assert (r.returncode, r.stderr) == (0, "")

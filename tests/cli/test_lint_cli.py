@@ -712,6 +712,36 @@ def test_a_field_typed_int_accepts_a_whole_number(vault):
     assert_clean(vault.run(cli="lint"))
 
 
+def test_a_vault_reached_through_a_symlink_is_checked_the_same(vault, tmp_path):
+    """/tmp and /var are symlinks on macOS, and a synced vault is often one
+    too. The scope check used to resolve the vault but not the file, so every
+    file under a symlinked ADULTING_HOME matched no schema and none of its
+    rules ran, while the summary still said the file was checked."""
+    vault.write_thread("Projects", "SGB", status="bogus")
+    direct = violations(vault.run(cli="lint"))
+    assert direct, "the fixture must produce a violation for this to prove anything"
+
+    link = tmp_path / "linked-vault"
+    link.symlink_to(vault.home)
+    through = vault.run(cli="lint", env={**vault.env, "ADULTING_HOME": str(link)})
+    assert [v.split(":", 1)[1] for v in violations(through)] == \
+           [v.split(":", 1)[1] for v in direct]
+    assert through.returncode == 1
+
+
+def test_a_file_that_is_not_utf8_is_a_violation_not_a_traceback(vault):
+    """Removing the blanket `except Exception` left `lint` with nothing
+    catching the read, so one junk file ended the whole run."""
+    vault.write_thread("Projects", "SGB")
+    bad = vault.home / "notes" / "2026-09-12-08-00-00.md"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"---\ntopic: x\n---\n\n\xff\xfe bad bytes\n")
+    r = vault.run(cli="lint")
+    assert r.stderr == ""
+    assert violations(r) == [f"{bad}:0: file is not valid UTF-8"]
+    assert r.returncode == 1
+
+
 def test_a_relative_path_is_checked_like_an_absolute_one(vault, tmp_path):
     """The caller's own prefix used to survive into the scope check, so a
     relative path reported `no matching file schema` and exited 1."""

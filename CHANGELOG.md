@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 4, parts R4-A1 and R4-A3: files a walker cannot read, and a vault behind a symlink
+
+Both are collateral from round 3, and both were reproduced before being fixed.
+
+- **R4-A1: a vault reached through a symlink was not checked at all.** `lint` resolved the vault but not the file it was looking at, so every walked path was "outside" the vault, matched no schema, and none of its rules ran — while the summary still said the file was checked. `/tmp` and `/var` are symlinks on macOS and a synced vault is often one, so this was easy to hit. Both sides are resolved now, and a test lints the same vault by both paths and compares.
+- **R4-A3: one file that is not UTF-8 ended the whole run with a stack trace.** Removing the blanket `except Exception` in round 3 (correctly) left nothing catching the read in `search` and `lint`. **`vault.read_utf8(path)`** is the one reader now: it returns `None` for a file that cannot be read, `tasks` uses it as before, and `search` skips such a file in notes, logs, threads, people and the buffer.
+- **`lint` reports it instead of skipping it**, as `<path>:0: file is not valid UTF-8`. `search` stays silent on purpose: it is read-only and its stdout is data — the agent harness discards stdout whenever stderr is non-empty, so a warning there would cost the caller the search results. `lint` is where the vault's health is reported.
+- `Vault.run` in the test harness takes an `env`, for the few tests that reach one vault by two paths.
+- **Verified on the vault copy:** `lint`, `search notes` and `search stream` print byte-identical output. **769 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 3, parts R3-B8 and R3-B9: the untested corners, and tests that say what they test
 
 - **R3-B8: `--help-json`'s content is tested, not just its shape.** `tests/unit/test_helpjson.py` asserts a whole manifest — descriptions, `choices`, `required`, `nargs`, `takes_value`, the `add_parser(help=…)` fallback description and the bare-command case — because `MANUAL.md` and `dev/tools/` are generated from exactly those fields. Blanking one description now fails two tests.

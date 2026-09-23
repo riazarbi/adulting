@@ -1536,3 +1536,54 @@ R4-C2 to C5, C7 and C8 were deferred to main; they still stand. New since:
 - [ ] Making `search` read a non-UTF-8 file instead of skipping it fails a
       test.
 - [ ] `dev/ci` is green, manual gate included.
+
+# Round 5: what was done
+
+Commits: `2de03ee` (the regenerated manual + B1, B4), `dd6aad4` (A1, A2, C3),
+`50d0522` (A3, C2), `aa4c3ce` (B3, B5). Each has its own CHANGELOG entry.
+**857 passing, `dev/ci` green — manual gate included.**
+
+## Round 5 done means
+
+- [x] `grep -rn 'read_text' src/adulting/` finds one line, inside
+      `V.read_utf8`. A bad file in any of the six stores leaves every listing
+      command working, and the good rows intact.
+- [x] `search` warns on a terminal and says nothing to a pipe, through
+      `V.tell_a_human`, which `notes` and `tasks` now share.
+- [x] `lint` and `tasks ingest` print absolute paths; so does everything else
+      that prints a path. The rule and its container reason are written into
+      `stories/2026-09-17-python-package-refactor.md` ("The path rule").
+- [x] Deleting either of `dev/manual-check`'s comparisons fails a test;
+      checked by disabling each in turn.
+- [x] Making `search` read a non-UTF-8 file instead of skipping it fails a
+      test, which asserts the rows rather than the absence of a traceback.
+- [x] `dev/ci` is green, manual gate included.
+
+## Corrections to what round 4 claimed
+
+- The round 4 CHANGELOG said the UTF-8 fix covered "notes, logs, threads,
+  people and the buffer". It covered `search`'s own walkers only; seven other
+  commands still ended in a traceback. The entry is corrected in place.
+- Round 4's C1 (vault-relative paths) is reverted. The evidence against it was
+  already in the repo and was not weighed.
+
+## Decisions taken in this round
+
+- **Absolute means absolute**, including `tasks show`'s `source:` and the
+  `path` field of every `--json` listing. The owner's instruction was "make it
+  absolute everywhere", and a second category is what made this oscillate.
+- **`V.rel` survives for identifiers and matching only** — thread refs,
+  wikilink targets, `lint`'s schema scope check (which closes R5-C2).
+- **Two kinds of read, named as such:** `read_utf8` for a walker, which skips;
+  `read_or_die` for a file the user named, which stops. The renderer keeps its
+  tolerant read (`errors='surrogateescape'`) so a note with odd bytes still
+  renders.
+
+## Still open
+
+- **R5-C1**: `helpjson`'s `help_map` fallback is dead now that
+  `Subcommands.add_parser` sets `description`, and is still tested.
+- **R5-C4 / R4-C5**: `ACTION: () do x` loses the `()` on ingest while
+  `buffer add-action` keeps it. It is a behaviour question — refuse the empty
+  parens, or keep them — so it is left for the owner.
+- R4-C2, C4, C5, C7, C8, the deferred bugs, and the merge.

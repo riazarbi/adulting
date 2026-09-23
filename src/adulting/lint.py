@@ -688,7 +688,7 @@ def discover_files():
         for root, dirs, files in os.walk(d):
             dirs[:] = [x for x in dirs if not x.startswith('.')]
             for f in sorted(files):
-                if f.startswith('.') or f.endswith('.bak'):
+                if f.startswith('.'):
                     continue
                 full = Path(root) / f
                 if full.suffix == '.md':

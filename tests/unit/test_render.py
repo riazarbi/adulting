@@ -85,6 +85,7 @@ def test_the_action_table_has_a_status_column():
     header = "| Assignee | Task | Status |\n|----------|--------------------------------------------------|--------|\n"
     for rendered in (R.pdf_markdown(note, "Riaz Arbi"), R.minutes_markdown(note, "Riaz Arbi")):
         assert header + "| Riaz Arbi | Booked | Done |\n" in rendered
+    # DEFERRED BUG 12: an empty table says so with three "None" cells.
     empty = R.minutes_markdown("---\ntopic: t\ntype: Meeting\n---\n\n# Content\nbody\n", "Riaz Arbi")
     assert header + "| None | None | None |\n" in empty
 

@@ -396,6 +396,7 @@ def cmd_set_scheduled(args):
 # ---------- subcommand: set-priority ----------
 
 def cmd_set_priority(args):
+    V.check_priority(args.priority)
     anchor = find_anchor(args.uuid)
     mutate_anchor(anchor, priority=args.priority)
     print(f"updated: {anchor.uuid}  priority={args.priority}")
@@ -481,6 +482,8 @@ def _print_table(anchors, cache):
 
 
 def cmd_list(args):
+    if args.priority:
+        V.check_priority(args.priority)
     anchors = [a for a in walk_anchors() if a.kind == 'TASK']
     if args.priority:
         anchors = [a for a in anchors if a.priority == args.priority]
@@ -549,7 +552,7 @@ def main():
         help="'(Assignee) description' or just 'description'.")
     p.add_argument('--due', help='YYYY-MM-DD due date.')
     p.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
-    p.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
+    p.add_argument('--priority', help="H, M or L.")
     p.add_argument('--depends', action='append', default=[],
         help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p.set_defaults(func=cmd_add)
@@ -582,7 +585,7 @@ def main():
     p = sub.add_parser('set-priority',
         help="Set priority H|M|L; writes [#X] in the visible portion.")
     p.add_argument('uuid', help="The task's uuid, from `tasks list`; any unique prefix will do.")
-    p.add_argument('priority', choices=['H', 'M', 'L'], help="H, M or L.")
+    p.add_argument('priority', help="H, M or L.")
     p.set_defaults(func=cmd_set_priority)
 
     p = sub.add_parser('add-depends', help="Add a depends entry.")
@@ -598,8 +601,7 @@ def main():
     p.set_defaults(func=cmd_rm_depends)
 
     p = sub.add_parser('list', help="List pending tasks (formatted).")
-    p.add_argument('--priority', choices=['H', 'M', 'L'],
-        help="Filter to a single priority.")
+    p.add_argument('--priority', help="Filter to a single priority: H, M or L.")
     p.add_argument('--thread',
         help="Filter to tasks whose source note carries this thread "
              "(e.g. Processes/SGB).")

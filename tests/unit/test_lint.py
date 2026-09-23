@@ -217,10 +217,7 @@ def test_record_block_shape_errors(validate, fence, key, label, block, json_name
     def errors(body):
         return list(L.validate_record_block(body, Path("f.md"), validate))
 
-    try:
-        json.loads("{")
-    except json.JSONDecodeError as e:
-        bad_json = str(e)
+    bad_json = "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
     assert errors("no block here\n") == [(0, f"{label}: no {fence} block")]
     assert errors(f"x\n{fence}\n\n```\n") == []
     assert errors(f"x\n{fence}\n{{\n```\n") == [(2, f"{label}: {json_name} does not parse: {bad_json}")]

@@ -126,19 +126,6 @@ def test_delete_missing_person(people_vault):
 
 # ---------- no interactivity (fails against the pre-port script) ----------
 
-def test_new_without_name_fails_instead_of_prompting(vault):
-    r = vault.run("new", "--category", "personal", input="Typed Name\n", cli="people")
-    assert r.returncode == 2
-    assert "--name" in r.stderr
-    assert list((vault.home / "people").iterdir()) == []
-
-
-def test_new_without_category_fails_instead_of_prompting(vault):
-    r = vault.run("new", "--name", "Typed Name", input="1\n", cli="people")
-    assert r.returncode == 2
-    assert "--category" in r.stderr
-    assert list((vault.home / "people").iterdir()) == []
-
 
 def test_delete_without_yes_refuses_even_if_stdin_says_yes(people_vault):
     path = people_vault.home / "people" / "Old Contact.md"

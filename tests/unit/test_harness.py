@@ -74,11 +74,3 @@ def test_a_cross_command_write_lands_in_the_test_vault(vault):
     assert "Draft the scope note" in vault.read("buffer.md")
 
 
-def test_the_repo_root_holds_no_commands():
-    """Every command is a console script now. A script at the root would sit
-    on the isolated PATH ahead of anything else, so none may creep back.
-    (own_bin_dirs keeps the root for dev/testbed, whose old implementation
-    is a directory of root scripts.)"""
-    stray = [f.name for f in REPO_ROOT.iterdir()
-             if f.is_file() and os.access(f, os.X_OK)]
-    assert stray == []

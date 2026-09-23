@@ -576,7 +576,7 @@ def main():
     p.add_argument('text', help="'(Assignee) description' or just 'description'.")
     p.add_argument('--due', help='YYYY-MM-DD due date applied on flush+ingest.')
     p.add_argument('--scheduled', help='YYYY-MM-DD scheduled date.')
-    p.add_argument('--priority', choices=['H', 'M', 'L'], help="H, M or L.")
+    p.add_argument('--priority', help="H, M or L.")
     p.add_argument('--depends', action='append', default=[],
                       help="A task's 8-character uuid, from `tasks list`; repeatable.")
     p.set_defaults(func=cmd_add_action)

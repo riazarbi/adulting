@@ -25,7 +25,8 @@ from harness import without_program
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "render"
 KINDS = ("pdf", "minutes", "agenda")
-NOTES = sorted(p for p in FIXTURES.glob("*.md") if ".expected." not in p.name)
+NOTES = sorted(p for p in FIXTURES.glob("*.md")
+               if ".expected." not in p.name and p.name != "README.md")
 HAS_PANDOC = shutil.which("pandoc") is not None and shutil.which("xelatex") is not None
 
 

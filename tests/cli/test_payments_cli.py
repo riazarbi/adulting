@@ -106,12 +106,6 @@ def test_payment_writes_a_buffer_ref(vault):
                         vault.read("buffer.md"))
 
 
-def test_log_without_a_thread_fails_instead_of_prompting(payments_vault):
-    r = payments_vault.run("log", input="1\n1500\n2026-03-01\nFNB\nInvoice 3\n", cli="payments")
-    assert r.returncode == 2
-    assert "thread" in r.stderr
-    assert list((payments_vault.home / "payments").rglob("*.md")) == []
-
 
 # ---------- list, show ----------
 

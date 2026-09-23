@@ -6,6 +6,7 @@ in the environment (set by tests/harness.py), as the agent container sets
 it, rather than from any gitconfig on the machine running the suite.
 """
 
+import re
 import subprocess
 
 import pytest
@@ -16,6 +17,13 @@ def git(vault, *argv):
                        capture_output=True, text=True, env=vault.env)
     assert r.returncode == 0, f"git {argv}: {r.stderr}"
     return r.stdout
+
+
+def without_blob_hashes(text):
+    """git's `index 0000000..5626abf` lines, blanked. The hashes are git's
+    own and encode no requirement of ours; the rest of the diff is ours to
+    pin."""
+    return re.sub(r'^index \S+$', 'index ...', text, flags=re.M)
 
 
 def log_subjects(vault):
@@ -92,13 +100,13 @@ def test_review_lists_files_inside_a_new_directory_individually(gitvault):
 
     r = gitvault.run("review", cli="commit")
     assert (r.returncode, r.stderr) == (0, "")
-    assert r.stdout == (
+    assert without_blob_hashes(r.stdout) == (
         "Changed paths:\n  untracked   assets/deep/one.md\n  untracked   assets/deep/two.md\n\n"
         "New files:\n\n"
         "diff --git a/assets/deep/one.md b/assets/deep/one.md\nnew file mode 100644\n"
-        "index 0000000..5626abf\n--- /dev/null\n+++ b/assets/deep/one.md\n@@ -0,0 +1 @@\n+one\n"
+        "index ...\n--- /dev/null\n+++ b/assets/deep/one.md\n@@ -0,0 +1 @@\n+one\n"
         "diff --git a/assets/deep/two.md b/assets/deep/two.md\nnew file mode 100644\n"
-        "index 0000000..f719efd\n--- /dev/null\n+++ b/assets/deep/two.md\n@@ -0,0 +1 @@\n+two\n")
+        "index ...\n--- /dev/null\n+++ b/assets/deep/two.md\n@@ -0,0 +1 @@\n+two\n")
 
 
 def test_review_truncation_is_configurable_and_announced(gitvault):
@@ -236,7 +244,7 @@ def test_review_shows_a_staged_rename_as_old_arrow_new(gitvault):
     git(gitvault, "mv", "notes/seed.md", "notes/renamed.md")
     r = gitvault.run("review", cli="commit")
     assert (r.returncode, r.stderr) == (0, "")
-    assert r.stdout == (
+    assert without_blob_hashes(r.stdout) == (
         "Changed paths:\n  renamed     notes/seed.md -> notes/renamed.md\n\n"
         "Changes to tracked files:\n\n"
         "diff --git a/notes/seed.md b/notes/renamed.md\nsimilarity index 100%\n"
@@ -249,9 +257,9 @@ def test_review_shows_an_empty_new_file_as_a_bare_diff_header(gitvault):
     gitvault.write("notes/empty.md", "")
     r = gitvault.run("review", cli="commit")
     assert (r.returncode, r.stderr) == (0, "")
-    assert r.stdout == (
+    assert without_blob_hashes(r.stdout) == (
         "Changed paths:\n  untracked   notes/empty.md\n\nNew files:\n\n"
-        "diff --git a/notes/empty.md b/notes/empty.md\nnew file mode 100644\nindex 0000000..e69de29\n")
+        "diff --git a/notes/empty.md b/notes/empty.md\nnew file mode 100644\nindex ...\n")
 
 
 def test_review_before_the_first_commit_lists_new_files(vault):
@@ -259,10 +267,10 @@ def test_review_before_the_first_commit_lists_new_files(vault):
     vault.write("notes/first.md", "first\n")
     r = vault.run("review", cli="commit")
     assert (r.returncode, r.stderr) == (0, "")
-    assert r.stdout == (
+    assert without_blob_hashes(r.stdout) == (
         "Changed paths:\n  untracked   notes/first.md\n\nNew files:\n\n"
         "diff --git a/notes/first.md b/notes/first.md\nnew file mode 100644\n"
-        "index 0000000..9c59e24\n--- /dev/null\n+++ b/notes/first.md\n@@ -0,0 +1 @@\n+first\n")
+        "index ...\n--- /dev/null\n+++ b/notes/first.md\n@@ -0,0 +1 @@\n+first\n")
 
 
 def test_filenames_with_spaces_and_non_ascii_are_readable(gitvault):

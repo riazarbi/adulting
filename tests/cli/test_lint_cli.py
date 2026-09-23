@@ -82,10 +82,10 @@ def test_schemas_flag_uses_another_directory(vault, tmp_path):
     ]
 
 
-def test_walk_skips_dot_directories_dot_files_and_bak_files(vault):
+def test_walk_skips_dot_files_and_anything_that_is_not_markdown(vault):
     vault.write("threads/.trash/Projects/Old.md", "garbage")
     vault.write("threads/Projects/.hidden.md", "garbage")
-    vault.write("threads/Projects/SGB.md.bak", "garbage")
+    vault.write("threads/Projects/SGB.md.bak", "garbage")   # suffix .bak, not .md
     vault.write("threads/Projects/notes.txt", "garbage")
     r = vault.run(cli="lint")
     assert (r.returncode, r.stdout) == (0, "\n0 file(s) checked. 0 violation(s).\n")
@@ -585,8 +585,7 @@ def test_thread_bad_currency_is_flagged(vault):
 def test_unbilled_hours_pass_lint(vault):
     vault.write_thread("Topics", "Reading")
     vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
-    r = vault.run(cli="lint")
-    assert r.returncode == 0, r.stdout + r.stderr
+    assert_clean(vault.run(cli="lint"))
 
 
 # ---------- payments files ----------

@@ -354,10 +354,3 @@ def test_tend_flags_a_hand_written_wrongly_cased_thread(vault):
                         "    fix: edit via `buffer rm 1` and re-add via the matching `buffer add-*`\n")
 
 
-def test_depends_help_says_a_whole_uuid(vault):
-    """--depends must be exactly 8 hex characters, so calling it a prefix
-    invites a shorter one that is then refused."""
-    manifest = json.loads(vault.run("--help-json", cli="buffer").stdout)
-    [sub] = [s for s in manifest["subcommands"] if s["name"] == "add-action"]
-    [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
-    assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."

@@ -138,12 +138,6 @@ def test_entries_stay_sorted_by_start(vault):
     assert names == ["earlier", "later"]
 
 
-def test_log_without_a_thread_fails_instead_of_prompting(hours_vault):
-    r = hours_vault.run("log", input="1\nTyped description\n60\n\n", cli="hours")
-    assert r.returncode == 2
-    assert "thread" in r.stderr
-    assert list((hours_vault.home / "hours").rglob("*.md")) == []
-
 
 # ---------- unbilled time: currency is optional, because hours records time and money is an overlay on it ----------
 

@@ -251,66 +251,23 @@ def test_list_table(board):
         "cccc0001        -                             unthreaded\n")
 
 
-def test_list_filters(board):
-    assert board.run("list", "--thread", "Projects/Alpha", cli="tasks").stdout.count("\n") == 2
-    assert board.run("list", "--priority", "M", cli="tasks").stdout == \
-        "aaaa0003  [#M]  Topics/zeta    second log task\n"
-    assert board.run("list", "--assignee", "Charlie", cli="tasks").stdout.startswith("aaaa0001")
-    assert board.run("list", "--thread", "Topics/zeta", "--priority", "H", cli="tasks").stdout == "(no tasks)\n"
+@pytest.mark.parametrize("argv, expected", [
+    (["--thread", "Projects/Alpha"],
+     "dddd0001  [#H]  Projects/SGB +1  (Riaz Arbi)  Draft the scope note  due:2026-09-20\n"
+     "aaaa0001  [#L]  Projects/SGB +1  (Charlie)    Existing              due:2026-09-05\n"),
+    (["--priority", "M"], "aaaa0003  [#M]  Topics/zeta    second log task\n"),
+    (["--assignee", "Charlie"],
+     "aaaa0001  [#L]  Projects/SGB +1  (Charlie)  Existing  due:2026-09-05\n"),
+    (["--overdue"],
+     "dddd0001  [#H]  Projects/SGB +1  (Riaz Arbi)  Draft the scope note  due:2026-09-20\n"
+     "aaaa0001  [#L]  Projects/SGB +1  (Charlie)    Existing              due:2026-09-05\n"),
+    (["--thread", "Topics/zeta", "--priority", "H"], "(no tasks)\n"),
+])
+def test_list_filters(board, argv, expected):
+    """`list` shows pending tasks only; DONE never appears in any of these."""
+    r = board.run("list", *argv, cli="tasks")
+    assert (r.returncode, r.stdout, r.stderr) == (0, expected, "")
 
-
-def test_list_shows_only_pending(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: pending one <!--abcd1234 entry:2026-05-20-->\n"
-        "DONE: completed one <!--ef567890 entry:2026-05-20 end:2026-05-25-->")
-    r = vault.run("list", cli="tasks")
-    assert (r.returncode, r.stdout, r.stderr) == (0, (
-        "abcd1234        Projects/SGB    pending one\n"), "")
-
-
-def test_list_priority_filter(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: [#H] high prio <!--abcd1234 entry:2026-05-20-->\n"
-        "TASK: [#L] low prio <!--ef567890 entry:2026-05-20-->")
-    r = vault.run("list", "--priority", "H", cli="tasks")
-    assert (r.returncode, r.stdout, r.stderr) == (0, (
-        "abcd1234  [#H]  Projects/SGB    high prio\n"), "")
-
-
-def test_list_assignee_filter(vault):
-    setup_vault(vault, people=("Riaz Arbi", "Charlie"))
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: (Riaz Arbi) mine <!--abcd1234 entry:2026-05-20-->\n"
-        "TASK: (Charlie) theirs <!--ef567890 entry:2026-05-20-->")
-    r = vault.run("list", "--assignee", "Charlie", cli="tasks")
-    assert (r.returncode, r.stdout, r.stderr) == (0, (
-        "ef567890        Projects/SGB  (Charlie)  theirs\n"), "")
-
-
-def test_list_overdue_filter(vault):
-    setup_vault(vault)
-    seed_note(vault, "2026-05-27-09-15-22",
-        "TASK: overdue <!--abcd1234 entry:2026-05-20 due:2000-01-01-->\n"
-        "TASK: future <!--ef567890 entry:2026-05-20 due:2099-01-01-->\n"
-        "TASK: no-due <!--beef0000 entry:2026-05-20-->")
-    r = vault.run("list", "--overdue", cli="tasks")
-    assert (r.returncode, r.stdout, r.stderr) == (0, (
-        "abcd1234        Projects/SGB    overdue  due:2000-01-01\n"), "")
-
-
-def test_list_thread_filter(vault):
-    setup_vault(vault, threads=(("Projects", "SGB"), ("Projects", "Other")))
-    vault.write_note("2026-05-27-09-15-22",
-        "TASK: in SGB <!--abcd1234 entry:2026-05-20-->",
-        threads=["Projects/SGB"])
-    vault.write_note("2026-05-27-10-30-00",
-        "TASK: in Other <!--ef567890 entry:2026-05-20-->",
-        threads=["Projects/Other"])
-    r = vault.run("list", "--thread", "Projects/SGB", cli="tasks")
-    assert (r.returncode, r.stdout, r.stderr) == (0, (
-        "abcd1234        Projects/SGB    in SGB\n"), "")
 
 
 def test_list_sorts_by_thread_alphabetically(vault):
@@ -452,12 +409,18 @@ def test_rm_depends_unknown_target_fails(vault):
     assert vault.read("notes/2026-05-27-09-15-22.md") == before
 
 
-def test_set_priority_takes_only_h_m_or_l(board):
+@pytest.mark.parametrize("argv", [
+    ["set-priority", "bbbb0001", "Z"],
+    ["list", "--priority", "Z"],
+    ["add", "Projects/SGB", "x", "--priority", "Z"],
+])
+def test_a_priority_is_h_m_or_l_wherever_it_is_given(board, argv):
+    """One rule and one message: argparse `choices` would have given a
+    different message and a different exit code for the same mistake."""
     before = board.snapshot()
-    r = board.run("set-priority", "bbbb0001", "Z", cli="tasks")
-    assert (r.returncode, r.stdout) == (2, "")
-    assert r.stderr.splitlines()[-1] == (
-        "tasks set-priority: error: argument priority: invalid choice: 'Z' (choose from 'H', 'M', 'L')")
+    r = board.run(*argv, cli="tasks")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "tasks: error: priority must be H, M, or L; got 'Z'\n"
     assert board.snapshot() == before
 
 
@@ -572,12 +535,6 @@ def test_ingest_reports_a_file_that_is_not_utf8_and_carries_on(vault):
                         f"  {bad}: file is not valid UTF-8; skipped\n\n")
     assert vault.run("list", cli="tasks").returncode == 0
 
-
-def test_depends_help_says_a_whole_uuid(vault):
-    manifest = json.loads(vault.run("--help-json", cli="tasks").stdout)
-    [sub] = [s for s in manifest["subcommands"] if s["name"] == "add"]
-    [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
-    assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."
 
 
 def test_list_resolves_a_bare_thread_name_like_every_other_command(board):

@@ -8,6 +8,7 @@ notice, which is what makes these worth pinning.
 
 from __future__ import annotations
 
+import functools
 import json
 import runpy
 import subprocess
@@ -20,7 +21,10 @@ sys.path.insert(0, str(REPO / "dev"))
 from commands import COMMANDS  # noqa: E402
 
 
+@functools.cache
 def harvest(fmt="md"):
+    """The corpus, harvested once per format for the whole run: a harvest
+    executes every command and each of its subcommands."""
     r = subprocess.run([sys.executable, str(HARVEST), "--format", fmt],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -59,5 +63,6 @@ def test_every_operator_tool_appears():
 
 def test_harvest_is_deterministic():
     """Two runs over an unchanged tree must be byte-identical — the whole
-    no-pollution argument for the generated artefacts rests on it."""
-    assert harvest() == harvest()
+    no-pollution argument for the generated artefacts rests on it. Around
+    the cache, so these really are two runs."""
+    assert harvest.__wrapped__() == harvest.__wrapped__()

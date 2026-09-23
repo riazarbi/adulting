@@ -173,15 +173,6 @@ def test_delete_not_found_and_ambiguous(threads_vault):
 
 # ---------- no interactivity (fails against the pre-port script) ----------
 
-@pytest.mark.parametrize("missing", ["--kind", "--category", "--name"])
-def test_new_fails_instead_of_prompting_for_a_missing_field(vault, missing):
-    given = {"--kind": "project", "--category": "professional", "--name": "Typed"}
-    argv = [x for k, val in given.items() if k != missing for x in (k, val)]
-    r = vault.run("new", *argv, input="1\n1\nTyped\n\n", cli="threads")
-    assert r.returncode == 2
-    assert missing in r.stderr
-    assert not (vault.home / "threads" / "Projects" / "Typed.md").exists()
-
 
 def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     for blank in ("", "  "):

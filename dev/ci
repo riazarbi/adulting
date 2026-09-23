@@ -98,6 +98,17 @@ def stage_lint():
     else:
         ok("python syntax")
 
+    # Every command is a console script: a script at the repo root would sit
+    # on the tests' isolated PATH ahead of the venv's.
+    stray = sorted(f.name for f in REPO.iterdir()
+                   if f.is_file() and os.access(f, os.X_OK))
+    if stray:
+        for f in stray:
+            print(f"    {f}")
+        bad("no commands at the repo root")
+    else:
+        ok("no commands at the repo root")
+
     env = command_env()
     missing = [t for t in TOOLS
                if run(t, '--help-json', capture_output=True, env=env).returncode != 0]

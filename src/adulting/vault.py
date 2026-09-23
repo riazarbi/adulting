@@ -580,6 +580,8 @@ def person_exists(name):
     return vault_file(f"people/{name}.md") is not None
 
 
+PRIORITIES = ('H', 'M', 'L')
+
 ASSIGNEE_PREFIX_RE = re.compile(r'^\((?P<assignee>[^)]*)\)\s*(?P<rest>.*)$')
 ACTION_RE = re.compile(r'^ACTION:\s*(?P<rest>.*)$')
 ATTRS_TAIL_RE = re.compile(r'\s*<!--(?P<attrs>[^>]*)-->\s*$')
@@ -614,6 +616,15 @@ def parse_action(line):
     return Action(assignee, body, attrs, errors)
 
 
+def check_priority(value):
+    """A priority as typed, or stop. One rule and one message wherever a
+    priority is given: on a flag, on a `priority:` attribute, or to
+    `tasks set-priority`."""
+    if value not in PRIORITIES:
+        die(f"priority must be H, M, or L; got {value!r}")
+    return value
+
+
 def parse_action_attrs(tokens):
     """Parse `due:... scheduled:... priority:... depends:...` tokens from an
     ACTION's attr comment. Returns (attrs, errors): a bad value is reported
@@ -631,7 +642,7 @@ def parse_action_attrs(tokens):
             else:
                 errors.append(f"{key} must be YYYY-MM-DD; got {val!r}")
         elif key == 'priority':
-            if val in ('H', 'M', 'L'):
+            if val in PRIORITIES:
                 attrs[key] = val
             else:
                 errors.append(f"priority must be H, M, or L; got {val!r}")

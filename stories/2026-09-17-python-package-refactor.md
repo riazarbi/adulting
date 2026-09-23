@@ -207,6 +207,16 @@ all, and fixing one means changing that test first. None is a data-loss risk.
     in the vault have a Summary.
 11. **A non-person link in `people:` is listed as an attendee** as written,
     e.g. `[[Projects/X]]`. No note in the vault has one.
+12. **An empty action table prints `| None | None | None |`** rather than
+    saying there are no action items.
+13. **The minutes' placeholders read oddly:** `No minutes agreements were
+    made.` (they are *minuted* agreements) beside `No Resolutions were
+    passed.` with its unexplained capital.
+14. **Header whitespace:** every `date:` line ends in a space, and a note
+    with no frontmatter renders `subtitle: ` and `date:  `.
+
+Bugs 2 and 10-14 are pinned by `tests/fixtures/render/*.expected.md`, whose
+README lists which line of which fixture holds each one.
 
 Fixed since the port (2026-09-22), found by the review (A8): minutes inserting
 a second Summary before any line containing `# Content`, and `#  Details` for a

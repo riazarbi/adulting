@@ -146,15 +146,20 @@ def test_thread_and_type_filter_together(stocked):
 
 def test_thread_accepts_bare_name(stocked):
     """`SGB` must resolve without a `threads list` round-trip first."""
-    bare = stocked.run("notes", "--thread", "SGB", cli="search")
-    full = stocked.run("notes", "--thread", "Processes/SGB", cli="search")
-    assert bare.returncode == 0
-    assert bare.stdout == full.stdout
+    r = stocked.run("notes", "--thread", "SGB", "--json", cli="search")
+    assert [x["path"] for x in json.loads(r.stdout)] == [
+        path(stocked, "notes/2026-08-22-09-00-00.md"),
+        path(stocked, "notes/2026-08-25-09-00-00.md")]
 
 
 def test_type_is_case_insensitive(stocked):
-    assert stocked.run("notes", "--type", "meeting", cli="search").stdout == \
-           stocked.run("notes", "--type", "Meeting", cli="search").stdout
+    """Comparing the two runs to each other passed even with the --type
+    filter removed entirely; this asserts what the filter selects."""
+    for typed in ("meeting", "Meeting", "MEETING"):
+        r = stocked.run("notes", "--type", typed, "--json", cli="search")
+        assert [x["path"] for x in json.loads(r.stdout)] == [
+            path(stocked, "notes/2026-08-22-09-00-00.md"),
+            path(stocked, "notes/2026-08-26-09-00-00.md")], typed
 
 
 def test_text_miss_reports_no_matches(stocked):

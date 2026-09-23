@@ -48,9 +48,19 @@ USES = [
 ]
 
 
-@pytest.mark.parametrize("what", ["missing", "a file"])
 @pytest.mark.parametrize("cli, argv", USES, ids=[" ".join([c, *a]) for c, a in USES])
-def test_a_vault_that_is_not_a_directory_is_refused(vault, tmp_path, cli, argv, what):
+def test_a_missing_vault_is_refused(vault, tmp_path, cli, argv):
+    check_refused(vault, tmp_path, cli, argv, "missing")
+
+
+# One command of each kind is enough for the second shape: the check itself
+# is the same one.
+@pytest.mark.parametrize("cli, argv", [("tasks", ["list"]), ("buffer", ["add", "x"])])
+def test_a_vault_that_is_a_file_is_refused(vault, tmp_path, cli, argv):
+    check_refused(vault, tmp_path, cli, argv, "a file")
+
+
+def check_refused(vault, tmp_path, cli, argv, what):
     """Reads used to report an empty vault and writes used to start a new
     one wherever ADULTING_HOME pointed, so a mistyped path went unnoticed.
     A file there crashed with a traceback."""
@@ -66,7 +76,9 @@ def test_a_vault_that_is_not_a_directory_is_refused(vault, tmp_path, cli, argv, 
         assert home.read_text() == "not a vault"
 
 
-@pytest.mark.parametrize("cli", SURFACE)
+# One command per shape: a name that differs from its file (notes.py), one
+# with no subcommands (lint), and one with a subcommand (tasks).
+@pytest.mark.parametrize("cli", ["notes", "lint", "tasks"])
 def test_errors_name_the_command_even_under_python_m(vault, tmp_path, cli):
     """The `<command>:` prefix used to come from argv[0], so under
     `python -m adulting.notes` errors read `notes.py: error: ...`."""
@@ -123,3 +135,13 @@ def test_help_json_is_a_documented_flag(vault, cli):
     manifest = json.loads(vault.run("--help-json", cli=cli).stdout)
     [flag] = [f for f in manifest["flags"] if f["name"] == "--help-json"]
     assert flag["description"] == "Print this command's arguments as JSON, and exit."
+
+
+@pytest.mark.parametrize("cli, subcommand", [("buffer", "add-action"), ("tasks", "add")])
+def test_depends_help_says_a_whole_uuid(vault, cli, subcommand):
+    """--depends must be exactly 8 hex characters, so calling it a prefix
+    invites a shorter one that is then refused."""
+    manifest = json.loads(vault.run("--help-json", cli=cli).stdout)
+    [sub] = [s for s in manifest["subcommands"] if s["name"] == subcommand]
+    [flag] = [f for f in sub["flags"] if f["name"] == "--depends"]
+    assert flag["description"] == "A task's 8-character uuid, from `tasks list`; repeatable."

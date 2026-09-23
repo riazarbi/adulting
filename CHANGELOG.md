@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-B (2 of 2): tests that say what they pin, and fewer of them
+
+- **R3-B4: the pinned renderer output says where it is wrong.** `tests/fixtures/render/README.md` explains that the `.expected.md` files were captured from the bash renderers, lists the six known-wrong things they pin, and points at the deferred bugs. **Deferred bugs 12, 13 and 14** are new: an empty action table prints `| None | None | None |`; the minutes summary says `No minutes agreements were made.` beside `No Resolutions were passed.`; headers carry trailing spaces and an empty `subtitle:`/`date:` when a note has no frontmatter. `test_render.py` carries a `# DEFERRED BUG 12` marker.
+- **R3-B6: the rule lives with the code, not in a test.** `vault.PRIORITIES` and `vault.check_priority` are the one place that says a priority is `H`, `M` or `L`; `tasks set-priority` and `tasks list --priority` both call it, so an unknown priority is refused instead of silently matching nothing.
+- **R3-B7: tests that could not fail are gone or made exact.** The "fails instead of prompting" family repeated in five files is deleted (`test_no_prompts.py` proves it once); the search tests that asserted only an exit code now assert the lines; the per-command list-filter tests are one parametrized test with exact output; `test_depends_help_says_a_whole_uuid` is folded into `test_every_command.py`; `test_commit_cli.py` masks blob hashes through one helper. `tests/dev/test_manual_harvest.py` caches its harvest instead of running the CLI once per test.
+- **The repo-root rule moved to `dev/ci` lint**, where the other repo-shape rules are, and out of `test_harness.py`.
+- `lint`'s dead `.bak` clause is removed: nothing writes `.bak` files any more.
+- **745 passing, `dev/ci` green.** The drop from 772 is the deletions above; coverage of behaviour is unchanged.
+
 ## 2026-09-23 - review round 3, part R3-B (1 of 2): the coverage the suite was missing
 
 Fresh mutations of the round 2 code were caught 2 times in 11. These are the holes that let that happen; each new test was checked by breaking the code it covers.
@@ -10,7 +19,7 @@ Fresh mutations of the round 2 code were caught 2 times in 11. These are the hol
 - **R3-B2: no default was tested.** `search notes/logs` (20), `search overview` (5), `search stream` (100), `commit review`'s per-file cap (150) and its whole-output cap (3000) each have a test that proves the default's effect; changing any of the five fails one. `commit review`'s tracked-file truncation was never exercised at all, because the fixture's only long file was untracked.
 - **R3-B3: rounding and aging rested on almost nothing.** Every rounding assertion now has a `.666…` twin beside its `.333…` case, so rounding down instead of half-even fails: `charge_of`, `hours_of` and a built statement. The aging buckets are tested at their boundaries (0, 29, 30, 59, 60, 89, 90, 200 days), so moving one fails.
 - **R3-B5: the coverage lost in the round 2 deletions is back:** an unbilled entry's buffer REF, the stored start and end after `hours log`, `hours report --json` per thread and currency, a payment with no account or note end to end, and `threads show Projects/sgb`.
-- **773 passing.**
+- **772 passing.**
 
 ## 2026-09-23 - the rules suggester is removed (owner decision)
 

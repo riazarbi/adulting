@@ -44,18 +44,16 @@ REFUSALS = [
      "threads: error: refusing to delete {home}/threads/Projects/SGB.md without -y"),
     ("notes", ["delete", "2026-09-10-14-30-00"], 1,
      "notes: error: refusing to delete {home}/notes/2026-09-10-14-30-00.md without -y"),
+    # A missing argument is argparse's to report, so one row pins its
+    # wording and the rest only require the refusal.
     ("hours", ["log"], 2, "hours log: error: the following arguments are required: thread"),
-    ("payments", ["log"], 2, "payments log: error: the following arguments are required: thread"),
-    ("people", ["new", "--category", "personal"], 2,
-     "people new: error: the following arguments are required: --name"),
-    ("threads", ["new", "--kind", "project", "--category", "professional"], 2,
-     "threads new: error: the following arguments are required: --name"),
-    ("notes", ["new", "--type", "Log", "--topic", "x"], 2,
-     "notes new: error: the following arguments are required: --thread"),
-    ("buffer", ["add-action"], 2,
-     "buffer add-action: error: the following arguments are required: thread, text"),
-    ("tasks", ["add"], 2, "tasks add: error: the following arguments are required: thread, text"),
-    ("commit", ["save"], 2, "commit save: error: the following arguments are required: --message"),
+    ("payments", ["log"], 2, None),
+    ("people", ["new", "--category", "personal"], 2, None),
+    ("threads", ["new", "--kind", "project", "--category", "professional"], 2, None),
+    ("notes", ["new", "--type", "Log", "--topic", "x"], 2, None),
+    ("buffer", ["add-action"], 2, None),
+    ("tasks", ["add"], 2, None),
+    ("commit", ["save"], 2, None),
 ]
 
 
@@ -69,7 +67,11 @@ def test_refuses_on_a_terminal_without_asking(one_of_each, cli, argv, code, mess
     before = one_of_each.snapshot()
     r = one_of_each.run_on_a_terminal(*[a.format(**fill) for a in argv], cli=cli)
     assert (r.returncode, r.stdout) == (code, "")
-    assert r.stderr.splitlines()[-1] == message.format(**fill)
+    last = r.stderr.splitlines()[-1]
+    if message:
+        assert last == message.format(**fill)
+    else:
+        assert last.startswith(f"{cli} {argv[0]}: error: ") and "?" not in last
     assert one_of_each.snapshot() == before
 
 
@@ -94,11 +96,17 @@ def test_edit_changes_the_record_without_asking(one_of_each, cli, argv, printed)
 
 
 
-@pytest.mark.parametrize("argv", [["notes"], ["logs"], ["activity"], ["overview", "SGB"], ["stream"]])
-def test_search_completes_on_a_terminal(one_of_each, argv):
+@pytest.mark.parametrize("argv, first", [
+    (["notes"], "2026-09-10-14-30-00.md"),
+    (["stream"], "0h 30m work"),
+])
+def test_search_completes_on_a_terminal(one_of_each, argv, first):
+    """Read-only commands must not wait for anything either, and must print
+    their answer rather than an empty one."""
     before = one_of_each.snapshot()
     r = one_of_each.run_on_a_terminal(*argv, cli="search")
     assert (r.returncode, r.stderr) == (0, "")
+    assert first in r.stdout
     assert one_of_each.snapshot() == before
 
 

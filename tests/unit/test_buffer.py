@@ -53,7 +53,7 @@ def test_regroup_lines_orders_groups_then_unknowns_then_unparsed():
              "- [[Projects/A]] TEXT: a1-early <!--2026-09-10T07:00:00-->",
              "- UNKNOWN: u1 <!--2026-09-09T08:00:00-->"]
     out = B.regroup_lines(*B.parse_buffer_entries(lines))
-    assert [l.split(": ", 1)[-1].split(" <!")[0] if l.startswith("-") else l for l in out] == [
+    assert [ln.split(": ", 1)[-1].split(" <!")[0] if ln.startswith("-") else ln for ln in out] == [
         "a1-early", "a1-late", "a2", "b", "",
         "<!-- UNKNOWN ENTRIES BELOW: convert via `buffer rm <n>` + the matching `buffer add-*`. tend will fail until cleared. -->",
         "u1", "u2", "",

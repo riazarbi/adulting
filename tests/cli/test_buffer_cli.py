@@ -42,7 +42,7 @@ def test_add_text_ref_action_line_shapes(buffer_vault):
             "--depends", "aaaaaaaa", cli="buffer").stdout,
         buffer_vault.run("add-action", "Projects/SGB", "Plain action", cli="buffer").stdout,
     ]
-    shapes = [re.sub(TS, "TS", l) for l in lines]
+    shapes = [re.sub(TS, "TS", line) for line in lines]
     assert shapes == [
         "buffered: - [[Projects/SGB]] TEXT: Auth wall unresolved <!--TS-->\n",
         "buffered: - [[Projects/SGB]] REF: [[notes/2026-09-10-14-30-00]] Kickoff <!--TS-->\n",
@@ -129,7 +129,8 @@ def test_list_numbers_lines_and_skips_blanks(buffer_vault):
 def test_list_filter_and_empty_messages(buffer_vault):
     assert buffer_vault.run("list", cli="buffer").stdout == "(buffer empty)\n"
     buffer_vault.write("buffer.md", "\n".join(MESSY) + "\n")
-    assert [l[:4] for l in buffer_vault.run("list", "WELLNESS", cli="buffer").stdout.splitlines()] == ["   1", "   8", "  12"]
+    listed = buffer_vault.run("list", "WELLNESS", cli="buffer").stdout.splitlines()
+    assert [line[:4] for line in listed] == ["   1", "   8", "  12"]
     assert buffer_vault.run("list", "zzz", cli="buffer").stdout == "(no matching entries)\n"
 
 

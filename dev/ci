@@ -3,7 +3,7 @@
 does; run a single stage by name while iterating locally.
 
     dev/ci            lint + test          (the gate; fast, no network, no LLM)
-    dev/ci lint       syntax + contracts only
+    dev/ci lint       syntax + ruff + contracts only
     dev/ci test       every test, with a coverage report
     dev/ci generate   regenerate MANUAL.md and dev/tools/ (needs `claude`)
     dev/ci manual     regenerate MANUAL.md only            (needs `claude`)
@@ -97,6 +97,20 @@ def stage_lint():
         bad("python syntax")
     else:
         ok("python syntax")
+
+    # ruff, configured in pyproject.toml. It reads the whole repo, so a rule
+    # it reports is reported once here rather than per file.
+    ruff = REPO / '.venv' / 'bin' / 'ruff'
+    if not ruff.exists():
+        bad("ruff (not installed; re-run the install line at the top of this file)")
+    else:
+        found = run(ruff, 'check', REPO / 'src', REPO / 'dev', REPO / 'tests',
+                    capture_output=True, text=True)
+        if found.returncode == 0:
+            ok("ruff")
+        else:
+            print(found.stdout, end='')
+            bad("ruff")
 
     # Every command is a console script: a script at the repo root would sit
     # on the tests' isolated PATH ahead of the venv's.

@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 3, part R3-C6: ruff runs (owner decision)
+
+The `# noqa` markers implied a linter that never ran. There is one now, and
+it is part of the gate rather than something to remember.
+
+- **`dev/ci lint` runs ruff** over `src`, `dev` and `tests`, configured in `pyproject.toml`: `E`, `F`, `W`, `B` (bugbear), `BLE` (the bare `except Exception:` this code base has argued with) and `RUF100`, which keeps a `# noqa` from outliving the thing it suppressed. `ruff>=0.16` is a dev dependency. Verified by breaking a file and watching the gate fail.
+- **Line length is 120**, which is what the code already sits inside; two long lines in `buffer.py` and `hours.py` were wrapped. Tests are exempt from that one rule, because they pin vault lines and command output verbatim and wrapping the strings would change what is pinned.
+- **The 19 findings are fixed, not silenced:** four unused imports (three of them left by moving `cmd_list` into `vault`), three unused test variables, two pointless f-strings, six `l` loop variables, one `raise ... from e` in `V.iso_date`, and — the one that was a latent bug — `lint`'s `problem()` closure captured the loop variable `tag` by reference (B023), so a record's message could have named a later record's index. It binds at definition now.
+- One stale `# noqa: E402` is gone; the rest are real and are honoured.
+
 ## 2026-09-23 - review round 3, parts R3-C4 and R3-C5: one machine each, and the inconsistencies picked
 
 **C4, the duplicated state machines:**

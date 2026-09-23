@@ -44,7 +44,7 @@ def test_log_lines(hours_vault):
         hours_vault.run("log", "Trust", "Board prep", "-d", "2026-08-05", "-t", "14:00", cli="hours").stdout,
         hours_vault.run("log", "Wellness", "5k", "run", "-m", "30", "-d", "2026-08-06", "-t", "06:30", cli="hours").stdout,
     ]
-    shapes = [re.sub(r"^logged [0-9a-f]{8}", "logged ID", l) for l in lines]
+    shapes = [re.sub(r"^logged [0-9a-f]{8}", "logged ID", line) for line in lines]
     assert shapes == [
         "logged ID  Projects/SANA  2026-08-04 09:15  1h 30m @ 2500 ZAR = 3750 ZAR\n",
         "logged ID  Processes/Trust  2026-08-05 14:00  0h 45m @ 1800 BWP = 1350 BWP\n",

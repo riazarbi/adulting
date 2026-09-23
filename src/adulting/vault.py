@@ -116,8 +116,9 @@ def iso_date(value):
     """An argparse type: a real date written YYYY-MM-DD, kept as text."""
     try:
         datetime.strptime(value, '%Y-%m-%d')
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"expected a date as YYYY-MM-DD, got {value!r}")
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(
+            f"expected a date as YYYY-MM-DD, got {value!r}") from e
     return value
 
 

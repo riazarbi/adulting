@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "coverage>=7.10"]
+dev = ["pytest>=8", "coverage>=7.10", "ruff>=0.16"]
 
 # One entry per ported command. A command appears here in the same change
 # that deletes its old script from the repo root.
@@ -37,6 +37,24 @@ where = ["src"]
 # Non-Python files installed with the package.
 [tool.setuptools.package-data]
 adulting = ["schemas/*.md"]
+
+# The linter `dev/ci lint` runs. The rule set is deliberately small: pyflakes
+# and pycodestyle for the mistakes, bugbear for the traps, and BLE for bare
+# `except Exception:` — the one this code base has had to argue with. 120
+# columns is what the code already sits inside.
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# RUF100 keeps the `# noqa` markers honest: one that no longer suppresses
+# anything is removed rather than left as a claim about the code.
+select = ["E", "F", "W", "B", "BLE", "RUF100"]
+
+# Tests pin vault lines and command output verbatim. Wrapping those strings
+# to fit a column would change what is being pinned, or hide it, so the
+# length rule does not apply to them.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

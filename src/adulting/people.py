@@ -7,7 +7,6 @@ action `assignee:`. They are not threads — they cannot be the value of
 `note.thread`. Skeleton: just create / delete / list / show.
 """
 
-import json
 import sys
 
 from adulting import vault as V

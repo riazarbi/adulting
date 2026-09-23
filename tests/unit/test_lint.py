@@ -1,6 +1,5 @@
 """Unit tests for adulting.lint: parsers, the schema DSL and graph checks."""
 
-import json
 from pathlib import Path
 
 import pytest

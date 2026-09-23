@@ -536,4 +536,4 @@ def test_stream_shows_a_hundred_events_by_default(vault):
     r = vault.run("stream", "--since", "2026-01-01", cli="search")
     # 101 log lines plus the thread-opened event: 100 shown, 2 not.
     assert r.stdout.splitlines()[-1] == "2 more not shown — raise --limit"
-    assert len([l for l in r.stdout.splitlines() if l.startswith("  log")]) == 100
+    assert len([line for line in r.stdout.splitlines() if line.startswith("  log")]) == 100

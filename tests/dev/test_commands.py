@@ -6,7 +6,7 @@ import tomllib
 from harness import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "dev"))
-from commands import COMMANDS  # noqa: E402
+from commands import COMMANDS
 
 
 def test_the_command_list_is_every_console_script_once():

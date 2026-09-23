@@ -29,8 +29,9 @@ combination.
 Every logged entry also drops a `REF:` into the buffer, so it appears in the
 thread's daily log on the next `buffer flush` -- the same thing `notes new`
 has always done. The pointer is filed under the day the work happened, not
-the day of the flush, so a backdated entry lands in the right day's log. That keeps the log a complete chronology of the thread
-rather than one that silently omits time. Best-effort: if the buffer cannot
+the day of the flush, so a backdated entry lands in the right day's log. That
+keeps the log a complete chronology of the thread rather than one that
+silently omits time. Best-effort: if the buffer cannot
 be written the entry is still recorded, and nothing is reported, because a
 warning on stderr would cost the caller its stdout.
 """
@@ -85,8 +86,8 @@ def resolve_billing(tpath, currency_flag, rate_flag):
     if not currency:
         if rate_flag is not None and int(rate_flag) != 0:
             V.die("--rate needs a currency\n"
-                  f"  pass --currency, or set `currency:` on the thread; "
-                  f"omit --rate to log the time as unbilled")
+                  "  pass --currency, or set `currency:` on the thread; "
+                  "omit --rate to log the time as unbilled")
         return None, 0
     return V.check_currency(currency), resolve_rate(tpath, rate_flag)
 

@@ -8,7 +8,7 @@ import pytest
 
 def violations(r):
     """The `<path>:<line>: <message>` lines, without the summary."""
-    return [l for l in r.stdout.split("\n") if l and "file(s) checked" not in l]
+    return [line for line in r.stdout.split("\n") if line and "file(s) checked" not in line]
 
 
 def assert_clean(r):
@@ -94,8 +94,8 @@ def test_walk_skips_dot_files_and_anything_that_is_not_markdown(vault):
 # ---------- threads and people ----------
 
 def test_closed_thread_and_person_need_ended(vault):
-    t = vault.write_thread("Projects", "SGB", status="closed")
-    p = vault.write_person("Riaz Arbi", status="closed")
+    vault.write_thread("Projects", "SGB", status="closed")
+    vault.write_person("Riaz Arbi", status="closed")
     assert violations(vault.run(cli="lint")) == [
         f"{vault.home}/threads/Projects/SGB.md:0: ended is required when status is closed",
         f"{vault.home}/people/Riaz Arbi.md:0: ended is required when status is closed",
@@ -273,7 +273,7 @@ def test_minimal_task_anchor_validates(vault):
 
 
 def test_full_task_anchor_validates(vault):
-    p = anchor_note(vault,
+    anchor_note(vault,
         "TASK: Prereq <!--ef567890 entry:2026-05-27-->",
         "TASK: [#H] (Riaz Arbi) Send quarterly report "
         "<!--abcd1234 entry:2026-05-27 due:2026-05-29 "

@@ -7,7 +7,6 @@ Skeleton: just create / delete / list / show. The richer reporting tools
 be rebuilt when we know what views we actually want from notes data.
 """
 
-import json
 import sys
 
 from adulting import vault as V

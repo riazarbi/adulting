@@ -487,7 +487,7 @@ def read_block(text, label):
     if blk is None:
         return [(0, f"{label}: no {fence} block")], 0, None
     errors = []
-    if sum(1 for l in lines if l.rstrip() == fence) > 1:
+    if sum(1 for line in lines if line.rstrip() == fence) > 1:
         errors.append((blk[0] + 1, f"{label}: more than one {kind['block']} block"))
 
     fence_line = blk[0] + 1
@@ -512,9 +512,9 @@ def validate_record_block(text, path, label, registry=None):
     errors, fence_line, records = read_block(text, label)
     yield from errors
     for idx, r in enumerate(records or []):
-        tag = f"{kind['key']}[{idx}]"
-
-        def problem(message):
+        # `tag` is bound now, not when `problem` is called, so the message
+        # names the record it was made for.
+        def problem(message, tag=f"{kind['key']}[{idx}]"):
             return (fence_line, f"{label}: {tag}{message}")
 
         if not isinstance(r, dict):
@@ -560,7 +560,7 @@ def report_duplicates(groups, wording):
         if len(hits) <= 1:
             continue
         for path, ln in hits:
-            others = ', '.join(f"{p}:{l}" for p, l in hits if (p, l) != (path, ln))
+            others = ', '.join(f"{p}:{n}" for p, n in hits if (p, n) != (path, ln))
             yield path, ln, f"{wording} {value!r} duplicated at {others}"
 
 

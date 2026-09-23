@@ -14,7 +14,6 @@ Output shape:
 """
 
 import argparse
-import json
 
 
 def _action_to_arg(action):

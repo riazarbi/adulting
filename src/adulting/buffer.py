@@ -407,7 +407,8 @@ def regroup_lines(entries, unknowns, unparsed):
             out.append(e['raw'])
     if unknowns:
         out.append('')
-        out.append('<!-- UNKNOWN ENTRIES BELOW: convert via `buffer rm <n>` + the matching `buffer add-*`. tend will fail until cleared. -->')
+        out.append('<!-- UNKNOWN ENTRIES BELOW: convert via `buffer rm <n>` + the '
+                   'matching `buffer add-*`. tend will fail until cleared. -->')
         for u in sorted(unknowns, key=lambda u: u['ts']):
             out.append(u['raw'])
     if unparsed:

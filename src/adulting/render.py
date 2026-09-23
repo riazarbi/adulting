@@ -17,7 +17,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-ENCODING = dict(encoding='utf-8', errors='surrogateescape')
+# The renderer carries odd bytes through instead of refusing the note: a
+# render is about getting the document out, and `lint` reports the file.
+ERRORS = 'surrogateescape'
+ENCODING = dict(encoding='utf-8', errors=ERRORS)
 
 # Whitespace means ASCII whitespace only, unlike Python's \s.
 SPACE = ' \t\n\r\f\v'

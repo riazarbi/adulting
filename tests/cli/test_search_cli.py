@@ -539,18 +539,48 @@ def test_stream_shows_a_hundred_events_by_default(vault):
     assert len([line for line in r.stdout.splitlines() if line.startswith("  log")]) == 100
 
 
-@pytest.mark.parametrize("argv", [["notes"], ["logs"], ["stream"], ["activity"],
-                                  ["overview", "Projects/SGB"]])
-def test_a_file_that_is_not_utf8_is_skipped_not_a_traceback(vault, argv):
-    """One junk file used to end the whole walk with a Python stack trace.
-    `search` is read-only and reports nothing about the vault's health, so it
-    skips the file; `lint` is the command that reports it."""
+@pytest.fixture
+def one_good_one_unreadable(vault):
+    """A readable note and a log, and an unreadable one of each beside them."""
     vault.write_thread("Projects", "SGB")
     vault.write_note("2026-09-10-14-30-00", "TEXT: readable", threads=["Projects/SGB"])
+    vault.write("logs/Projects/SGB/2026-09-10.md",
+                '---\nthread: "[[Projects/SGB]]"\ndate: 2026-09-10\n---\n\n'
+                "TEXT: a readable log line\n")
     for rel in ("notes/2026-09-12-08-00-00.md", "logs/Projects/SGB/2026-09-12.md"):
         bad = vault.home / rel
         bad.parent.mkdir(parents=True, exist_ok=True)
         bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
-    r = vault.run(*argv, cli="search")
-    assert "Traceback" not in r.stderr
+    return vault
+
+
+def test_a_file_that_is_not_utf8_is_left_out_of_the_results(one_good_one_unreadable):
+    """One junk file used to end the whole walk with a stack trace. It is
+    skipped — not read with replacement characters, which would put a row of
+    mojibake in the results and call it a note."""
+    rows = json.loads(one_good_one_unreadable.run("notes", "--json", cli="search").stdout)
+    assert [Path(r["path"]).name for r in rows] == ["2026-09-10-14-30-00.md"]
+    logs = json.loads(one_good_one_unreadable.run("logs", "--json", cli="search").stdout)
+    assert [Path(r["path"]).name for r in logs] == ["2026-09-10.md"]
+    stream = one_good_one_unreadable.run("stream", "--since", "2026-09-01",
+                                         cli="search").stdout
+    assert "a readable log line" in stream
+    assert "2026-09-12" not in stream
+
+
+@pytest.mark.parametrize("argv", [["notes"], ["logs"], ["stream"], ["activity"],
+                                  ["overview", "Projects/SGB"]])
+def test_nothing_is_said_about_a_skipped_file_into_a_pipe(one_good_one_unreadable, argv):
+    """The agent harness discards stdout whenever stderr is non-empty, and
+    `search`'s stdout is the answer."""
+    r = one_good_one_unreadable.run(*argv, cli="search")
     assert (r.returncode, r.stderr) == (0, "")
+
+
+def test_a_skipped_file_is_named_on_a_terminal(one_good_one_unreadable):
+    """A person running `search` by hand is told a file was dropped, as
+    `notes` already tells them about a failed ingest."""
+    r, said = one_good_one_unreadable.run_with_stderr_on_a_terminal("notes", cli="search")
+    assert r.returncode == 0
+    bad = one_good_one_unreadable.home / "notes" / "2026-09-12-08-00-00.md"
+    assert said == f"search: warning: {bad} is not valid UTF-8; skipped\n"

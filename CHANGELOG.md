@@ -2,6 +2,23 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-23 - review round 5, parts R5-A1, R5-A2, R5-C3: one reader for the whole vault
+
+Round 4 fixed `search`'s own walks and the CHANGELOG claimed more than that.
+Every other read went straight to `read_text`, so a single unreadable file
+still ended `notes list`, `threads list`, `people list`, `hours list`,
+`hours report`, `search stream` and `search activity` in a traceback. The
+round 4 entry is corrected above.
+
+- **`grep -rn read_text src/adulting/` now finds one line**, inside `vault.read_utf8`. Everything else reads through one of two helpers, and which one says what kind of read it is:
+  - **`read_utf8(path)`** — a walker. Returns `None`, and the caller skips the file: `file_summary`, `note_info`, `read_records`, `load_all`, and `search`'s walks. A listing drops the row and keeps the rest.
+  - **`read_or_die(path)`** — a file the user named. Stops with `<abs path> is not valid UTF-8`, because skipping it would answer a question about *that* file by pretending it is not there: `notes cat|copy|pdf`, `people show`, `threads show`, the buffer, `config.yaml`, a record file being rewritten, a schema.
+- **R5-A2: `search` tells a human and says nothing to a pipe.** `vault.tell_a_human(msg)` warns only when `sys.stderr.isatty()` — the pattern `notes` already used, now shared by `notes`, `search` and `tasks`. The agent harness discards stdout whenever stderr is non-empty, and these commands' stdout is the answer.
+- **R5-C3: a file `tasks` cannot read is no longer counted as a failed action.** It printed `Failed: 1` for a file that may have held no ACTION lines at all; it is a warning on a terminal now, and the count stays a count of ACTION lines. The test that pinned the old wording is replaced by one that pins both halves.
+- **R5-B2: the `search` skip is tested by its results**, not by the absence of a traceback: the good note and log are in the rows, the unreadable ones are not. Reading them with replacement characters would now fail the test.
+- New: one parametrised test puts an unreadable file in each of the six stores and runs every listing against it. `Vault.run_with_stderr_on_a_terminal` is the harness half of the isatty rule.
+- **Verified on the vault copy:** six commands print byte-identical output. **851 passing, `dev/ci` green.**
+
 ## 2026-09-23 - review round 5, part R5-B1: MANUAL.md regenerated, and the gate that checks it is itself checked
 
 - **The manual is regenerated** (owner ran `dev/ci manual`) and the gate passes. `buffer suggest`, the `notes` picker subcommands (`edit`, `nano`, `strip`), `hours log --all` and `payments log --all` are gone from it; `tasks ingest`, `notes list` and the three `--json` flags are in it.
@@ -59,7 +76,7 @@ the names the manual uses with the names the CLI has. `dev/ci lint` runs it.
 Both are collateral from round 3, and both were reproduced before being fixed.
 
 - **R4-A1: a vault reached through a symlink was not checked at all.** `lint` resolved the vault but not the file it was looking at, so every walked path was "outside" the vault, matched no schema, and none of its rules ran — while the summary still said the file was checked. `/tmp` and `/var` are symlinks on macOS and a synced vault is often one, so this was easy to hit. Both sides are resolved now, and a test lints the same vault by both paths and compares.
-- **R4-A3: one file that is not UTF-8 ended the whole run with a stack trace.** Removing the blanket `except Exception` in round 3 (correctly) left nothing catching the read in `search` and `lint`. **`vault.read_utf8(path)`** is the one reader now: it returns `None` for a file that cannot be read, `tasks` uses it as before, and `search` skips such a file in notes, logs, threads, people and the buffer.
+- **R4-A3: one file that is not UTF-8 ended the whole run with a stack trace.** Removing the blanket `except Exception` in round 3 (correctly) left nothing catching the read in `search` and `lint`. **`vault.read_utf8(path)`** is the one reader now: it returns `None` for a file that cannot be read, `tasks` uses it as before, and `search` skips such a file in its own walks over notes, logs, threads, people and the buffer. (**Corrected 2026-09-23:** that covered `search`'s walkers only. Every other read in the package still went straight to `read_text`, so `notes list`, `threads list`, `people list`, `hours list`, `hours report`, `search stream` and `search activity` still ended in a traceback. See R5-A1 below.)
 - **`lint` reports it instead of skipping it**, as `<path>:0: file is not valid UTF-8`. `search` stays silent on purpose: it is read-only and its stdout is data — the agent harness discards stdout whenever stderr is non-empty, so a warning there would cost the caller the search results. `lint` is where the vault's health is reported.
 - `Vault.run` in the test harness takes an `env`, for the few tests that reach one vault by two paths.
 - **Verified on the vault copy:** `lint`, `search notes` and `search stream` print byte-identical output. **769 passing, `dev/ci` green.**

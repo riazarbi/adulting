@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import pty
+import select
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -179,6 +180,25 @@ class Vault:
         finally:
             os.close(child)
             os.close(parent)
+
+    def run_with_stderr_on_a_terminal(self, *argv: str, cli: str):
+        """Run a CLI with stderr attached to a pseudo-terminal, and return
+        (result, what it wrote to that terminal). For the warnings that are
+        only said when a person is there to read them."""
+        parent, child = pty.openpty()
+        try:
+            r = subprocess.run([command_path(cli, self.env), *argv],
+                               stdout=subprocess.PIPE, stderr=child,
+                               stdin=subprocess.DEVNULL, text=True,
+                               env=self.env, timeout=30)
+            # Read while the child end is still open: closing it first can
+            # discard what the process wrote to the terminal.
+            ready, _, _ = select.select([parent], [], [], 5)
+            said = os.read(parent, 4096).decode() if ready else ""
+        finally:
+            os.close(child)
+            os.close(parent)
+        return r, said.replace("\r\n", "\n")
 
     def snapshot(self) -> dict:
         """Every file in the vault and its contents."""

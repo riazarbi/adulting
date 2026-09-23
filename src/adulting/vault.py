@@ -129,6 +129,18 @@ def warn(msg):
     print(f"{program()}: warning: {msg}", file=sys.stderr)
 
 
+def tell_a_human(msg):
+    """Warn, but only when a person is there to read it.
+
+    The agent harness discards stdout whenever stderr is non-empty, so a
+    command whose stdout is the answer cannot warn into a pipe without
+    throwing the answer away. On a terminal there is no such cost, and a
+    person should be told that a file was skipped.
+    """
+    if sys.stderr.isatty():
+        warn(msg)
+
+
 def make_dir(path):
     """Create a folder the user named, and its parents, or stop saying why not."""
     try:
@@ -178,7 +190,7 @@ def read_config():
     config = vault_home() / '.adulting' / 'config.yaml'
     if not config.exists():
         return {}
-    return parse_block(config.read_text(encoding='utf-8').split('\n'))
+    return parse_block(read_or_die(config).split('\n'))
 
 
 def config_default(section, key, fallback):
@@ -249,17 +261,32 @@ def parse_block(lines):
     return out
 
 
-def read_utf8(path):
+def read_utf8(path, errors='strict'):
     """A vault file's text, or None when it cannot be read as UTF-8.
 
     Every command walks files it did not write — a stray binary, a
     sync-conflict copy, something saved in another encoding. A walker skips
     those and carries on; `lint` is the command that reports them.
+
+    This is the only place the vault is read, so there is one answer to a
+    file that cannot be.
     """
     try:
-        return path.read_text(encoding='utf-8')
+        return path.read_text(encoding='utf-8', errors=errors)
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def read_or_die(path, errors='strict'):
+    """A file's text, or stop saying which file is unreadable.
+
+    For a file the user named: skipping it silently would answer a question
+    about *that* file by pretending it does not exist.
+    """
+    text = read_utf8(path, errors)
+    if text is None:
+        die(f"{path} is not valid UTF-8")
+    return text
 
 
 def parse_frontmatter_doc(text):
@@ -322,8 +349,12 @@ def today():
 
 
 def file_summary(path):
-    """What `threads list` and `people list` show of a file."""
-    fm = parse_frontmatter_doc(path.read_text(encoding='utf-8'))[0]
+    """What `threads list` and `people list` show of a file, or None when the
+    file cannot be read — a listing skips it rather than ending there."""
+    text = read_utf8(path)
+    if text is None:
+        return None
+    fm = parse_frontmatter_doc(text)[0]
     return {'path': str(path.relative_to(vault_home())),
             'status': fm.get('status', ''), 'category': fm.get('category', ''),
             'started': fm.get('started', ''), 'ended': fm.get('ended', '')}
@@ -332,7 +363,7 @@ def file_summary(path):
 def file_json(path, **identity):
     """What `threads show --json` and `people show --json` print: who it is,
     where it is, and all of its frontmatter."""
-    fm = parse_frontmatter_doc(path.read_text(encoding='utf-8'))[0]
+    fm = parse_frontmatter_doc(read_or_die(path))[0]
     return json.dumps({**identity, 'path': str(path.relative_to(vault_home())), **fm}, indent=2)
 
 
@@ -439,7 +470,7 @@ def is_thread(ref):
 def thread_meta(path):
     """(currency, rate) from a thread file's frontmatter; either may be None.
     A rate that is not a whole number is an error, not a missing rate."""
-    fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+    fm, _ = parse_frontmatter_doc(read_or_die(path))
     rate = fm.get('rate')
     if rate in (None, ''):
         return fm.get('currency') or None, None
@@ -516,7 +547,7 @@ def banking():
 
 def client(tpath):
     """Who is being billed, from the thread's frontmatter."""
-    fm, _ = parse_frontmatter_doc(tpath.read_text(encoding='utf-8'))
+    fm, _ = parse_frontmatter_doc(read_or_die(tpath))
     return {
         'name': fm.get('client_name') or '',
         'lines': lines_of(fm.get('client_address')),
@@ -635,9 +666,12 @@ def find_block(lines, fence):
 
 
 def read_records(path, store):
-    if not path.exists():
+    """The records in a file, or none at all: a file that cannot be read has
+    no records to show, and `lint` reports it."""
+    text = read_utf8(path)
+    if text is None:
         return []
-    lines = path.read_text(encoding='utf-8').split('\n')
+    lines = text.split('\n')
     blk = find_block(lines, store.fence)
     if blk is None:
         return []
@@ -660,7 +694,9 @@ def write_records(path, records, store, ref, currency):
     payload = json.dumps({store.key: records}, indent=2,
                          ensure_ascii=False).split('\n')
     if path.exists():
-        lines = path.read_text(encoding='utf-8').split('\n')
+        # Rewriting a file means reading all of it first; a file that cannot
+        # be read is an error, never something to overwrite.
+        lines = read_or_die(path).split('\n')
         blk = find_block(lines, store.fence)
         if blk is None:
             die(f"{path} has no {store.fence} block")
@@ -696,7 +732,7 @@ def find_record(store, record_id):
         records = read_records(path, store)
         for r in records:
             if r.get('id') == record_id:
-                fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+                fm, _ = parse_frontmatter_doc(read_or_die(path))
                 return path, unwiki(fm.get('thread', '')) or path.stem, records, r
     return None
 
@@ -704,7 +740,10 @@ def find_record(store, record_id):
 def load_all(store):
     """Yield (path, thread_ref, record) for every record in a store."""
     for path in record_files(store.subdir):
-        fm, _ = parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+        text = read_utf8(path)
+        if text is None:
+            continue
+        fm, _ = parse_frontmatter_doc(text)
         ref = unwiki(fm.get('thread', '')) or path.stem
         for r in read_records(path, store):
             yield path, ref, r

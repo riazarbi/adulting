@@ -63,6 +63,19 @@ def event_date(fm_value, fallback_stem):
     return ''
 
 
+def read_or_skip(path):
+    """A file's text, or None and a word to anyone watching.
+
+    `search` answers on stdout and a person may be reading it, so a file that
+    cannot be read is skipped either way — and said out loud only when stderr
+    is a terminal, where saying it costs nothing.
+    """
+    text = V.read_utf8(path)
+    if text is None:
+        V.tell_a_human(f"{path} is not valid UTF-8; skipped")
+    return text
+
+
 def note_records():
     """Every parseable note, as a dict. Unparseable files are skipped."""
     out = []
@@ -70,9 +83,9 @@ def note_records():
     if not notes_dir.is_dir():
         return out
     for path in sorted(notes_dir.glob('*.md')):
-        text = V.read_utf8(path)
+        text = read_or_skip(path)
         if text is None:
-            continue   # not readable as UTF-8: skipped, as `tasks` skips it
+            continue
         fm, body = V.parse_frontmatter_doc(text)
         if not fm:
             continue   # no frontmatter: not a note this command knows
@@ -94,7 +107,7 @@ def log_records():
     if not logs_dir.is_dir():
         return out
     for path in sorted(logs_dir.rglob('*.md')):
-        text = V.read_utf8(path)
+        text = read_or_skip(path)
         if text is None:
             continue
         fm, body = V.parse_frontmatter_doc(text)
@@ -191,7 +204,7 @@ def stream_entities():
         if not base.is_dir():
             continue
         for path in sorted(base.rglob('*.md')):
-            text = V.read_utf8(path)
+            text = read_or_skip(path)
             if text is None:
                 continue
             fm, _ = V.parse_frontmatter_doc(text)
@@ -218,7 +231,7 @@ def stream_pending():
     if not buffer_file.exists():
         return []
     out = []
-    text = V.read_utf8(buffer_file)
+    text = read_or_skip(buffer_file)
     if text is None:
         return []
     entries, _, _ = B.parse_buffer_entries(text.splitlines())

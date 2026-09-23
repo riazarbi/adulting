@@ -134,7 +134,7 @@ def ref_target_resolves(target):
 def read_buffer():
     if not buffer_file().exists():
         return []
-    return buffer_file().read_text(encoding='utf-8').split('\n')
+    return V.read_or_die(buffer_file()).split('\n')
 
 
 def write_buffer(lines):
@@ -509,7 +509,7 @@ def cmd_flush(args):
             body_lines.append(line)
 
         if log_path.exists():
-            existing = log_path.read_text(encoding='utf-8')
+            existing = V.read_or_die(log_path)
             if not existing.endswith('\n'):
                 existing += '\n'
             log_path.write_text(existing + '\n'.join(body_lines) + '\n', encoding='utf-8')

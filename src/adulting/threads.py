@@ -63,9 +63,12 @@ def cmd_delete(args):
 def cmd_list(args):
     rows = []
     for kind, name, path in V.discover_threads():
+        summary = V.file_summary(path)
+        if summary is None:
+            continue
         # `thread` is the resolvable Kind/Name form.
         rows.append({'kind': kind, 'name': name, 'thread': V.thread_ref(kind, name),
-                     **V.file_summary(path)})
+                     **summary})
 
     return V.print_summary_list(rows, args, 'thread', 'threads')
 
@@ -75,7 +78,7 @@ def cmd_show(args):
     if args.json:
         print(V.file_json(path, kind=kind, name=name))
     else:
-        sys.stdout.write(path.read_text(encoding='utf-8'))
+        sys.stdout.write(V.read_or_die(path))
     return 0
 
 

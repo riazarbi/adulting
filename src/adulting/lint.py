@@ -170,7 +170,7 @@ def parse_constraint(text):
 
 
 def parse_schema(path):
-    text = path.read_text(encoding='utf-8')
+    text = V.read_or_die(path)
     fm, body_start = parse_frontmatter(text)
     schema = {
         'name': fm.get('schema'),

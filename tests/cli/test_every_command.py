@@ -157,3 +157,80 @@ def test_a_subcommand_answers_help_json_too(vault, cli, subcommand):
     manifest = json.loads(r.stdout)
     assert manifest["name"] == subcommand
     assert "--help-json" in [f["name"] for f in manifest["flags"]]
+
+
+# ---------- a file nothing can read ----------
+
+STORES = [
+    ("notes/2026-09-12-08-00-00.md", ["notes", "list"]),
+    ("threads/Projects/Broken.md", ["threads", "list"]),
+    ("people/Broken.md", ["people", "list"]),
+    ("hours/Projects/Broken.md", ["hours", "list"]),
+    ("payments/Projects/Broken.md", ["payments", "list"]),
+    ("logs/Projects/SGB/2026-09-12.md", ["search", "stream"]),
+]
+
+
+@pytest.mark.parametrize("bad_file", [s[0] for s in STORES])
+@pytest.mark.parametrize("argv", [c for _, c in STORES] + [["search", "activity"],
+                                                           ["search", "notes"],
+                                                           ["hours", "report"],
+                                                           ["tasks", "list"]])
+def test_a_file_that_is_not_utf8_never_stops_a_listing(vault, bad_file, argv):
+    """A vault holds files nobody here wrote: a stray binary, a sync-conflict
+    copy, something saved in another encoding. A command that walks the vault
+    skips it; only `lint` reports it. Every one of these used to end in a
+    UnicodeDecodeError traceback."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_person("Riaz Arbi")
+    bad = vault.home / bad_file
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
+
+    r = vault.run(*argv[1:], cli=argv[0])
+    assert (r.returncode, r.stderr) == (0, ""), r.stderr
+    assert "Broken" not in r.stdout
+
+
+def test_the_good_rows_survive_a_bad_file_beside_them(vault):
+    """Skipping is not the same as giving up: everything readable is listed."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_thread("Projects", "Alpha")
+    (vault.home / "threads" / "Projects" / "Broken.md").write_bytes(b"\xff\xfe")
+    listed = vault.run("list", cli="threads").stdout
+    assert [line.split()[0] for line in listed.splitlines()[1:]] == \
+        ["Projects/Alpha", "Projects/SGB"]
+
+
+def test_a_named_file_that_is_not_utf8_says_so_instead_of_crashing(vault):
+    """Asked for one file by name, a command cannot skip it: it says what is
+    wrong with the file, naming it, and exits 1."""
+    vault.write_person("Riaz Arbi")
+    bad = vault.home / "people" / "Riaz Arbi.md"
+    bad.write_bytes(b"---\nstatus: open\n---\n\n\xff\xfe bad bytes\n")
+    r = vault.run("show", "Riaz Arbi", cli="people")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"people: error: {bad} is not valid UTF-8\n"
+
+
+def test_a_skipped_file_is_not_counted_as_a_failed_action(vault):
+    """`tasks` used to report `Failed: 1` for a file it could not read, as
+    though an ACTION line in it had been refused. The file had no actions in
+    it; nobody can know whether it did."""
+    vault.write_thread("Projects", "SGB")
+    vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/SGB"])
+    bad = vault.home / "logs" / "Projects" / "SGB" / "2026-09-12.md"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
+
+    r = vault.run(cli="tasks")
+    assert r.returncode == 0
+    assert r.stdout.splitlines()[-1] == "Ingested: 1.  Failed: 0."
+    # Silent into a pipe: the harness drops stdout when stderr is written to.
+    assert r.stderr == ""
+
+    # On a terminal there is a person to tell, and no cost to telling them.
+    vault.write_note("2026-09-11-14-30-00", "ACTION: another", threads=["Projects/SGB"])
+    r, said = vault.run_with_stderr_on_a_terminal(cli="tasks")
+    assert r.returncode == 0
+    assert said == f"tasks: warning: {bad} is not valid UTF-8; skipped\n"

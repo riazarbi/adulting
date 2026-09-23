@@ -572,22 +572,6 @@ def test_rm_depends_removes_a_dependency_whose_task_is_gone(vault):
     assert note.read_text(encoding="utf-8").split("\n")[8] == "TASK: needs gone <!--bbbb0001 entry:2026-09-01-->  "
 
 
-def test_ingest_reports_a_file_that_is_not_utf8_and_carries_on(vault):
-    vault.write_thread("Projects", "SGB")
-    bad = vault.home / "logs" / "Projects" / "SGB" / "2026-09-12.md"
-    bad.parent.mkdir(parents=True)
-    bad.write_bytes(b"---\nthread: x\n---\n\xff\xfe bad bytes\nACTION: unreachable\n")
-    good = vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/SGB"])
-    r = vault.run(cli="tasks")
-    assert r.returncode == 1
-    assert re.fullmatch(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(good.relative_to(vault.home)))}"
-                        rf":9  do it\nIngested: 1.  Failed: 1.\n", r.stdout)
-    assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
-                        f"  {bad.relative_to(vault.home)}: file is not valid UTF-8; skipped\n\n")
-    assert vault.run("list", cli="tasks").returncode == 0
-
-
-
 def test_list_resolves_a_bare_thread_name_like_every_other_command(board):
     """It compared the raw string to the canonical `Kind/Name`, so a bare
     name printed a plausible empty answer instead of the tasks."""

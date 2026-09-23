@@ -58,7 +58,10 @@ def note_path(stem):
 
 def note_info(path):
     """What `list` shows about one note, read from its frontmatter."""
-    fm, _ = V.parse_frontmatter_doc(path.read_text(encoding='utf-8'))
+    text = V.read_utf8(path)
+    if text is None:
+        return None     # a note nobody can read is not listed; `lint` says so
+    fm, _ = V.parse_frontmatter_doc(text)
     timestamp = str(fm.get('timestamp') or '')
     return {
         'stem': path.stem,
@@ -82,7 +85,7 @@ def all_notes():
     if not notes_dir().is_dir():
         return []
     infos = [note_info(p) for p in notes_dir().glob('*.md') if not p.name.startswith('.')]
-    return sorted(infos, key=sort_key)
+    return sorted([i for i in infos if i is not None], key=sort_key)
 
 
 def ingest_actions():
@@ -97,8 +100,8 @@ def ingest_actions():
         _, failed = tasks.ingest()
     except OSError:
         failed = True
-    if failed and sys.stderr.isatty():
-        V.warn("some ACTION lines were not ingested; run `tasks` to see why")
+    if failed:
+        V.tell_a_human("some ACTION lines were not ingested; run `tasks` to see why")
 
 
 # ---------- writing a new note ----------
@@ -191,7 +194,7 @@ def cmd_list(args):
 
 
 def cmd_cat(args):
-    sys.stdout.write(note_path(args.stem).read_text(encoding='utf-8'))
+    sys.stdout.write(V.read_or_die(note_path(args.stem)))
     return 0
 
 
@@ -211,7 +214,7 @@ def cmd_copy(args):
         V.die(f"{target} already exists; try again in a second")
     # Every line that starts with `topic:` gets the suffix, body lines
     # included, and the copy keeps the original timestamp (deferred bug 4).
-    lines = source.read_text(encoding='utf-8').split('\n')
+    lines = V.read_or_die(source).split('\n')
     lines = [line + ' COPY' if line.startswith('topic:') else line for line in lines]
     target.write_text('\n'.join(lines), encoding='utf-8')
     print(f"Copied {source.name} to {target.name}")
@@ -234,7 +237,7 @@ def cmd_render(args):
     # Absolute, because pandoc runs from a scratch directory.
     out_dir = (Path(args.out).expanduser() if args.out else Path.home() / 'Downloads').resolve()
     V.make_dir(out_dir)
-    text = source.read_text(**render.ENCODING)
+    text = V.read_or_die(source, errors=render.ERRORS)
     owner = V.read_config().get('owner', '')
     if args.subcommand == 'pdf':
         markdown = render.pdf_markdown(text, owner)

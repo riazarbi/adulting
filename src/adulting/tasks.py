@@ -179,7 +179,7 @@ def find_anchor(uuid_prefix):
 def write_line(path, line_no, new_line):
     """Rewrite a single line of a file. Atomic via tmp + os.replace, so a
     vault being synced never sees a half-written note."""
-    lines = path.read_text(encoding='utf-8').split('\n')
+    lines = V.read_or_die(path).split('\n')
     lines[line_no] = new_line
     tmp = path.with_suffix(path.suffix + '.tmp')
     tmp.write_text('\n'.join(lines), encoding='utf-8')
@@ -247,8 +247,10 @@ def ingest(dry_run=False):
     for path in discover_source_files():
         text = V.read_utf8(path)
         if text is None:
-            failed.append((str(path.relative_to(V.vault_home())),
-                           ["file is not valid UTF-8; skipped"]))
+            # Not a failed action: the file had no actions in it as far as
+            # anyone can tell. It is said once, where warnings go, and the
+            # count stays a count of ACTION lines.
+            V.tell_a_human(f"{path} is not valid UTF-8; skipped")
             continue
         threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
         for i, action in find_action_lines(text):

@@ -71,8 +71,11 @@ def cmd_delete(args):
 def cmd_list(args):
     rows = []
     for name, path in discover_people():
+        summary = V.file_summary(path)
+        if summary is None:
+            continue
         # `person` is the resolvable wikilink form.
-        rows.append({'name': name, 'person': f"people/{name}", **V.file_summary(path)})
+        rows.append({'name': name, 'person': f"people/{name}", **summary})
 
     return V.print_summary_list(rows, args, 'person', 'people')
 
@@ -85,7 +88,7 @@ def cmd_show(args):
     if args.json:
         print(V.file_json(path, name=path.stem))
     else:
-        sys.stdout.write(path.read_text(encoding='utf-8'))
+        sys.stdout.write(V.read_or_die(path))
     return 0
 
 

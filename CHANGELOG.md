@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-29 - what the manual could not say, and a gate over what the tool definitions claim
+
+Regenerating fixed the agent tool definitions — four of them still described
+the pre-port interactive commands — but it could not fix what the manual was
+missing, because the harvest only sees help text, docstrings, schemas and the
+README, and none of them said these things.
+
+- **A new README section, "Output conventions", carried into the manual** (it is in `dev/manual-harvest`'s `README_SECTIONS`). It states the three facts that hold across every command: paths in output are absolute and why; a file that cannot be read as UTF-8 is skipped by a walker, reported by `lint`, and fatal only when the file was named; and every command *and subcommand* answers `--help-json`.
+- The commands say it where it is their own behaviour: `lint`'s docstring names the `file is not valid UTF-8` violation, `tasks`' says a skipped file is not a failed action, `search`'s says one unreadable file cannot cost you a result set.
+- **`dev/tools-check` now compares a claim with the truth**, not just the shape: a description that says a command prompts, is interactive, or reads stdin fails the gate. Nothing in this package prompts — `tests/cli/test_no_prompts.py` holds every command to it — and four definitions claimed otherwise for six rounds of review, because nothing read them. A denial next to the word ("Nothing prompts", "rather than prompting") is the wording these should carry and passes.
+- Checked by putting the real stale sentence back into `dev/tools/hours.json` and watching the gate name it. `tests/dev/test_tools_check.py` pins both halves against the four sentences that were actually there.
+- **868 passing, `dev/ci` green.** The manual needs one more `dev/ci manual` to pick up the new section.
+
 ## 2026-09-23 - review round 5, parts R5-B3 and R5-B5: tests that prove what they say
 
 - **R5-B3: every subcommand is checked for `--help-json`, not four samples.** The test reads each command's own manifest and asks all 74 subcommands, so one added tomorrow is covered tomorrow. It also asserts the answer is the *subcommand's* manifest, not the whole command's.

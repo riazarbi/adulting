@@ -44,7 +44,8 @@ from commands import COMMANDS as TOOLS  # noqa: E402
 # README sections worth carrying as background. Everything else in the README
 # is either install boilerplate or restates the command surface.
 README_SECTIONS = ['Conceptual model', 'Dependencies', 'Data store',
-                   'Schemas', 'Vault hygiene', 'Known issues', 'Design goals']
+                   'Output conventions', 'Schemas', 'Vault hygiene',
+                   'Known issues', 'Design goals']
 
 
 def tool_source(tool):

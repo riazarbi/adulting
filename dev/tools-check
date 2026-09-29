@@ -12,6 +12,9 @@ Checks, all fatal:
   scope      exactly one file per operator tool; no extras, none missing
   content    description non-empty, names every subcommand the tool reports,
              and mentions each of the tool's own flags
+  truth      no description claims a command prompts or reads stdin. Nothing
+             here does, and a stale claim that one does teaches the agent to
+             avoid a command that is safe to call
   hygiene    no absolute filesystem paths baked into a description
   policy     forbidden_args name real subcommands of that tool, and the
              description declares exactly those blocks — so what the agent
@@ -43,6 +46,17 @@ LIST_FIELDS = {'prepend_args', 'forbidden_args'}
 # Matches an absolute path that would have come from the build machine.
 ABS_PATH_RE = re.compile(r'(?<![\w/])/(?:Users|home|private|var|opt)/\S+')
 
+# No command in this package prompts or reads stdin — tests/cli/test_no_prompts.py
+# holds every one of them to it. These definitions described the pre-port
+# commands for six rounds after that stopped being true, because nothing
+# compared the prose with the code.
+PROMPT_RE = re.compile(r'\b(prompts?|prompting|interactively|interactive|stdin)\b', re.I)
+# A denial has to sit next to the word it denies. "Nothing prompts" is the
+# statement we want; "Never call `log` without THREAD — it enters interactive
+# capture" denies something else entirely and is the claim we are hunting.
+DENIAL_RE = re.compile(r"\b(no|not|never|nothing|none|without|n't|rather than|"
+                       r"instead of)\b(\s+\S+){0,2}\s*$", re.I)
+
 
 def operator_tools(corpus_json=None):
     """The harvested view of the repo, so scope has one definition."""
@@ -53,6 +67,20 @@ def operator_tools(corpus_json=None):
     if p.returncode != 0:
         sys.exit(f"tools-check: harvest failed: {p.stderr.strip()}")
     return json.loads(p.stdout)
+
+
+def interactivity_claims(description):
+    """Sentences claiming the command prompts, or reads from stdin.
+
+    A sentence that denies it — "Nothing prompts", "never reads stdin" — is
+    exactly what these definitions should say, so a claim counts only when
+    the word is not negated by the words right before it.
+    """
+    for sentence in re.split(r'(?<=[.;])\s+|\n', description):
+        for m in PROMPT_RE.finditer(sentence):
+            if not DENIAL_RE.search(sentence[:m.start()]):
+                yield sentence.strip()
+                break
 
 
 def main():
@@ -111,6 +139,10 @@ def main():
         for m in ABS_PATH_RE.findall(desc):
             errors.append(f"{path.name}: description leaks a build-machine "
                           f"path: {m}")
+
+        for said in interactivity_claims(desc):
+            errors.append(f"{path.name}: description says the command is "
+                          f"interactive, and none of them are: {said!r}")
 
         manifest = manifests.get(tool, {})
         subs = [s['name'] for s in manifest.get('subcommands', [])]

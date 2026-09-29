@@ -359,6 +359,31 @@ Constraint cell DSL (single cell, semicolon-separated):
 
 `~/vault/buffer.md` is an append-only inbox for quick-capture entries. Routing those entries to notes (resolving threads, fixing references, applying schemas) is intended as a periodic ritual run by an AI agent against a tool-call API; the routing logic is not yet automated.
 
+# Output conventions
+
+These hold for every command.
+
+- **Every path a command prints is absolute.** A path in output is there to be
+  opened, and a reader resolves a relative path against its own working
+  directory, which is not the vault — in a container the vault is often mounted
+  somewhere else entirely. Vault-relative strings do appear, but as identifiers
+  rather than paths: a thread ref (`Projects/SGB`), a wikilink target
+  (`people/Riaz Arbi`).
+- **A file that cannot be read as UTF-8 is skipped, not fatal.** A vault
+  collects files nobody here wrote: a stray binary, a sync-conflict copy,
+  something saved in another encoding. A command that walks the vault skips
+  such a file and carries on, so one bad file cannot cost you a listing.
+  `lint` is where it is reported, as `<path>:0: file is not valid UTF-8`. A
+  command asked for one file by name stops instead, with `<path> is not valid
+  UTF-8`, because skipping would answer a question about that file by
+  pretending it is not there.
+- **A skipped file is named only when stderr is a terminal.** Piped output is
+  the answer to a question, and an agent harness discards stdout whenever
+  stderr is non-empty, so a warning there would cost the caller the answer.
+- **Every command and subcommand answers `--help-json`**, printing its own
+  arguments as JSON and exiting 0. `tasks --help-json` describes the whole
+  command and its subcommands; `tasks list --help-json` describes `list`.
+
 # Vault hygiene
 
 - `notes pdf` / `minutes` / `agenda` run pandoc inside a temporary directory — no scratch files leak into your CWD

@@ -20,6 +20,10 @@ its own working directory — which is not the vault. In the agent's container
 the vault is a bind mount at /vault while the process runs in /workspace, so
 a vault-relative path silently resolves to nothing.
 
+A file that cannot be read as UTF-8 is skipped rather than searched, so one
+unreadable file cannot cost you a result set. It is named on stderr only when
+stderr is a terminal; `lint` reports it either way.
+
 Dates are the EVENT date, not the capture date: a note's frontmatter
 `timestamp` is when the thing happened, while its filename is when the note
 was written. They differ in both directions — an agenda drafted days before

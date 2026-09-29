@@ -9,6 +9,10 @@ No-arg invocation (used as a pre-pass by `notes`):
   ...-->` anchor. The uuid8 is freshly generated and checked against
   the existing vault for uniqueness.
 
+  A file that cannot be read as UTF-8 is skipped, not counted as a failed
+  action; it is named on stderr when stderr is a terminal, and `lint`
+  reports it either way.
+
 Subcommands:
   add <thread> <text>            buffer-append a structured ACTION
   done <uuid>                    flip source TASK->DONE; stamp end:<today>

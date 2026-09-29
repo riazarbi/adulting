@@ -5,7 +5,11 @@ Usage:
     lint <path> [<path> ...]    # validate specific files
 
 Exit code 0 if clean, 1 if any violations. Errors print as
-<path>:<line>: <message>. Pass --quiet for exit-code-only.
+<path>:<line>: <message>, the path absolute, as every command prints one.
+Pass --quiet for exit-code-only.
+
+Every other command skips a file it cannot read as UTF-8 and carries on.
+This is where such a file is reported, as `file is not valid UTF-8`.
 """
 
 import json

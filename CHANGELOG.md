@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-09-30 - the container's way of running the package is tested
+
+The image bind-mounts the source at runtime and installs nothing, so each
+command is a wrapper around `python3 -m adulting.<name>` with PYTHONPATH on
+the mounted `src/`. Every other test runs the venv's console scripts, so a
+module that lost its `__main__` guard, or that only imports when installed,
+would break the container with a green suite.
+
+- **`tests/dev/test_container.py`** reads the Dockerfile as text and runs what it builds — no Docker needed. It pins the wrapper list against `dev/commands.py` (the one list the dev scripts share, previously duplicated in the Dockerfile with nothing comparing them), that the wrappers still run a module rather than a console script, and that all ten commands answer `--help-json` when the source is the only thing on the path.
+- `-S` keeps site-packages out of those runs, so the venv's editable install cannot answer for the source. A companion test points PYTHONPATH at an empty directory and asserts the import fails, so the others cannot pass on an installed copy.
+- Checked by dropping `commit` from the Dockerfile's list and by removing `lint`'s `__main__` guard; each fails one test.
+- The Dockerfile itself needed no change: it was already written for the package (no taskwarrior, no `pipx`, source mounted at runtime), and its claim that `notes pdf|minutes|agenda` still write markdown without pandoc is true — `render.to_pdf` returns "pandoc is not installed" and keeps the file.
+- **881 passing, `dev/ci` green.**
+
 ## 2026-09-29 - what the manual could not say, and a gate over what the tool definitions claim
 
 Regenerating fixed the agent tool definitions — four of them still described

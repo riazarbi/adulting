@@ -1,5 +1,5 @@
 {
   "command": "lint",
-  "description": "Validates vault files against the adulting schemas.\n\nUsage: lint [PATH ...] [--schemas DIR] [--quiet]\n\nArgs:\n  PATH  files to validate. Default: walk the whole vault.\n\nFlags:\n  --schemas DIR  schemas directory. Default: the schemas bundled with the package.\n  --quiet        suppress per-violation output; report by exit code only\n\nExamples:\n  []\n  [\"notes/2026-09-10-14-30-00.md\"]\n  [\"--quiet\"]\n\nNotes:\n  Read-only. Violations print as PATH:LINE: MESSAGE.\n  Exit code 0 means clean. 1 means violations were found. 2 means no schemas could be loaded.\n",
+  "description": "Validate vault files against the schemas. Also reports files that are not valid UTF-8.\n\nUsage: lint [--schemas DIR] [--quiet] [PATH ...]\n\nArgs:\n  PATH  files to validate; zero or more. Default: walk the whole vault.\n\nFlags:\n  --schemas DIR  schemas directory. Default: the schemas bundled with the tools.\n  --quiet  suppress per-violation output; only the exit code is reported.\n\nExamples:\n  []\n  [\"notes/2026-09-10-14-30-00.md\"]\n  [\"--quiet\"]\n\nNotes:\n  Each violation prints as <absolute path>:<line>: <message>.\n  Exit 0: clean. Exit 1: one or more violations. Exit 2: no schemas could be loaded.\n",
   "read_only": true
 }

@@ -9,19 +9,17 @@
 # the repo on the host flow through immediately, without a rebuild. The
 # commands are wrappers around `python3 -m adulting.<name>`; see below.
 #
-# The agent base image must exist locally. Build it via the `agent-base`
-# profile in the staging vault's compose file:
+# The agent is published, so there is nothing to build first — the build
+# pulls it. For a private package, authenticate once:
 #
-#   docker compose -f /home/riaz/vault/docker-compose.yml \
-#       --profile build build agent-base
+#   echo $GITHUB_TOKEN | docker login ghcr.io -u riazarbi --password-stdin
 #
-# or directly:
+# `:latest` moves. Pin a release tag or a digest when a rebuild has to
+# produce the same image twice:
 #
-#   docker build -t agent:local \
-#       -f /home/riaz/projects/agent/docker/Dockerfile \
-#       /home/riaz/projects/agent
+#   FROM ghcr.io/riazarbi/agent@sha256:<digest> AS agent_bin
 
-FROM agent:local AS agent_bin
+FROM ghcr.io/riazarbi/agent:latest AS agent_bin
 
 # sid was chosen when the image still needed taskwarrior 3.x; it no longer
 # does, but sid is a current, working base and changing it is a separate

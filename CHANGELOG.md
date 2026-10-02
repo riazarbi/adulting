@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - the image derives from the published agent
+
+The agent is published to GHCR, so the base no longer has to be built on the
+host first.
+
+- **`FROM ghcr.io/riazarbi/agent:latest`**, in place of `agent:local`. The build pulls it; the comment block that told you to build `agent-base` from the staging vault's compose file first — with `/home/riaz` paths — is gone, replaced by the `docker login ghcr.io` line a private package needs and a note that `:latest` moves, with the digest form to pin.
+- Nothing else in the image changed: the source still arrives as a runtime bind mount, the ten commands are still wrappers around `python3 -m adulting.<name>`, and `tests/dev/test_container.py` still passes.
+- **Outside this repo:** `~/vault/docker-compose.yml` still carries a build-only `agent-base` service to produce `agent:local`, and tells you to build it before `agent-shallow`. Both are now redundant.
+
 ## 2026-09-30 - the container's way of running the package is tested
 
 The image bind-mounts the source at runtime and installs nothing, so each

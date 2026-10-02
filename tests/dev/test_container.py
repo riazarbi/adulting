@@ -13,7 +13,9 @@ install it performs is reproduced with a wheel built from the same sources.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -93,3 +95,102 @@ def test_every_command_is_a_console_script_the_install_creates(command):
     on the host, where the dev venv is editable, and nowhere else."""
     scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
     assert scripts[command] == f"adulting.{command}:main"
+
+
+# ---------- the entrypoint that installs the tool definitions ----------
+
+ENTRYPOINT = REPO_ROOT / "container" / "entrypoint.sh"
+TOOLS = sorted(p.name for p in (REPO_ROOT / "dev" / "tools").glob("*.json"))
+
+
+def test_the_image_ships_the_definitions_and_runs_them_through_the_entrypoint():
+    assert "COPY dev/tools /opt/tools" in instructions()
+    assert "COPY container/entrypoint.sh /usr/local/bin/adulting-entrypoint" in instructions()
+    assert 'ENTRYPOINT ["/usr/local/bin/adulting-entrypoint"]' in instructions()
+
+
+@pytest.fixture
+def entrypoint(tmp_path):
+    """Run the shim as the image would, with a stub for the agent binary and
+    the shipped definitions where the image puts them."""
+    src = tmp_path / "opt" / "tools"
+    src.mkdir(parents=True)
+    for name in TOOLS:
+        (src / name).write_text(((REPO_ROOT / "dev" / "tools" / name).read_text()),
+                                encoding="utf-8")
+    state = tmp_path / "state"
+    stub = tmp_path / "agent"
+    stub.write_text('#!/bin/sh\necho "agent ran with: $*"\n', encoding="utf-8")
+    stub.chmod(0o755)
+
+    def run(src_dir=src):
+        # `src` is hardcoded to /opt/tools in the shim, so the test runs it
+        # through a copy with that one path pointed at the fixture's dir.
+        script = tmp_path / "entrypoint.sh"
+        script.write_text(ENTRYPOINT.read_text().replace("src=/opt/tools", f"src={src_dir}"),
+                          encoding="utf-8")
+        script.chmod(0o755)
+        return subprocess.run([str(script), "-mailbox"], capture_output=True, text=True,
+                              env={**os.environ, "AGENT_STATE_DIR": str(state),
+                                   "AGENT_BIN": str(stub)})
+
+    run.state = state
+    run.src = src
+    return run
+
+
+def test_the_definitions_are_installed_and_the_agent_gets_its_arguments(entrypoint):
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    assert sorted(p.name for p in (entrypoint.state / "tools").glob("*.json")) == TOOLS
+    assert f"adulting: installed {len(TOOLS)} tool definition(s)" in r.stdout
+    assert "agent ran with: -mailbox" in r.stdout
+
+
+def test_a_stale_definition_is_overwritten_and_a_foreign_one_is_left_alone(entrypoint):
+    """The image is the source of truth for the files it ships, and nothing
+    else: the agent seeds its own builtins into this directory."""
+    tools = entrypoint.state / "tools"
+    tools.mkdir(parents=True)
+    (tools / "tasks.json").write_text('{"command": "tasks", "description": "stale"}',
+                                      encoding="utf-8")
+    (tools / "read_file.json").write_text('{"builtin": true, "description": "the agent\'s own"}',
+                                          encoding="utf-8")
+
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    assert "stale" not in (tools / "tasks.json").read_text(encoding="utf-8")
+    assert (tools / "tasks.json").read_text(encoding="utf-8") == \
+        (REPO_ROOT / "dev" / "tools" / "tasks.json").read_text(encoding="utf-8")
+    assert "the agent's own" in (tools / "read_file.json").read_text(encoding="utf-8")
+
+
+def test_a_definition_naming_a_missing_command_is_reported_not_deleted(entrypoint):
+    """The directory is shared, so a definition for someone else's binary is
+    not ours to remove — but the model would call it and fail, so it is said."""
+    tools = entrypoint.state / "tools"
+    tools.mkdir(parents=True)
+    (tools / "frobnicate.json").write_text('{"command": "frobnicate", "description": "x"}',
+                                           encoding="utf-8")
+
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    assert "adulting: warning: frobnicate.json names frobnicate, which is not on PATH" in r.stderr
+    assert (tools / "frobnicate.json").is_file()
+    # A builtin has no `command` and is not reported.
+    assert "read_file" not in r.stderr
+
+
+def test_the_agent_still_starts_when_the_state_directory_cannot_be_written(entrypoint, tmp_path):
+    """A read-only mount is a reason to say so, not to leave the mailbox
+    unattended."""
+    entrypoint.state.mkdir(parents=True)
+    (entrypoint.state / "tools").mkdir()
+    (entrypoint.state / "tools").chmod(0o500)
+    try:
+        r = entrypoint()
+    finally:
+        (entrypoint.state / "tools").chmod(0o700)
+    assert r.returncode == 0, r.stderr
+    assert "cannot write" in r.stderr
+    assert "agent ran with: -mailbox" in r.stdout

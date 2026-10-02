@@ -2,6 +2,21 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - the agent tool definitions ride with the image
+
+The agent seeds its `tools/` directory only if it is missing and never
+touches it again, so a long-lived state dir keeps whatever generation of the
+definitions was first hand-copied into it. The staging vault's copies were
+months stale — they still described commands that prompt on stdin — and
+`notes.json` was not there at all, so the agent had no `notes` tool.
+
+- **`COPY dev/tools /opt/tools`**, and `container/entrypoint.sh` installs them into `$AGENT_STATE_DIR/tools` before exec'ing the agent. The definitions and the commands they describe now ship as one artifact and cannot disagree, which is what `dev/ci`'s `tools-check` already enforces inside the repo.
+- **Files the image ships are overwritten on every start** — the image is the source of truth, so a hand edit to one of them does not survive a restart. Everything else in the directory is left alone: the agent's own builtins (`read_file`, `rg`, `load_skill`, …) are untouched.
+- **A definition naming a command that is not on PATH is reported, not deleted.** The directory is shared with whatever else drops tools into it, and a definition for someone else's binary is not ours to remove. Builtins carry no `command` and are not reported.
+- A state directory that cannot be written is a warning, not a refusal to start: a read-only mount should not leave the mailbox unattended.
+- The agent watches that directory, so the writes register within its debounce window — no second restart.
+- **Run in the container, not just written:** with a deliberately stale `tasks.json` and a hand-made `read_file.json` in the state dir, the entrypoint reports "installed 10 tool definition(s)", the stale copy is replaced by the committed one, the agent's own file survives, and the agent receives its arguments. Six tests drive the script directly on the host with a stub agent, covering each of those cases plus the read-only one.
+
 ## 2026-10-02 - the image installs the package instead of mounting it
 
 The container used to find the CLIs by bind-mounting the host repo at

@@ -85,6 +85,13 @@ COPY --from=build /opt/venv /opt/venv
 # than the agent's first tool call.
 RUN /opt/venv/bin/lint --help-json > /dev/null
 
+# The agent tool definitions ride with the commands they describe, so the two
+# cannot drift apart. The entrypoint installs them into the agent's state
+# directory on every start; see container/entrypoint.sh for what that means
+# for a file edited by hand.
+COPY dev/tools /opt/tools
+COPY container/entrypoint.sh /usr/local/bin/adulting-entrypoint
+
 # PATH puts the venv first, so `tasks` and friends are the installed scripts.
 # No PYTHONPATH: there is nothing to point it at.
 ENV PATH=/opt/venv/bin:$PATH \
@@ -104,4 +111,4 @@ ENV GIT_AUTHOR_NAME=agent \
 
 WORKDIR /workspace
 USER 1000:0
-ENTRYPOINT ["/usr/local/bin/agent"]
+ENTRYPOINT ["/usr/local/bin/adulting-entrypoint"]

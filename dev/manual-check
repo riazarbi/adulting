@@ -22,55 +22,20 @@ Usage:
 """
 
 import argparse
-import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'dev'))
 from commands import COMMANDS  # noqa: E402
-
-# Documented once in the manual's own preamble, not per command.
-EXEMPT_FLAGS = {'--help', '-h', '--help-json'}
+from surface import EXEMPT_FLAGS, FLAG_RE, manifest, real_names  # noqa: E402
 
 # `| `name` | ...` — the first cell of a table row, where the manual lists a
 # subcommand or a flag.
 ROW_RE = re.compile(r'^\|\s*`([^`]+)`\s*\|')
 # Any `code span` in the section.
 CODE_RE = re.compile(r'`([^`]+)`')
-FLAG_RE = re.compile(r'--[a-z][a-z0-9-]*')
-
-
-def manifest(tool):
-    """The tool's own description of its surface."""
-    exe = REPO / '.venv' / 'bin' / tool
-    env = dict(os.environ)
-    env.pop('ADULTING_HOME', None)
-    p = subprocess.run([str(exe), '--help-json'], capture_output=True, text=True,
-                       env=env, stdin=subprocess.DEVNULL, timeout=20)
-    if p.returncode != 0:
-        sys.exit(f"manual-check: error: {tool} --help-json failed: {p.stderr.strip()}")
-    return json.loads(p.stdout)
-
-
-def spellings(flag):
-    """Every way a flag can be written, longest first, so a message about it
-    names `--minutes` rather than `-m`."""
-    return sorted([flag['name']] + flag.get('aliases', []), key=len, reverse=True)
-
-
-def real_names(m):
-    """(subcommands, flags) the command really has. A flag is the set of its
-    spellings: documenting either one documents the flag."""
-    subs = {s['name'] for s in m.get('subcommands', [])}
-    flags = [f for f in m.get('flags', [])]
-    for s in m.get('subcommands', []):
-        flags += s.get('flags', [])
-    spelt = {tuple(spellings(f)) for f in flags}
-    return subs, sorted(s for s in spelt if not set(s) & EXEMPT_FLAGS)
 
 
 def sections(manual_text):

@@ -27,10 +27,15 @@ def load(path):
 
 CHECK = load(REPO / "dev" / "manual-check")
 
+# What the CLI's surface is, and what prose may claim about it, is shared by
+# the three gates that compare committed text with the code.
+sys.path.insert(0, str(REPO / "dev"))
+import surface  # noqa: E402
+
 sections = CHECK.sections
 claimed_names = CHECK.claimed_names
-real_names = CHECK.real_names
-spellings = CHECK.spellings
+real_names = surface.real_names
+spellings = surface.spellings
 
 MANUAL = """# Manual
 

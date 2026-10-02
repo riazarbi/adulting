@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - the agent skills ship in the image too, and are gated like the tools
+
+The skills carried the same stale picture as the tool definitions did: `hours
+log` and `payments log` "going interactive" without a thread, `threads new`
+and `people new` "prompting for any field you leave out", and a whole
+`footguns` section about interactive traps that have not existed since the
+port. The system prompt said there were "Nine vault tools" and that there is
+"no `notes` tool".
+
+- **`agent/skills/` in the repo**, shipped as `COPY agent/skills /opt/skills` and installed by the entrypoint beside the tool definitions. The stale passages are rewritten: nothing prompts, a command given too little exits with an argparse error naming what is missing.
+- **The system prompt is deliberately not shipped.** Tools and skills are capabilities — one file or folder each, so another image's install side by side — while a prompt is the agent's identity. An overlay agent can be general-purpose and still load these. The owner's call, and the right one.
+- **`dev/agent-check`**, in `dev/ci lint`: every `command subcommand` and `--flag` a skill names in a code span exists, nothing claims a command prompts, and each skill has the shape the agent requires (SKILL.md, frontmatter `name` equal to the folder name, a description, no keys outside the spec whitelist — the agent rejects a skill that breaks any of those, silently).
+- **`dev/surface.py`** is now the one definition of what the CLI's surface is and what prose may claim about it; `manual-check`, `tools-check` and `agent-check` all read it. The claim detector got sharper in the process: it matches the shapes a claim takes ("goes interactive", "prompts on stdin", "confirmation prompt") rather than the bare words, because the skills talk about the agent's *own* system prompt constantly — and a `without` or `no` earlier in the sentence no longer reads as a denial, which was hiding two of the real claims.
+- **The entrypoint installs atomically.** Both tiers start at once and the agent watches those directories, so each file is staged under a dotted name and renamed into place; a skill folder is staged whole and swapped, so a file the new version dropped cannot linger inside it. An unwritable destination is one warning, not one per file.
+- **Install-only, by decision:** nothing is deleted, so an overlay that stops being run leaves its files behind to be pruned by hand. Simpler than tracking what was installed.
+- **Built and run:** "installed 10 tool definition(s)", "installed 9 skill(s)", a stale `tasks.json` replaced, and a foreign `someone-elses` skill left untouched beside them.
+- **Outside this repo:** `~/vault/.agent/prompt/00-role.md` loses the ten-tool inventory and the "no `notes` tool" paragraph — the file's own rule is that the tool descriptions are the interface reference, so that list was a leak against it. `docker-compose.yml` drops `:ro` from the skills mount for both tiers, so they still land in `~/vault/.agent/skills` where they can be read on the host.
+- **913 passing, `dev/ci` green.**
+
 ## 2026-10-02 - the agent tool definitions ride with the image
 
 The agent seeds its `tools/` directory only if it is missing and never

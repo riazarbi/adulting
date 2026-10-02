@@ -85,11 +85,17 @@ COPY --from=build /opt/venv /opt/venv
 # than the agent's first tool call.
 RUN /opt/venv/bin/lint --help-json > /dev/null
 
-# The agent tool definitions ride with the commands they describe, so the two
-# cannot drift apart. The entrypoint installs them into the agent's state
-# directory on every start; see container/entrypoint.sh for what that means
-# for a file edited by hand.
+# The agent tool definitions and skills ride with the commands they describe,
+# so they cannot drift apart from them. The entrypoint installs both into the
+# agent's state directory on every start; see container/entrypoint.sh for
+# what that means for a file edited by hand.
+#
+# The system prompt is deliberately not here. Tools and skills are
+# capabilities and compose — one file or folder each, installed side by side
+# with another image's — while a prompt is the agent's identity. An overlay
+# agent can be general-purpose and still load these.
 COPY dev/tools /opt/tools
+COPY agent/skills /opt/skills
 COPY container/entrypoint.sh /usr/local/bin/adulting-entrypoint
 
 # PATH puts the venv first, so `tasks` and friends are the installed scripts.

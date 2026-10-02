@@ -43,7 +43,7 @@ PY = REPO / '.venv' / 'bin' / 'python'
 sys.path.insert(0, str(REPO / 'dev'))
 from commands import COMMANDS as TOOLS  # noqa: E402
 DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-check', 'manual-diff',
-             'tools-build', 'tools-check', 'testbed', 'ci']
+             'tools-build', 'tools-check', 'agent-check', 'testbed', 'ci']
 
 BOLD, GREEN, RED, YELLOW, OFF = '\033[1m', '\033[32m', '\033[31m', '\033[33m', '\033[0m'
 failed = []
@@ -144,6 +144,15 @@ def stage_lint():
     else:
         print(stale.stdout, end='')
         bad("MANUAL.md matches the CLI")
+
+    # The agent skills ship in the image, so what is committed is what the
+    # model is told. They must not describe commands that have changed.
+    drifted = run(PY, REPO / 'dev' / 'agent-check', capture_output=True, text=True, env=env)
+    if drifted.returncode == 0:
+        ok("agent skills match the CLI")
+    else:
+        print(drifted.stdout, end='')
+        bad("agent skills match the CLI")
 
     # The committed agent tool definitions must stay loadable and in scope.
     # Deterministic, so it belongs in the gate rather than the generation stage.

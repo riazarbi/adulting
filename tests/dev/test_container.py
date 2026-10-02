@@ -123,19 +123,21 @@ def entrypoint(tmp_path):
     stub.write_text('#!/bin/sh\necho "agent ran with: $*"\n', encoding="utf-8")
     stub.chmod(0o755)
 
-    def run(src_dir=src):
-        # `src` is hardcoded to /opt/tools in the shim, so the test runs it
-        # through a copy with that one path pointed at the fixture's dir.
-        script = tmp_path / "entrypoint.sh"
-        script.write_text(ENTRYPOINT.read_text().replace("src=/opt/tools", f"src={src_dir}"),
-                          encoding="utf-8")
-        script.chmod(0o755)
-        return subprocess.run([str(script), "-mailbox"], capture_output=True, text=True,
+    skills = tmp_path / "opt" / "skills"
+    (skills / "a-skill").mkdir(parents=True)
+    (skills / "a-skill" / "SKILL.md").write_text("---\nname: a-skill\n---\n",
+                                                 encoding="utf-8")
+
+    def run():
+        return subprocess.run([str(ENTRYPOINT), "-mailbox"], capture_output=True, text=True,
                               env={**os.environ, "AGENT_STATE_DIR": str(state),
-                                   "AGENT_BIN": str(stub)})
+                                   "AGENT_BIN": str(stub),
+                                   "ADULTING_TOOLS_DIR": str(src),
+                                   "ADULTING_SKILLS_DIR": str(skills)})
 
     run.state = state
     run.src = src
+    run.skills = skills
     return run
 
 
@@ -194,3 +196,49 @@ def test_the_agent_still_starts_when_the_state_directory_cannot_be_written(entry
     assert r.returncode == 0, r.stderr
     assert "cannot write" in r.stderr
     assert "agent ran with: -mailbox" in r.stdout
+
+
+SKILLS = sorted(d.name for d in (REPO_ROOT / "agent" / "skills").iterdir() if d.is_dir())
+
+
+def test_the_image_ships_the_skills_too():
+    assert "COPY agent/skills /opt/skills" in instructions()
+    assert SKILLS, "no skills committed"
+
+
+def test_the_skills_are_installed_as_folders(entrypoint):
+    """A skill is a folder holding SKILL.md, so the install has to copy a
+    tree, not a file."""
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    assert "adulting: installed 1 skill(s)" in r.stdout
+    assert (entrypoint.skills / "a-skill" / "SKILL.md").is_file()
+    installed = entrypoint.state / "skills" / "a-skill" / "SKILL.md"
+    assert installed.read_text(encoding="utf-8") == "---\nname: a-skill\n---\n"
+
+
+def test_a_stale_skill_is_replaced_whole_and_a_foreign_one_is_kept(entrypoint):
+    """Replaced, not merged: a file the new version of a skill no longer has
+    would otherwise linger inside it. Another image's skill is untouched."""
+    skills = entrypoint.state / "skills"
+    (skills / "a-skill").mkdir(parents=True)
+    (skills / "a-skill" / "SKILL.md").write_text("stale", encoding="utf-8")
+    (skills / "a-skill" / "references").mkdir()
+    (skills / "a-skill" / "references" / "gone.md").write_text("old", encoding="utf-8")
+    (skills / "someone-elses").mkdir()
+    (skills / "someone-elses" / "SKILL.md").write_text("theirs", encoding="utf-8")
+
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    assert "stale" not in (skills / "a-skill" / "SKILL.md").read_text(encoding="utf-8")
+    assert not (skills / "a-skill" / "references").exists()
+    assert (skills / "someone-elses" / "SKILL.md").read_text(encoding="utf-8") == "theirs"
+
+
+def test_nothing_is_left_behind_when_an_install_is_interrupted(entrypoint):
+    """Each file is staged under a dotted name and renamed into place, so a
+    watcher never reads half of one. Nothing dotted should survive."""
+    r = entrypoint()
+    assert r.returncode == 0, r.stderr
+    for directory in (entrypoint.state / "tools", entrypoint.state / "skills"):
+        assert [p.name for p in directory.iterdir() if p.name.startswith(".")] == []

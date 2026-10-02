@@ -5,9 +5,11 @@
 # no apt), so adding python on top of it is not possible — we pull the
 # binary out and rebuild the runtime ourselves.
 #
-# The source is bind-mounted at runtime (see docker-compose.yml) so edits to
-# the repo on the host flow through immediately, without a rebuild. The
-# commands are wrappers around `python3 -m adulting.<name>`; see below.
+# The adulting package is installed into a venv at build time, so the image
+# is self-contained: the ten commands are its own console scripts and the
+# container needs nothing mounted at /opt to run them. Changing the CLI means
+# rebuilding (`docker compose up -d --build`), which is quick — the package
+# has no third-party dependencies to fetch.
 #
 # The agent is published, so there is nothing to build first — the build
 # pulls it. For a private package, authenticate once:
@@ -24,6 +26,33 @@ FROM ghcr.io/riazarbi/agent:latest AS agent_bin
 # sid was chosen when the image still needed taskwarrior 3.x; it no longer
 # does, but sid is a current, working base and changing it is a separate
 # decision from this refactor.
+# The package is installed in its own stage so that pip, ensurepip and
+# setuptools do not end up in the shipped image. `--copies` gives the venv a
+# real interpreter binary rather than a symlink into this stage, which the
+# final stage does not have; the stdlib it loads comes from the identical
+# base below.
+FROM debian:sid-slim AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-setuptools \
+ && rm -rf /var/lib/apt/lists/*
+
+# Only what the build needs: `readme` in pyproject.toml points at README.md,
+# so the install fails without it. Tests, stories and the host's .venv stay
+# out of the image.
+COPY pyproject.toml README.md /src/
+COPY src /src/src
+
+# --no-build-isolation keeps the build off PyPI: the backend comes from
+# apt's setuptools, which a venv cannot see on its own, so PYTHONPATH points
+# at Debian's dist-packages for this one command rather than making the
+# shipped venv a --system-site-packages one. There are no runtime
+# dependencies, so this is the whole install.
+RUN python3 -m venv --copies /opt/venv \
+ && PYTHONPATH=/usr/lib/python3/dist-packages \
+    /opt/venv/bin/pip install --no-cache-dir --no-build-isolation /src
+
+
 FROM debian:sid-slim
 
 # python3 runs the adulting package (standard library only). taskwarrior is
@@ -42,26 +71,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=agent_bin /usr/local/bin/agent /usr/local/bin/agent
 
-# /opt/adulting is filled at runtime by a bind mount from
-# /home/riaz/projects/adulting on the host. Pre-create the directory so
-# the mount has a target and so PATH resolves cleanly even if the mount is
-# ever omitted (the dir is just empty in that case).
 # /state and /workspace match the agent base image's layout — bind mounts
 # land there and need to be writable by the container UID.
-RUN mkdir -p /opt/adulting /state /workspace && chmod 0777 /state /workspace
+RUN mkdir -p /state /workspace && chmod 0777 /state /workspace
 
-# The commands are console scripts of the `adulting` package, which a pipx or
-# pip install would create. This image cannot install it: the source arrives
-# at runtime as a bind mount, after the build. So each command gets a wrapper
-# that runs its module, and PYTHONPATH points at the mounted source. Edits on
-# the host still take effect immediately, with no rebuild.
-RUN for cmd in tasks notes search threads people hours payments buffer lint commit; do \
-      printf '#!/bin/sh\nexec python3 -m adulting.%s "$@"\n' "$cmd" > /usr/local/bin/$cmd; \
-      chmod 0755 /usr/local/bin/$cmd; \
-    done
+# The venv, holding the package and its ten console scripts. /opt/venv, not
+# /opt/adulting: the old image had the host repo bind-mounted at the latter,
+# and a mount left behind in a compose file would otherwise shadow the
+# install and break every command.
+COPY --from=build /opt/venv /opt/venv
 
-# ADULTING_HOME points at the bind-mounted vault.
-ENV PYTHONPATH=/opt/adulting/src \
+# One command run at build time, so a broken install fails the build rather
+# than the agent's first tool call.
+RUN /opt/venv/bin/lint --help-json > /dev/null
+
+# PATH puts the venv first, so `tasks` and friends are the installed scripts.
+# No PYTHONPATH: there is nothing to point it at.
+ENV PATH=/opt/venv/bin:$PATH \
     ADULTING_HOME=/vault \
     AGENT_STATE_DIR=/state \
     HOME=/tmp

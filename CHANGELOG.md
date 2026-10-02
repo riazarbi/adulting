@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - the image installs the package instead of mounting it
+
+The container used to find the CLIs by bind-mounting the host repo at
+`/opt/adulting` and pointing PYTHONPATH at it, with a shell wrapper per
+command running `python3 -m adulting.<name>`. The image is self-contained now.
+
+- **A build stage installs the package into a venv at `/opt/venv`**, which the runtime stage copies in and puts first on PATH. The ten commands inside the container are the package's own console scripts — the same ones the tests run. `pip`, `ensurepip` and `setuptools` stay in the build stage.
+- `--copies` gives the venv a real interpreter rather than a symlink into a stage the runtime does not have. `--no-build-isolation` with `PYTHONPATH=/usr/lib/python3/dist-packages` for that one command keeps the build off PyPI: the backend comes from apt's setuptools, which a venv cannot see on its own.
+- **`/opt/venv`, not `/opt/adulting`:** a source mount left behind in a compose file would otherwise shadow the install and break every command.
+- **The build runs `lint --help-json`** before shipping, so a broken install fails the build rather than the agent's first tool call.
+- **Built and run for real** (podman): all ten commands resolve to `/opt/venv/bin`, `lint`, `threads list` and `tasks list` work against a mounted vault, and PYTHONPATH is empty inside the container. 320 MB.
+- **`tests/dev/test_container.py` pins the new contract** instead of the old one: the install, the venv on PATH, the build-time smoke run, what the build copies, no PYTHONPATH in the runtime stage, no `/opt/adulting`, no `python3 -m` wrappers, and that pyproject still ships the schemas an installed `lint` needs. Checked by reinstating PYTHONPATH, dropping the smoke run and emptying `package-data` in turn.
+- **Outside this repo:** `~/vault/docker-compose.yml` drops the `/opt/adulting:ro` mount from both `agent-shallow` and `agent-deep`. Changing the CLI now needs `up -d --build` rather than a restart.
+
 ## 2026-10-02 - the image derives from the published agent
 
 The agent is published to GHCR, so the base no longer has to be built on the

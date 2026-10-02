@@ -223,3 +223,14 @@ def test_main_is_quiet_and_exits_0_when_nothing_has_drifted(monkeypatch, tmp_pat
     monkeypatch.setattr(sys, "argv", ["manual-check", "--manual", str(manual)])
     assert CHECK.main() == 0
     assert capsys.readouterr().out == ""
+
+
+def test_the_generation_stage_checks_what_it_generated():
+    """`dev/ci manual` and `dev/ci tools` both run their checker on the
+    output. Without that, a generation that dropped a command is reported by
+    the next run rather than the one that caused it."""
+    ci = (REPO / "dev" / "ci").read_text(encoding="utf-8")
+    manual = ci[ci.index("def stage_manual("):ci.index("def stage_tools(")]
+    tools = ci[ci.index("def stage_tools("):ci.index("def main(")]
+    assert "manual-build" in manual and "manual-check" in manual
+    assert "tools-build" in tools and "tools-check" in tools

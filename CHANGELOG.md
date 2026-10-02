@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - `dev/ci manual` checks what it generated
+
+`dev/ci tools` ran `tools-check` on its output; `dev/ci manual` did not, so a
+generation that dropped a command or invented a flag was reported by the next
+run rather than the one that caused it.
+
+- `stage_manual` now runs `manual-check` after `manual-build`, and reports the pair, exactly as `stage_tools` does.
+- A test pins the symmetry: both stages must name their builder and their checker. Checked by removing the new call and watching it fail.
+- **914 passing, `dev/ci` green.**
+
 ## 2026-10-02 - the agent skills ship in the image too, and are gated like the tools
 
 The skills carried the same stale picture as the tool definitions did: `hours

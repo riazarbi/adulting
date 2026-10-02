@@ -233,8 +233,14 @@ def stage_manual(corpus):
     if not corpus.ensure():
         bad("corpus harvest")
         return
-    if run(REPO / 'dev' / 'manual-build', '--corpus', corpus.markdown,
-           '--out', REPO / 'MANUAL.md', env=command_env()).returncode == 0:
+    # Checked here as well as in the gate, as `tools` is: a generation that
+    # dropped a command or invented a flag should be reported by the run that
+    # produced it, not by the next one.
+    env = command_env()
+    built = run(REPO / 'dev' / 'manual-build', '--corpus', corpus.markdown,
+                '--out', REPO / 'MANUAL.md', env=env).returncode == 0
+    checked = built and run(REPO / 'dev' / 'manual-check', env=env).returncode == 0
+    if checked:
         ok("MANUAL.md generated")
     else:
         bad("MANUAL.md generation")

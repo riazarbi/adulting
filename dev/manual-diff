@@ -23,10 +23,10 @@ from pathlib import Path
 
 # Names the manual must never contain: the machinery that produces it.
 FORBIDDEN = ['manual-harvest', 'manual-build', 'manual-diff', 'manual-prompt',
-             'ci.sh', 'agent-build', 'help-json']
+             'dev/ci', 'agent-build', 'help-json']
 
-OPERATOR_TOOLS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
-                  'payments', 'buffer', 'lint', 'commit']
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from commands import COMMANDS as OPERATOR_TOOLS  # noqa: E402
 
 # A command is only counted where it is presented as code — a fenced block
 # or inline backticks. Matching bare prose picks up phrases like "tasks whose
@@ -106,8 +106,8 @@ def main():
     else:
         only_a = [h for h in ha if h not in hb]
         only_b = [h for h in hb if h not in ha]
-        detail = ''.join(f"       only in A: {'#'*l} {t}\n" for l, t in only_a)
-        detail += ''.join(f"       only in B: {'#'*l} {t}\n" for l, t in only_b)
+        detail = ''.join(f"       only in A: {'#'*depth} {head}\n" for depth, head in only_a)
+        detail += ''.join(f"       only in B: {'#'*depth} {head}\n" for depth, head in only_b)
         if not detail:
             detail = "       same headings, different order\n"
         passed &= report("headings", False, detail.rstrip())

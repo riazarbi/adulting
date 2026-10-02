@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adulting"
+version = "0.1.0"
+description = "Plain-text vault tools: notes, threads, tasks, hours, payments."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+# Runtime dependencies. Empty on purpose: the standard library covers the
+# tools today. Add a package here only when hand-rolling it would bloat the
+# code, and prefer stable, widely used ones.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "coverage>=7.10", "ruff>=0.16"]
+
+# One entry per ported command. A command appears here in the same change
+# that deletes its old script from the repo root.
+[project.scripts]
+buffer = "adulting.buffer:main"
+commit = "adulting.commit:main"
+hours = "adulting.hours:main"
+lint = "adulting.lint:main"
+notes = "adulting.notes:main"
+payments = "adulting.payments:main"
+people = "adulting.people:main"
+search = "adulting.search:main"
+tasks = "adulting.tasks:main"
+threads = "adulting.threads:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Non-Python files installed with the package.
+[tool.setuptools.package-data]
+adulting = ["schemas/*.md"]
+
+# The linter `dev/ci lint` runs. The rule set is deliberately small: pyflakes
+# and pycodestyle for the mistakes, bugbear for the traps, and BLE for bare
+# `except Exception:` — the one this code base has had to argue with. 120
+# columns is what the code already sits inside.
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# RUF100 keeps the `# noqa` markers honest: one that no longer suppresses
+# anything is removed rather than left as a claim about the code.
+select = ["E", "F", "W", "B", "BLE", "RUF100"]
+
+# Tests pin vault lines and command output verbatim. Wrapping those strings
+# to fit a column would change what is being pinned, or hide it, so the
+# length rule does not apply to them.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+# Most tests run the commands as subprocesses; "subprocess" makes coverage
+# follow them into the child Python processes too.
+patch = ["subprocess"]
+parallel = true
+source = ["src/adulting", "."]
+omit = ["tests/*", ".venv/*", ".claude/*", "eval/*"]
+data_file = ".coverage-data/coverage"
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+sort = "Cover"
+
+[tool.coverage.html]
+directory = "htmlcov"

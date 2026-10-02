@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Check the agent skills against the commands as they actually are.
+
+Developer tool. Runs in the CI gate: no model call, no network — it asks each
+command for its `--help-json` manifest and compares the names the skills use
+with the names the CLI has.
+
+The skills ship in the image and are installed into the agent's skills
+directory on start, so what is committed here is what the model is told. They
+carry sequences and judgement; the per-command surface belongs to the tool
+definitions, which say so themselves. What is checked is the surface that
+leaks in anyway:
+
+  names         a `command subcommand` in a code span is a real subcommand,
+                and a `--flag` is a real flag of some command
+  truth         nothing claims a command prompts or reads stdin. Nothing
+                does, and the skills said otherwise for months
+  shape         the agent's own rules: SKILL.md present, frontmatter `name`
+                equal to the folder name, description non-empty, no keys
+                outside the spec whitelist
+
+Usage:
+    dev/agent-check [--dir agent/skills]
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / 'dev'))
+from commands import COMMANDS  # noqa: E402
+from surface import (EXEMPT_FLAGS, FLAG_RE, interactivity_claims,  # noqa: E402
+                     manifest, real_names)
+
+# The agent rejects a skill carrying any other key (README: "Unknown keys are
+# rejected"), so a typo here is a skill that silently never loads.
+ALLOWED_KEYS = {'name', 'description', 'license', 'allowed-tools', 'metadata',
+                'compatibility'}
+NAME_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+)*$')
+
+CODE_RE = re.compile(r'`([^`]+)`')
+# A placeholder, not a subcommand: `tasks <uuid>`, `hours ...`.
+PLACEHOLDER_RE = re.compile(r'^[a-z][a-z-]*$')
+
+
+def frontmatter(text):
+    """The YAML-ish frontmatter as a dict, or None when there is none. Only
+    the flat `key: value` shape the agent's own validator accepts."""
+    if not text.startswith('---\n'):
+        return None
+    end = text.find('\n---', 4)
+    if end == -1:
+        return None
+    out = {}
+    for line in text[4:end].split('\n'):
+        if not line.strip() or line.startswith((' ', '\t')):
+            continue
+        key, _, value = line.partition(':')
+        out[key.strip()] = value.strip()
+    return out
+
+
+def named_surface(text):
+    """(command, subcommand) pairs and flags the prose names.
+
+    Read from code spans only. "notes and logs" is prose about notes; `notes
+    list` is a claim that the subcommand exists.
+    """
+    pairs, flags = set(), set()
+    for span in CODE_RE.findall(text):
+        words = span.split()
+        if words and words[0] in COMMANDS and len(words) > 1:
+            if PLACEHOLDER_RE.match(words[1]):
+                pairs.add((words[0], words[1]))
+        flags |= set(FLAG_RE.findall(span))
+    return pairs, flags - EXEMPT_FLAGS
+
+
+def problems(path, text, surfaces):
+    """Everything wrong with one skill, as messages."""
+    out = []
+
+    front = frontmatter(text)
+    if front is None:
+        out.append("has no frontmatter")
+    else:
+        for key in sorted(set(front) - ALLOWED_KEYS):
+            out.append(f"frontmatter key {key!r} is not one the agent accepts")
+        name = front.get('name', '')
+        if not name:
+            out.append("frontmatter has no name")
+        elif name != path.parent.name:
+            out.append(f"frontmatter name {name!r} is not the folder name "
+                       f"{path.parent.name!r}; the agent rejects the skill")
+        elif not NAME_RE.match(name):
+            out.append(f"name {name!r} is not lowercase words joined by hyphens")
+        if not front.get('description'):
+            out.append("frontmatter has no description, so nothing tells the "
+                       "model when to load this skill")
+
+    pairs, flags = named_surface(text)
+    every_flag = {s for spelt in surfaces['flags'] for s in spelt}
+    for command, sub in sorted(pairs):
+        if sub not in surfaces['subcommands'][command]:
+            out.append(f"names `{command} {sub}`, which is not a subcommand of "
+                       f"{command}")
+    for flag in sorted(flags):
+        if flag not in every_flag:
+            out.append(f"names the flag `{flag}`, which no command has")
+
+    for said in interactivity_claims(text):
+        out.append(f"says a command is interactive, and none of them are: {said!r}")
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Check the agent skills against the CLI.")
+    ap.add_argument('--dir', default=str(REPO / 'agent' / 'skills'))
+    args = ap.parse_args()
+
+    root = Path(args.dir)
+    if not root.is_dir():
+        sys.exit(f"agent-check: error: no skills directory at {root}")
+
+    surfaces = {'subcommands': {}, 'flags': set()}
+    for tool in COMMANDS:
+        subs, flags = real_names(manifest(tool))
+        surfaces['subcommands'][tool] = subs
+        surfaces['flags'] |= set(flags)
+
+    failed = False
+    found = sorted(d for d in root.iterdir() if d.is_dir())
+    if not found:
+        sys.exit(f"agent-check: error: no skills in {root}")
+
+    for directory in found:
+        skill = directory / 'SKILL.md'
+        if not skill.exists():
+            skill = directory / 'skill.md'
+        if not skill.exists():
+            print(f"{directory.name}: no SKILL.md")
+            failed = True
+            continue
+        for problem in problems(skill, skill.read_text(encoding='utf-8'), surfaces):
+            print(f"{directory.name}: {problem}")
+            failed = True
+
+    if failed:
+        print("\nThe skills describe commands that have changed. Fix the text; "
+              "the tool definitions carry the surface.")
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

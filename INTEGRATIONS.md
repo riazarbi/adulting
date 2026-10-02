@@ -4,8 +4,8 @@ This codebase relies on two external applications. Each section
 documents what we use it for, the configuration the integration
 needs, and the steps a fresh install requires.
 
-(The task backend is no longer listed here: it's an embedded internal
-component, set up via `tasks install`. See README.md for usage.)
+(There is no task backend to configure: a task is a `TASK:` line in the
+note or log that carries it. See README.md for usage.)
 
 ## Obsidian
 

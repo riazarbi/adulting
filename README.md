@@ -47,26 +47,32 @@ This division is why `hours` accepts threads with no currency: a 5k run and a cl
 
 # Installation
 
-Drop the repo onto your `PATH`. I keep a `bin` directory in my home folder and clone into it:
+The commands are console scripts of the `adulting` Python package. Install it
+with pipx, which puts each command on your `PATH` in its own environment:
 
 ```zsh
-cd ~
-mkdir -p bin
-cd bin
-git clone git@github.com:riazarbi/adulting.git
+git clone git@github.com:riazarbi/adulting.git ~/projects/adulting
+pipx install ~/projects/adulting
 ```
 
-Then add this to the bottom of `.zshrc` or `.bashrc`:
+To work on the code, install it editable in a venv instead, which is what the
+tests use:
 
 ```zsh
-export PATH=/Users/riaz/bin/adulting:$PATH
+cd ~/projects/adulting
+uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+dev/ci                 # lint + tests + coverage
 ```
+
+Installed commands: `tasks`, `notes`, `search`, `threads`, `people`, `hours`,
+`payments`, `buffer`, `lint`, `commit`. They are generic names; if one clashes
+with something else on your `PATH`, the clash is yours to resolve.
 
 ## Dependencies
 
-- `bash`, `python3`, `awk`, `sed`, `grep` — required by everything
+- Python 3.11 or newer. No third-party runtime dependencies.
+- `git` — required by `commit`
 - `pandoc` and a LaTeX engine (`xelatex` via e.g. MacTeX or TeX Live) — required by `notes pdf`, `notes minutes`, `notes agenda`
-- macOS `open` (or Linux `xdg-open`) — used to launch Obsidian for note editing
 
 ## One-time setup
 
@@ -105,18 +111,19 @@ Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files wi
 
 ### Subcommands
 
-| Command              | What it does                                                    |
-|----------------------|-----------------------------------------------------------------|
-| `notes` / `--new`    | Create a new note (interactive: type → thread → topic → people → meeting extras → opens editor) |
-| `--edit` / `--nano`  | Pick a note, edit in default editor / nano                      |
-| `--last`             | Open most recent note                                           |
-| `--copy` / `--strip` / `--delete` / `--cat` | Pick a note, do the thing                |
-| `--pdf` / `--minutes` / `--agenda` | Pick a note, render PDF                           |
-| `--help`             | Full help                                                       |
+A note is named by its stem — the filename without `.md`, e.g. `2026-09-10-14-30-00`. `notes list` shows the stems.
 
-Every non-`--new` invocation runs `tasks` first to ingest any pending `ACTION:` lines.
+| Command | What it does |
+|---|---|
+| `notes new --type T --topic X --thread K/N [--thread ...] [--person N ...] [--counterparty C] [--location L]` | Create a note; print its path. `--person` is for Meeting and Correspondence, `--counterparty`/`--location` for Meeting |
+| `notes list [filter] [--json]` | Stem, date, type, threads and topic of every note, oldest first |
+| `notes cat <stem>` | Print a note |
+| `notes last` | Print the path of the newest note |
+| `notes copy <stem>` | Copy a note to a new timestamp; its topic gets ` COPY` |
+| `notes delete <stem> -y` | Delete a note; refuses without `-y` |
+| `notes pdf\|minutes\|agenda <stem> [--out DIR]` | Render to `<stem>.md` and `<stem>.md.pdf` (default `~/Downloads`); print both paths |
 
-The files `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, `notes_strip` are helpers invoked by `notes`. They fail loudly if called directly (env-var guards).
+Every subcommand except `new` runs a task ingest first, to pick up pending `ACTION:` lines. If any line fails to ingest, a one-line warning goes to stderr when it is a terminal.
 
 ## threads
 
@@ -124,14 +131,14 @@ Skeleton management for thread files. Daily-review / tail / overdue tooling will
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `threads new`                        | Interactive: pick kind, category, name, optional currency/rate; creates the file |
-| `threads delete <thread> [-y]`       | Delete a thread (with confirm)                                |
+| `threads new --name N --kind K --category C [--currency X --rate R]` | Create a thread file; name, kind and category required |
+| `threads delete <thread> -y`         | Delete a thread; refuses without `-y`                         |
 | `threads list [--json]`              | List all threads (kind, status, category, name)               |
 | `threads show <thread> [--json]`     | Print frontmatter + body (or JSON of frontmatter)             |
 
 `<thread>` accepts a bare name (`SGB`) or a path (`Processes/SGB`). Bare names error if ambiguous across kinds.
 
-`threads new` also asks for a `currency` (blank to skip) and, if you give one, a `rate` — the billing defaults `hours` reads. Both are optional: most threads are never billed. Flags `--currency` / `--rate` skip the prompts, and passing `--kind --category --name` together suppresses all prompting for scripted use.
+`threads new` also takes `--currency` and `--rate`, the billing defaults `hours` reads. Both are optional: most threads are never billed. `--rate` needs `--currency`. Without `--rate`, `hours` falls back to `.adulting/config.yaml` `hours.rate`, then 2500.
 
 ## people
 
@@ -139,8 +146,8 @@ Same skeleton shape, applied to people files.
 
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
-| `people new`                         | Interactive: pick category, name; creates the file            |
-| `people delete <name> [-y]`          | Delete a person (with confirm)                                |
+| `people new --name N --category C`   | Create a person file; both flags required                     |
+| `people delete <name> -y`            | Delete a person; refuses without `-y`                         |
 | `people list [--json]`               | List all people                                               |
 | `people show <name> [--json]`        | Print the file (or JSON of frontmatter)                       |
 
@@ -175,12 +182,11 @@ Consulting time tracking. One file per thread at `~/vault/hours/<Kind>/<Thread>.
 | Command | What it does |
 |---|---|
 | `hours log <thread> <description...>` | Append an entry |
-| `hours log` | Interactive: pick thread → description → minutes → rate |
 | `hours list [thread] [--since] [--until] [--json]` | List entries |
 | `hours report [--thread] [--since] [--until] [--json]` | Totals by thread **and currency**; unbilled time totalled separately |
 | `hours show <id> [--json]` | One entry |
 | `hours edit <id> [-m/-r/-c/-d/-t/--description]` | Change one field |
-| `hours rm <id> [-y]` | Delete an entry |
+| `hours rm <id> -y` | Delete an entry; refuses without `-y` |
 
 `log` flags: `-m/--minutes` (default 60), `-r/--rate`, `-c/--currency`, `-d/--date`, `-t/--time`.
 
@@ -235,13 +241,12 @@ Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thr
 | Command | What it does |
 |---|---|
 | `payments log <thread> <amount>` | Record a receipt |
-| `payments log` | Interactive: pick thread → amount → date → account → note |
 | `payments list [thread] [--since] [--until] [--json]` | List payments |
 | `payments statement [--thread] [--since] [--until] [--as-of] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
 | `payments statement --thread T --pdf out.pdf [--as-of D]` | Render a statement of account as a PDF |
 | `payments show <id> [--json]` | One payment |
 | `payments edit <id> [--amount/-c/-d/-t/-a/-n]` | Change one field |
-| `payments rm <id> [-y]` | Delete a payment |
+| `payments rm <id> -y` | Delete a payment; refuses without `-y` |
 
 `log` flags: `-c/--currency`, `-d/--date`, `-t/--time`, `-a/--account`, `-n/--note`.
 
@@ -291,7 +296,7 @@ The payment reference printed on the statement is the thread name without its `K
 
 ## lint
 
-Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
+Validates everything in `~/vault/` against schemas in `src/adulting/schemas/`. Reports `path:line: message` for each violation. Exit 0 clean, 1 if any.
 
 | Command          | What it does                                              |
 |------------------|-----------------------------------------------------------|
@@ -299,7 +304,7 @@ Validates everything in `~/vault/` against schemas in `schemas/`. Reports `path:
 | `lint <path>`    | Validate one file (good for pre-save hooks)               |
 | `lint --quiet`   | Suppress per-violation output, exit-code only             |
 
-Schemas live in `schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `schemas/note_meeting.md` for the canonical shape.
+Schemas live in `src/adulting/schemas/` as markdown files with YAML frontmatter and a `## Fields` table. See `src/adulting/schemas/note_meeting.md` for the canonical shape.
 
 # Data store
 
@@ -354,10 +359,34 @@ Constraint cell DSL (single cell, semicolon-separated):
 
 `~/vault/buffer.md` is an append-only inbox for quick-capture entries. Routing those entries to notes (resolving threads, fixing references, applying schemas) is intended as a periodic ritual run by an AI agent against a tool-call API; the routing logic is not yet automated.
 
+# Output conventions
+
+These hold for every command.
+
+- **Every path a command prints is absolute.** A path in output is there to be
+  opened, and a reader resolves a relative path against its own working
+  directory, which is not the vault — in a container the vault is often mounted
+  somewhere else entirely. Vault-relative strings do appear, but as identifiers
+  rather than paths: a thread ref (`Projects/SGB`), a wikilink target
+  (`people/Riaz Arbi`).
+- **A file that cannot be read as UTF-8 is skipped, not fatal.** A vault
+  collects files nobody here wrote: a stray binary, a sync-conflict copy,
+  something saved in another encoding. A command that walks the vault skips
+  such a file and carries on, so one bad file cannot cost you a listing.
+  `lint` is where it is reported, as `<path>:0: file is not valid UTF-8`. A
+  command asked for one file by name stops instead, with `<path> is not valid
+  UTF-8`, because skipping would answer a question about that file by
+  pretending it is not there.
+- **A skipped file is named only when stderr is a terminal.** Piped output is
+  the answer to a question, and an agent harness discards stdout whenever
+  stderr is non-empty, so a warning there would cost the caller the answer.
+- **Every command and subcommand answers `--help-json`**, printing its own
+  arguments as JSON and exiting 0. `tasks --help-json` describes the whole
+  command and its subcommands; `tasks list --help-json` describes `list`.
+
 # Vault hygiene
 
-- All `notes_*` helpers fail loudly if invoked outside `notes` (env-var guards)
-- `notes pdf` / `--minutes` / `--agenda` run inside a `mktemp -d` workdir — no scratch files leak into your CWD
+- `notes pdf` / `minutes` / `agenda` run pandoc inside a temporary directory — no scratch files leak into your CWD
 
 # Obsidian roadmap
 
@@ -376,8 +405,9 @@ What remains:
 # Design goals
 
 - Run on macOS or Linux.
-- One self-contained file per utility (with thin `notes_*` helpers).
-- Require no Python libraries beyond the standard library; no pip installs.
+- One module per command in the `adulting` package, sharing one vault module.
+- Require no third-party Python libraries at runtime; `pytest` and `coverage` for development only.
+- Be non-interactive: every command runs from its arguments, so a person and an agent drive it the same way.
 - Be operated from the command line.
 - Maintain state in simple text-based file formats.
 - Maintain all state under a single vault directory (default `~/vault/`, override with `ADULTING_HOME`).

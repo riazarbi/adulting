@@ -2,6 +2,877 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - the agent skills ship in the image too, and are gated like the tools
+
+The skills carried the same stale picture as the tool definitions did: `hours
+log` and `payments log` "going interactive" without a thread, `threads new`
+and `people new` "prompting for any field you leave out", and a whole
+`footguns` section about interactive traps that have not existed since the
+port. The system prompt said there were "Nine vault tools" and that there is
+"no `notes` tool".
+
+- **`agent/skills/` in the repo**, shipped as `COPY agent/skills /opt/skills` and installed by the entrypoint beside the tool definitions. The stale passages are rewritten: nothing prompts, a command given too little exits with an argparse error naming what is missing.
+- **The system prompt is deliberately not shipped.** Tools and skills are capabilities — one file or folder each, so another image's install side by side — while a prompt is the agent's identity. An overlay agent can be general-purpose and still load these. The owner's call, and the right one.
+- **`dev/agent-check`**, in `dev/ci lint`: every `command subcommand` and `--flag` a skill names in a code span exists, nothing claims a command prompts, and each skill has the shape the agent requires (SKILL.md, frontmatter `name` equal to the folder name, a description, no keys outside the spec whitelist — the agent rejects a skill that breaks any of those, silently).
+- **`dev/surface.py`** is now the one definition of what the CLI's surface is and what prose may claim about it; `manual-check`, `tools-check` and `agent-check` all read it. The claim detector got sharper in the process: it matches the shapes a claim takes ("goes interactive", "prompts on stdin", "confirmation prompt") rather than the bare words, because the skills talk about the agent's *own* system prompt constantly — and a `without` or `no` earlier in the sentence no longer reads as a denial, which was hiding two of the real claims.
+- **The entrypoint installs atomically.** Both tiers start at once and the agent watches those directories, so each file is staged under a dotted name and renamed into place; a skill folder is staged whole and swapped, so a file the new version dropped cannot linger inside it. An unwritable destination is one warning, not one per file.
+- **Install-only, by decision:** nothing is deleted, so an overlay that stops being run leaves its files behind to be pruned by hand. Simpler than tracking what was installed.
+- **Built and run:** "installed 10 tool definition(s)", "installed 9 skill(s)", a stale `tasks.json` replaced, and a foreign `someone-elses` skill left untouched beside them.
+- **Outside this repo:** `~/vault/.agent/prompt/00-role.md` loses the ten-tool inventory and the "no `notes` tool" paragraph — the file's own rule is that the tool descriptions are the interface reference, so that list was a leak against it. `docker-compose.yml` drops `:ro` from the skills mount for both tiers, so they still land in `~/vault/.agent/skills` where they can be read on the host.
+- **913 passing, `dev/ci` green.**
+
+## 2026-10-02 - the agent tool definitions ride with the image
+
+The agent seeds its `tools/` directory only if it is missing and never
+touches it again, so a long-lived state dir keeps whatever generation of the
+definitions was first hand-copied into it. The staging vault's copies were
+months stale — they still described commands that prompt on stdin — and
+`notes.json` was not there at all, so the agent had no `notes` tool.
+
+- **`COPY dev/tools /opt/tools`**, and `container/entrypoint.sh` installs them into `$AGENT_STATE_DIR/tools` before exec'ing the agent. The definitions and the commands they describe now ship as one artifact and cannot disagree, which is what `dev/ci`'s `tools-check` already enforces inside the repo.
+- **Files the image ships are overwritten on every start** — the image is the source of truth, so a hand edit to one of them does not survive a restart. Everything else in the directory is left alone: the agent's own builtins (`read_file`, `rg`, `load_skill`, …) are untouched.
+- **A definition naming a command that is not on PATH is reported, not deleted.** The directory is shared with whatever else drops tools into it, and a definition for someone else's binary is not ours to remove. Builtins carry no `command` and are not reported.
+- A state directory that cannot be written is a warning, not a refusal to start: a read-only mount should not leave the mailbox unattended.
+- The agent watches that directory, so the writes register within its debounce window — no second restart.
+- **Run in the container, not just written:** with a deliberately stale `tasks.json` and a hand-made `read_file.json` in the state dir, the entrypoint reports "installed 10 tool definition(s)", the stale copy is replaced by the committed one, the agent's own file survives, and the agent receives its arguments. Six tests drive the script directly on the host with a stub agent, covering each of those cases plus the read-only one.
+
+## 2026-10-02 - the image installs the package instead of mounting it
+
+The container used to find the CLIs by bind-mounting the host repo at
+`/opt/adulting` and pointing PYTHONPATH at it, with a shell wrapper per
+command running `python3 -m adulting.<name>`. The image is self-contained now.
+
+- **A build stage installs the package into a venv at `/opt/venv`**, which the runtime stage copies in and puts first on PATH. The ten commands inside the container are the package's own console scripts — the same ones the tests run. `pip`, `ensurepip` and `setuptools` stay in the build stage.
+- `--copies` gives the venv a real interpreter rather than a symlink into a stage the runtime does not have. `--no-build-isolation` with `PYTHONPATH=/usr/lib/python3/dist-packages` for that one command keeps the build off PyPI: the backend comes from apt's setuptools, which a venv cannot see on its own.
+- **`/opt/venv`, not `/opt/adulting`:** a source mount left behind in a compose file would otherwise shadow the install and break every command.
+- **The build runs `lint --help-json`** before shipping, so a broken install fails the build rather than the agent's first tool call.
+- **Built and run for real** (podman): all ten commands resolve to `/opt/venv/bin`, `lint`, `threads list` and `tasks list` work against a mounted vault, and PYTHONPATH is empty inside the container. 320 MB.
+- **`tests/dev/test_container.py` pins the new contract** instead of the old one: the install, the venv on PATH, the build-time smoke run, what the build copies, no PYTHONPATH in the runtime stage, no `/opt/adulting`, no `python3 -m` wrappers, and that pyproject still ships the schemas an installed `lint` needs. Checked by reinstating PYTHONPATH, dropping the smoke run and emptying `package-data` in turn.
+- **Outside this repo:** `~/vault/docker-compose.yml` drops the `/opt/adulting:ro` mount from both `agent-shallow` and `agent-deep`. Changing the CLI now needs `up -d --build` rather than a restart.
+
+## 2026-10-02 - the image derives from the published agent
+
+The agent is published to GHCR, so the base no longer has to be built on the
+host first.
+
+- **`FROM ghcr.io/riazarbi/agent:latest`**, in place of `agent:local`. The build pulls it; the comment block that told you to build `agent-base` from the staging vault's compose file first — with `/home/riaz` paths — is gone, replaced by the `docker login ghcr.io` line a private package needs and a note that `:latest` moves, with the digest form to pin.
+- Nothing else in the image changed: the source still arrives as a runtime bind mount, the ten commands are still wrappers around `python3 -m adulting.<name>`, and `tests/dev/test_container.py` still passes.
+- **Outside this repo:** `~/vault/docker-compose.yml` still carries a build-only `agent-base` service to produce `agent:local`, and tells you to build it before `agent-shallow`. Both are now redundant.
+
+## 2026-09-30 - the container's way of running the package is tested
+
+The image bind-mounts the source at runtime and installs nothing, so each
+command is a wrapper around `python3 -m adulting.<name>` with PYTHONPATH on
+the mounted `src/`. Every other test runs the venv's console scripts, so a
+module that lost its `__main__` guard, or that only imports when installed,
+would break the container with a green suite.
+
+- **`tests/dev/test_container.py`** reads the Dockerfile as text and runs what it builds — no Docker needed. It pins the wrapper list against `dev/commands.py` (the one list the dev scripts share, previously duplicated in the Dockerfile with nothing comparing them), that the wrappers still run a module rather than a console script, and that all ten commands answer `--help-json` when the source is the only thing on the path.
+- `-S` keeps site-packages out of those runs, so the venv's editable install cannot answer for the source. A companion test points PYTHONPATH at an empty directory and asserts the import fails, so the others cannot pass on an installed copy.
+- Checked by dropping `commit` from the Dockerfile's list and by removing `lint`'s `__main__` guard; each fails one test.
+- The Dockerfile itself needed no change: it was already written for the package (no taskwarrior, no `pipx`, source mounted at runtime), and its claim that `notes pdf|minutes|agenda` still write markdown without pandoc is true — `render.to_pdf` returns "pandoc is not installed" and keeps the file.
+- **881 passing, `dev/ci` green.**
+
+## 2026-09-29 - what the manual could not say, and a gate over what the tool definitions claim
+
+Regenerating fixed the agent tool definitions — four of them still described
+the pre-port interactive commands — but it could not fix what the manual was
+missing, because the harvest only sees help text, docstrings, schemas and the
+README, and none of them said these things.
+
+- **A new README section, "Output conventions", carried into the manual** (it is in `dev/manual-harvest`'s `README_SECTIONS`). It states the three facts that hold across every command: paths in output are absolute and why; a file that cannot be read as UTF-8 is skipped by a walker, reported by `lint`, and fatal only when the file was named; and every command *and subcommand* answers `--help-json`.
+- The commands say it where it is their own behaviour: `lint`'s docstring names the `file is not valid UTF-8` violation, `tasks`' says a skipped file is not a failed action, `search`'s says one unreadable file cannot cost you a result set.
+- **`dev/tools-check` now compares a claim with the truth**, not just the shape: a description that says a command prompts, is interactive, or reads stdin fails the gate. Nothing in this package prompts — `tests/cli/test_no_prompts.py` holds every command to it — and four definitions claimed otherwise for six rounds of review, because nothing read them. A denial next to the word ("Nothing prompts", "rather than prompting") is the wording these should carry and passes.
+- Checked by putting the real stale sentence back into `dev/tools/hours.json` and watching the gate name it. `tests/dev/test_tools_check.py` pins both halves against the four sentences that were actually there.
+- **868 passing, `dev/ci` green.** The manual needs one more `dev/ci manual` to pick up the new section.
+
+## 2026-09-23 - review round 5, parts R5-B3 and R5-B5: tests that prove what they say
+
+- **R5-B3: every subcommand is checked for `--help-json`, not four samples.** The test reads each command's own manifest and asks all 74 subcommands, so one added tomorrow is covered tomorrow. It also asserts the answer is the *subcommand's* manifest, not the whole command's.
+- **R5-B5, the weak tests:**
+  - `commit review`'s whole-output cap asserted `len(lines) <= 3000`, which passes for any output including none. It pins the real count now, and changing `DEFAULT_MAX_LINES` fails it.
+  - `tasks list --thread SGB` compared its output to `--thread Projects/SGB`, which proves neither. The rows are spelled out; the two forms are still compared, as the point is that they agree.
+  - `search`'s path tests asserted `startswith("/")`. They assert the path is resolved and is a file — the thing the contract is about.
+  - `notes cat` compared its output to the file it had just printed, which passes however wrong both are. It pins the note's own text, and *then* compares with the file.
+  - The `--help-json` manifest test repeated an assertion from forty lines above; it now checks the one thing the other does not — that the manifest survives a JSON round trip.
+  - The symlinked-vault test stripped the path prefix before comparing, so it could not see the one thing R5-A3 changed. It compares whole lines, absolute paths included.
+- **857 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 5, part R5-A3: every path a command prints is absolute
+
+Round 3 made `tasks` print vault-relative paths, round 4 extended that to
+`lint`, and both were wrong for a reason already in the repo: a reader
+resolves a relative path against its own working directory, which is not the
+vault. In the agent's container the vault is a bind mount at `/vault` while
+the process runs in `/workspace`. Emitting relative paths from `search` once
+cost about 57 tool calls and a wrong answer.
+
+- **`vault.full(path)`** builds every path in output: `lint` violations and its "duplicated at" messages, `tasks` ingest failures, `tasks show`'s `source:` and `list --json`, `threads`/`people`/`notes` `created:`/`deleted:`/`already exists:`/`not found:`/`refusing to delete`, `buffer flush`'s log lines, the `path` field of `threads`/`people` `list --json` and `show --json`, and the errors naming a thread file to fix a `rate:` or `currency:` in.
+- **`vault.rel(path)` stays for identifiers and for matching** — thread refs, wikilink targets, and `lint`'s schema scope check, which used to re-implement it two screens away (**R5-C2**).
+- **The rule is written into the story** (`stories/2026-09-17-python-package-refactor.md`, "The path rule") with the container reason and the note that it has now been decided three times, so the next reader does not re-argue it.
+- **Verified on the vault copy:** `lint` prints the same eight violations as before, each named absolutely, and `tasks --dry-run` is unchanged. **851 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 5, parts R5-A1, R5-A2, R5-C3: one reader for the whole vault
+
+Round 4 fixed `search`'s own walks and the CHANGELOG claimed more than that.
+Every other read went straight to `read_text`, so a single unreadable file
+still ended `notes list`, `threads list`, `people list`, `hours list`,
+`hours report`, `search stream` and `search activity` in a traceback. The
+round 4 entry is corrected above.
+
+- **`grep -rn read_text src/adulting/` now finds one line**, inside `vault.read_utf8`. Everything else reads through one of two helpers, and which one says what kind of read it is:
+  - **`read_utf8(path)`** — a walker. Returns `None`, and the caller skips the file: `file_summary`, `note_info`, `read_records`, `load_all`, and `search`'s walks. A listing drops the row and keeps the rest.
+  - **`read_or_die(path)`** — a file the user named. Stops with `<abs path> is not valid UTF-8`, because skipping it would answer a question about *that* file by pretending it is not there: `notes cat|copy|pdf`, `people show`, `threads show`, the buffer, `config.yaml`, a record file being rewritten, a schema.
+- **R5-A2: `search` tells a human and says nothing to a pipe.** `vault.tell_a_human(msg)` warns only when `sys.stderr.isatty()` — the pattern `notes` already used, now shared by `notes`, `search` and `tasks`. The agent harness discards stdout whenever stderr is non-empty, and these commands' stdout is the answer.
+- **R5-C3: a file `tasks` cannot read is no longer counted as a failed action.** It printed `Failed: 1` for a file that may have held no ACTION lines at all; it is a warning on a terminal now, and the count stays a count of ACTION lines. The test that pinned the old wording is replaced by one that pins both halves.
+- **R5-B2: the `search` skip is tested by its results**, not by the absence of a traceback: the good note and log are in the rows, the unreadable ones are not. Reading them with replacement characters would now fail the test.
+- New: one parametrised test puts an unreadable file in each of the six stores and runs every listing against it. `Vault.run_with_stderr_on_a_terminal` is the harness half of the isatty rule.
+- **Verified on the vault copy:** six commands print byte-identical output. **851 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 5, part R5-B1: MANUAL.md regenerated, and the gate that checks it is itself checked
+
+- **The manual is regenerated** (owner ran `dev/ci manual`) and the gate passes. `buffer suggest`, the `notes` picker subcommands (`edit`, `nano`, `strip`), `hours log --all` and `payments log --all` are gone from it; `tasks ingest`, `notes list` and the three `--json` flags are in it.
+- **The gate only knew one way to write a heading.** The regenerated manual writes `### tasks`, the previous one `### `tasks``, so every command came back as "no section" and the real comparison never ran. Both spellings are read now — how the heading is written is the manual writer's choice.
+- **R5-B4: a flag is matched by name, not by substring.** `--json` was satisfied by `--json-lines`, which would leave the flag it is about undocumented while naming one that exists.
+- **R5-B1: the gate is gated.** `problems()` and `main()` never ran in a test, so either comparison could be deleted with a green suite. There are tests for all of it now: the empty case, every kind of drift, the `--json-lines` case, and `main` both ways. Checked by disabling each comparison in turn and watching a test fail.
+- `tests/dev/test_manual_check.py` loads the script as a module rather than with `runpy`, so a test can replace `manifest()` and drive the comparison from a stub instead of the real CLI.
+- **787 passing, `dev/ci` green — manual gate included.**
+
+## 2026-09-23 - review round 4, part R4-C1: one path format, finished
+
+Round 3 settled on vault-relative paths for the commands that walk the vault
+and exempted `lint`, on the grounds that it is the command you point at files.
+The exemption was wrong: `lint` and `tasks ingest` print the *same* ACTION
+violation, and that is the one place a user sees both formats at once.
+
+- **`vault.rel(path)`** is the one answer: a file inside the vault is named relative to it, a path outside keeps its own name, and `V.where` builds `path:line` on top of it. Every command uses it — `lint`'s violations and the "duplicated at" half of its cross-file messages, and the `created:`/`deleted:`/`already exists:`/`not found:`/`refusing to delete` lines in `threads`, `people` and `notes`.
+- **`lint`'s output changed**: `/Users/you/vault/notes/x.md:0: …` is now `notes/x.md:0: …`. Verified on the vault copy — the same eight violations, in the same order, named the way every other command names them.
+- The test harness grew `Vault.rel(path)` for the same reason.
+- **781 passing.**
+
+## 2026-09-23 - review round 4, part R4-B: three tests that could not fail
+
+Each of these defended a round 3 fix without being able to notice its
+removal. Each is now checked by undoing the fix it covers.
+
+- **B1: the windowed PDF only proved `--since`.** `--until 2026-06-30` was past every fixture record, and `--as-of` was the same date — a statement drops anything after `as_of` anyway, so `cmd_pdf` could pass `until=None` and nothing changed. There is now work and a payment on 2026-07-15, with `--as-of 2026-08-31`, so only `--until` excludes them. Dropping either end of the window fails the test.
+- **B2: `scheduled:` was the one ACTION attribute nothing asserted** on an ingested anchor. `test_ingest_with_assignee_and_attrs` now carries all five — assignee, priority, due, scheduled, depends — and dropping `scheduled` from the ingest fails it.
+- **B3: the local-day rule was undefended.** Every fixture timestamp was mid-day, where the local and UTC days agree, so `Store.day_of` could bucket by UTC and stay green — though it decides which log file a record lands in and which statement window it falls in. A new test logs at 09:00 in Australia/Sydney, which stores `2026-06-01T23:00:00.000Z`, and asserts the entry is filed, listed and REF'd under 2026-06-02.
+- **781 passing.**
+
+## 2026-09-23 - review round 4, part R4-A2: a gate that catches a stale MANUAL.md
+
+`dev/tools/*.json` were gated; the manual was not, and it is what an agent
+reads. **`dev/manual-check`** closes that: it asks every command for its
+`--help-json` manifest — deterministic, no model, no network — and compares
+the names the manual uses with the names the CLI has. `dev/ci lint` runs it.
+
+- It checks three things and ignores prose: every subcommand the manual documents exists, every subcommand is documented, and the same both ways for flags (`--help` and `--help-json` are exempt). A section is read to the next heading, subcommand claims are read from the **Subcommands** table only, and a flag's spellings count as one flag.
+- **`--help-json` now reports a flag's `aliases`**, so `-m/--minutes` is one flag written two ways rather than one documented and one missing.
+- **It is failing, and that is the point.** The committed manual still documents `buffer suggest`, deleted in round 3, and three `notes` subcommands (`edit`, `nano`, `strip`) that have not existed since the port — it still describes `notes` as an interactive picker. It also misses `tasks ingest`, three `--json` flags, and every `notes new` flag, and documents `hours log --all` and `payments log --all`, which do not exist.
+- **Regenerating is `dev/ci manual`, which needs `claude`** and is the owner's step. Nothing here can write the manual; this only refuses to let it drift quietly.
+- `tests/dev/test_manual_check.py` pins how the manual is read, against a manual written in the test rather than the committed one, so the tests say the same thing whatever state the real manual is in. **780 passing.**
+
+## 2026-09-23 - review round 4, parts R4-A4 and R4-C6: flags that lied about what they do
+
+- **R4-A4: `tasks --dry-run done <uuid>` wrote to disk.** The flag is top-level so that bare `tasks --dry-run` works, and argparse took it before any subcommand, where it did nothing — the anchor flipped to `DONE:` and nothing said otherwise. Round 3 made this worse by removing the "(default invocation only)" caveat from the help. `tasks` now refuses the flag rather than ignoring it: `tasks: error: --dry-run applies to ingest only, not to 'done'`, exit 2, nothing written. `tasks ingest --dry-run`, `tasks --dry-run ingest` and bare `tasks --dry-run` are unaffected.
+- **R4-C6: `tasks list --help-json` exited 2.** Making `--help-json` a real flag in round 3 put it on the top-level parser only. It is an argparse **action** now, so it is handed the parser that parsed it and every subcommand answers with its own manifest. Argparse still decides what is data: after `--`, or as another flag's value, `--help-json` is written as the record it looks like.
+- **A subcommand's one-line help is now its description**, so `tasks list --help-json` and `tasks list --help` say what the subcommand does. The whole-command manifest is unchanged — it already filled that in from `add_parser(help=…)`.
+- `helpjson` decides `takes_value` from `nargs == 0` rather than by naming two argparse classes, so a custom action is described correctly.
+- **Verified on the vault copy:** `tasks list`, `tasks --dry-run` and `hours report` print byte-identical output. **775 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 4, parts R4-A1 and R4-A3: files a walker cannot read, and a vault behind a symlink
+
+Both are collateral from round 3, and both were reproduced before being fixed.
+
+- **R4-A1: a vault reached through a symlink was not checked at all.** `lint` resolved the vault but not the file it was looking at, so every walked path was "outside" the vault, matched no schema, and none of its rules ran — while the summary still said the file was checked. `/tmp` and `/var` are symlinks on macOS and a synced vault is often one, so this was easy to hit. Both sides are resolved now, and a test lints the same vault by both paths and compares.
+- **R4-A3: one file that is not UTF-8 ended the whole run with a stack trace.** Removing the blanket `except Exception` in round 3 (correctly) left nothing catching the read in `search` and `lint`. **`vault.read_utf8(path)`** is the one reader now: it returns `None` for a file that cannot be read, `tasks` uses it as before, and `search` skips such a file in its own walks over notes, logs, threads, people and the buffer. (**Corrected 2026-09-23:** that covered `search`'s walkers only. Every other read in the package still went straight to `read_text`, so `notes list`, `threads list`, `people list`, `hours list`, `hours report`, `search stream` and `search activity` still ended in a traceback. See R5-A1 below.)
+- **`lint` reports it instead of skipping it**, as `<path>:0: file is not valid UTF-8`. `search` stays silent on purpose: it is read-only and its stdout is data — the agent harness discards stdout whenever stderr is non-empty, so a warning there would cost the caller the search results. `lint` is where the vault's health is reported.
+- `Vault.run` in the test harness takes an `env`, for the few tests that reach one vault by two paths.
+- **Verified on the vault copy:** `lint`, `search notes` and `search stream` print byte-identical output. **769 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, parts R3-B8 and R3-B9: the untested corners, and tests that say what they test
+
+- **R3-B8: `--help-json`'s content is tested, not just its shape.** `tests/unit/test_helpjson.py` asserts a whole manifest — descriptions, `choices`, `required`, `nargs`, `takes_value`, the `add_parser(help=…)` fallback description and the bare-command case — because `MANUAL.md` and `dev/tools/` are generated from exactly those fields. Blanking one description now fails two tests.
+- **`threads.py` has a unit test file**: what `threads new` writes (frontmatter, heading, billing only when given) and the five ways it refuses, including a name already taken in another case. `buffer`'s empty-body branches — `TEXT body is empty`, `ACTION description is empty` and the empty-after-assignee case — are covered in `tests/unit/test_buffer.py`. (`statement_pdf` has no file of its own; its `markdown` and `money` are asserted in `tests/unit/test_statement.py`, which is where the statement it renders is built.)
+- Each new test was checked by breaking the code it covers.
+- **R3-B9: the test docstrings describe behaviour, not the port.** "refactor unit 4", "characterisation added before the port", "fails against the pre-port script" and "the OLD bash renderer" are gone from six files; the section headers say "nothing prompts". Where the provenance still matters — the render fixtures — it is in `tests/fixtures/render/README.md`.
+- **The production-vault tripwire names its likely cause.** It now says Obsidian or a sync client touching the vault is the usual reason, tells you to rerun with the vault closed and sync paused, and only then to treat it as a leaking test.
+- **762 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, part R3-D: the docs that lied, and the scripts ruff could not see
+
+- **R3-D1: `schemas/thread.md` named the wrong config key.** It said a thread's `rate` falls back to `.adulting/config.yaml`'s `time.rate`; `hours.py` reads `hours.rate`, and the README always said so. The schema ships as package data and is harvested, so the wrong key had already reached `MANUAL.md`; both are corrected.
+- **R3-D4: `dev/testbed` is in the repo's own style** — single quotes like every other file (110 strings, converted by tokenising rather than by hand), and its `read = lambda p: ...` is a `def`.
+- **ruff was not seeing the `dev/` scripts at all**, because they have no `.py` suffix and a directory only brings ruff the files it recognises. They are named one by one now, which found two more `l` loop variables in `dev/manual-diff`.
+- `dev/testbed`, `dev/manual-diff` and `dev/ci` were each run after the edits. **749 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, part R3-C6: ruff runs (owner decision)
+
+The `# noqa` markers implied a linter that never ran. There is one now, and
+it is part of the gate rather than something to remember.
+
+- **`dev/ci lint` runs ruff** over `src`, `dev` and `tests`, configured in `pyproject.toml`: `E`, `F`, `W`, `B` (bugbear), `BLE` (the bare `except Exception:` this code base has argued with) and `RUF100`, which keeps a `# noqa` from outliving the thing it suppressed. `ruff>=0.16` is a dev dependency. Verified by breaking a file and watching the gate fail.
+- **Line length is 120**, which is what the code already sits inside; two long lines in `buffer.py` and `hours.py` were wrapped. Tests are exempt from that one rule, because they pin vault lines and command output verbatim and wrapping the strings would change what is pinned.
+- **The 19 findings are fixed, not silenced:** four unused imports (three of them left by moving `cmd_list` into `vault`), three unused test variables, two pointless f-strings, six `l` loop variables, one `raise ... from e` in `V.iso_date`, and — the one that was a latent bug — `lint`'s `problem()` closure captured the loop variable `tag` by reference (B023), so a record's message could have named a later record's index. It binds at definition now.
+- One stale `# noqa: E402` is gone; the rest are real and are honoured.
+
+## 2026-09-23 - review round 3, parts R3-C4 and R3-C5: one machine each, and the inconsistencies picked
+
+**C4, the duplicated state machines:**
+
+- `render.cut_sections` and `fill_sections` were the same walk twice. There is one `walk_sections(lines, headings, inserts, stops)` now; the two names remain as the two ways it is used, one line each.
+- `tasks` ingest held a literal copy of `write_anchor`'s tmp+rename fifty lines below it. Both call `write_line(path, line_no, new_line)`.
+- `lint` reported a duplicate uuid and a duplicate record id with the same eight lines twice. `report_duplicates(groups, wording)` is the one copy.
+
+**C5, the consistency list — each item decided rather than left:**
+
+- **One path format in `tasks`.** It printed absolute on ingest, vault-relative in `show` and a bare basename in the ambiguity error. Everything it prints is vault-relative now, through `V.where(path, line_no)`, matching `buffer`. **This closes the second half of deferred bug 7.** `lint` keeps absolute paths on purpose: it is the one command you point at files, and its output is read by editors.
+- **`tasks ingest` is a real subcommand**, so `--dry-run` and `--quiet` belong to a command instead of being "(default invocation only)" flags. Bare `tasks` still ingests, and `tasks --dry-run ingest` means what it says (the subparser's copies default to SUPPRESS rather than overwriting the flag).
+- **`tasks list --json` and `buffer list --json`** — the last two listings without it. `tasks` prints each anchor's own fields, `buffer` the numbered lines as `{line_no, text}`.
+- **`--date` is on every `buffer add-*`**, not just `add-ref`: filing an entry under the day the thing happened is true of any entry, and `stamp()` was always generic.
+- **`payments statement --as-of` is an argparse date** like `--since` and `--until`, so a bad one is refused in the same words (exit 2 now, not 1).
+- `threads list` and `people list` are one function, `V.print_summary_list`; the `CENT = V.CENT` aliases are gone; the uuid help string is `UUID_HELP`, said once (`--depends` keeps its own wording, because a dependency is stored verbatim and is not a prefix); `parse_block`'s `out[key] == ''` sentinel is explained where it is used.
+- **Verified on the vault copy:** `threads list`, `people list`, `tasks list`, `tasks --dry-run`, `payments statement` and `lint` print byte-identical output before and after. `dev/tools/{tasks,buffer}.json` describe the new flags. **749 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, part R3-C2: one record store, not two copies of one
+
+`hours` and `payments` keep their records the same way and differed only in a
+fence, a subdir and a noun, so every function that read or wrote a record file
+existed twice — `as_output` byte for byte, `cmd_rm` but for a variable name.
+
+- **`vault.Store`** carries the six values that differ (subdir, fence, JSON key, file heading, the noun for messages, the field that dates a record) and owns `path`, `read`, `save`, `load_all`, `find`, `collect` and `cmd_rm`. `V.HOURS` and `V.PAYMENTS` are the two of them; `hours rm` and `payments rm` are now literally the same function.
+- Deleted as duplicates: `save`, `collect`, `as_output`, `find_entry`/`find_payment`, `cmd_rm`, `by_start`/`by_received`, `start_name`/`received_name`, and the `SUBDIR`/`HEADING`/`KEY` constants in both modules.
+- **`write_records` went from 8 parameters to 5**, and `read_records`, `find_record` and `load_all` take a store instead of a `(subdir, fence, key)` triple, so a caller can no longer pair the wrong fence with the wrong key. `search` and `lint` read the same store values rather than repeating the fences and the `"startTime of entry …"` wording.
+- **Verified on the vault copy:** `hours list`, `hours report`, `payments list`, `payments statement`, `search stream` and `lint` print byte-identical output before and after. **745 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, part R3-B (2 of 2): tests that say what they pin, and fewer of them
+
+- **R3-B4: the pinned renderer output says where it is wrong.** `tests/fixtures/render/README.md` explains that the `.expected.md` files were captured from the bash renderers, lists the six known-wrong things they pin, and points at the deferred bugs. **Deferred bugs 12, 13 and 14** are new: an empty action table prints `| None | None | None |`; the minutes summary says `No minutes agreements were made.` beside `No Resolutions were passed.`; headers carry trailing spaces and an empty `subtitle:`/`date:` when a note has no frontmatter. `test_render.py` carries a `# DEFERRED BUG 12` marker.
+- **R3-B6: the rule lives with the code, not in a test.** `vault.PRIORITIES` and `vault.check_priority` are the one place that says a priority is `H`, `M` or `L`; `tasks set-priority` and `tasks list --priority` both call it, so an unknown priority is refused instead of silently matching nothing.
+- **R3-B7: tests that could not fail are gone or made exact.** The "fails instead of prompting" family repeated in five files is deleted (`test_no_prompts.py` proves it once); the search tests that asserted only an exit code now assert the lines; the per-command list-filter tests are one parametrized test with exact output; `test_depends_help_says_a_whole_uuid` is folded into `test_every_command.py`; `test_commit_cli.py` masks blob hashes through one helper. `tests/dev/test_manual_harvest.py` caches its harvest instead of running the CLI once per test.
+- **The repo-root rule moved to `dev/ci` lint**, where the other repo-shape rules are, and out of `test_harness.py`.
+- `lint`'s dead `.bak` clause is removed: nothing writes `.bak` files any more.
+- **745 passing, `dev/ci` green.** The drop from 772 is the deletions above; coverage of behaviour is unchanged.
+
+## 2026-09-23 - review round 3, part R3-B (1 of 2): the coverage the suite was missing
+
+Fresh mutations of the round 2 code were caught 2 times in 11. These are the holes that let that happen; each new test was checked by breaking the code it covers.
+
+- **R3-B1: the client-facing bank details had no test.** Every PDF test ran with incomplete banking, so only the "not yet supplied" branch ever rendered and corrupting the account number changed nothing. The Payment block's exact rows are asserted now, and so is the "Hours written off" line, which was never rendered either.
+- **R3-B2: no default was tested.** `search notes/logs` (20), `search overview` (5), `search stream` (100), `commit review`'s per-file cap (150) and its whole-output cap (3000) each have a test that proves the default's effect; changing any of the five fails one. `commit review`'s tracked-file truncation was never exercised at all, because the fixture's only long file was untracked.
+- **R3-B3: rounding and aging rested on almost nothing.** Every rounding assertion now has a `.666…` twin beside its `.333…` case, so rounding down instead of half-even fails: `charge_of`, `hours_of` and a built statement. The aging buckets are tested at their boundaries (0, 29, 30, 59, 60, 89, 90, 200 days), so moving one fails.
+- **R3-B5: the coverage lost in the round 2 deletions is back:** an unbilled entry's buffer REF, the stored start and end after `hours log`, `hours report --json` per thread and currency, a payment with no account or note end to end, and `threads show Projects/sgb`.
+- **772 passing.**
+
+## 2026-09-23 - the rules suggester is removed (owner decision)
+
+`buffer suggest` proposed a structured entry for raw text. It was not routed to by anything and suggested poorly, so it is gone rather than maintained.
+
+- Removed: `src/adulting/suggester.py`, the `buffer suggest` subcommand and its helpers, `tests/unit/test_suggester.py`, the suggest tests in `test_buffer_cli.py`, `test_no_prompts.py` and `test_every_command.py`, and the `eval/suggester/` corpus.
+- `dev/tools/buffer.json` drops the subcommand and its `forbidden_args` block; `dev/tools-build`'s policy no longer names it.
+- **R3-D2 and R3-D3 with it:** the policy block described prompts that no longer exist (`hours log` with no thread, `threads new` with fields missing); it now says that no command prompts and points at the terminal tests. `tools-build`'s unused `ALLOWED_FIELDS` copy is gone.
+- Nothing else referenced the module. **748 passing, `dev/ci` green.**
+
+## 2026-09-23 - review round 3, part R3-C1: one `ACTION:` parser
+
+There were four: `tasks`' regex, `buffer`'s assignee split, `buffer`'s copy of the same checks in `tend`, and `lint`'s different regex. R3-A5.2 and R3-A5.3 were the consequences.
+
+- **`vault.parse_action(line)`** returns `(assignee, body, attrs, errors)`, taking the trailing `<!--attrs-->` off before reading the body. `vault.split_assignee` is the shared `(Person) text` split. `tasks`, `buffer` and `lint` all use them.
+- **R3-A5.2:** `ACTION: <!--due:2026-01-01-->` used to become a task whose description was the comment, with the due date dropped. It is now an action with attributes and no description, and it is reported, not ingested.
+- **R3-A5.3:** `tasks` and `lint` agree about a bare `ACTION:` line. `tasks` used to skip it silently; both now call it a missing description.
+- **`lint` also reports an ACTION's attribute errors**, which only `tasks` used to check.
+- **Verified on the vault copy:** `tasks --dry-run` and `lint` print exactly what they printed before. **786 passing.**
+
+## 2026-09-23 - review round 3, part R3-A: the bugs
+
+Each fix has a test written to fail first. Owner decisions are marked.
+
+- **R3-A1: `payments statement --pdf` ignored `--since`/`--until`.** The text view said `(nothing to report)` while the PDF billed the whole thread. `one_thread_statement` now takes the window and walks the records through `hours.collect` and `payments.collect`, so both views read them the same way.
+- **R3-A2: `--help-json` anywhere in the arguments hijacked the command.** It was scanned out of `sys.argv` before parsing, so `buffer add-text -- --help-json` printed the manifest, exited 0 and wrote nothing. It is now a real flag on every command, handled by `vault.parse_command`, so argparse decides what is data: after `--`, or as `--topic=--help-json`, the record is written. The flag is documented in every `--help-json` manifest.
+- **R3-A3 (owner decision: ints only, failing loudly at entry and at usage):**
+  - `vault.as_int` and `vault.as_money` replace every silent fallback. A thread's `rate: 1,000`, a config `hours.rate: 2,500`, a stored rate that is missing, `2.5` or `'abc'`, and an unreadable payment amount now stop the command naming the record: `rate of entry 'aaaa0001' must be a whole number; got 'abc'`.
+  - No entry is implicitly unbilled: `hours.rate_of` and `payments.amount_of` are the only readers.
+  - `lint` enforces the schemas' `type` column, which was parsed and never used: a field typed `int` must hold a whole number. The vault copy is clean: same 8 violations as before.
+- **R3-A4: `lint <relative-path>` invented a violation.** Paths are resolved before they are checked, so a relative path agrees with the absolute one.
+- **R3-A5:**
+  - `tasks list --thread SGB` resolves the name like every other command, instead of comparing the raw string and printing a plausible `(no tasks)`.
+  - The PDF ledger's Hours column adds up: hours are rounded per line, as charges are, so three 50-minute entries print 0.83 three times under 2.49. `statement.check` now also asserts that the lines' payments and hours sum to their totals.
+  - **(owner decision) `search` no longer folds thread-name case:** `search notes --thread acme` is refused, as `hours list acme` always was. `fold_case` and the four functions that threaded it through are gone.
+  - Every walker reads a stored time through `vault.as_time`, so a malformed `startTime` stops each command with the same message. `search`'s five `except Exception` swallows and `_safe_load` are gone; `minutes_between` with them.
+- **Verified on the vault copy:** hours, payments, search, tasks and lint print exactly what they printed before. **773 passing.**
+
+## 2026-09-22 - review round 2, part R-D: the tests
+
+- **R-D1, tests that could not fail or hid a bug:**
+  - `new_id` takes a `draw` function, so a test can force a collision; deleting the avoid-existing guard now fails it.
+  - `test_pdf_markdown` carries `# DEFERRED BUG 10`.
+  - The deferred-bug-8 lint test asserts the exit code and all output.
+  - The static no-stdin test says plainly that the terminal tests are what protect the rule.
+  - The terminal refusal tests assert each exact message, and they now also cover `buffer rm` and `hours`/`payments edit`.
+- **R-D2, duplicates deleted,** each checked against its counterpart first: 18 across `search`, `buffer`, `notes`, `tasks`, `hours`, `payments`, `threads` and `notes render`.
+  - `test_thread_names.py` and `test_review_small_bugs.py` are gone. Their tests moved into the files for their commands and are named for the behaviour they check.
+  - `tests/cli/` is one file per command, plus `test_no_prompts.py`, `test_every_command.py` and the three notes files.
+- **R-D3, exact:**
+  - Ten `tasks` mutation tests fold into the exact, step-by-step one, which gains the replace-an-existing-due and replace-an-existing-priority cases.
+  - The `tasks list` filters, `search` notes/logs filters, `commit review` outputs and `buffer tend`'s report assert whole output.
+  - The 14 clean lint tests check exit code, stderr and summary.
+  - The argparse-only tests assert the exact message and an unchanged vault, or are deleted where argparse's `choices` is the whole behaviour.
+- **R-D4, behaviour not internals:**
+  - Cycles are tested through `cross_check_tasks`, `--as-of` through `payments statement`.
+  - The three statement tests that restated `S.check()` are gone.
+  - The pretty-printed JSON test spells out its expected lines.
+  - Every per-file run wrapper (`hours()`, `pay()`, `buf()`, …) is gone in favour of `vault.run(…, cli=…)`, which now closes stdin by default.
+- **Also:** the suggester's folder checks use `is_dir()`/`is_file()`. `threads new` and `people new` explain why they alone ask the filesystem whether a name is taken. The refactor story's status and "Duplication left in place" are current.
+- **737 passing, 97% coverage, `dev/ci` green.**
+
+## 2026-09-22 - review round 2, part R-C: consistency
+
+- **Shared names used directly:**
+  - `V.HOURS_FENCE`, `V.PAYMENTS_FENCE` and `V.KIND_DIRS` replace the local copies in `hours`, `payments`, `search` and `threads`. `search.DATE_RE` is renamed `LEADING_DATE_RE`, so it no longer shadows `V.DATE_RE`.
+  - `search` parses task anchors with `tasks.parse_anchor` and buffer lines with `buffer.parse_buffer_entries`, instead of its own copies of their regexes. They are stricter, and on the vault copy they match exactly the same lines.
+- **One naming style:** `V.vault_home()` everywhere, no module imports `vault_home` on its own, and every subparser is `p = sub.add_parser(...)`.
+- **Dead code removed:**
+  - The `rm-depends` branch that could not run.
+  - The `if not tok` guard in `parse_action_attrs`; `buffer_action` no longer builds empty tokens.
+  - `write_buffer`'s mkdir and `require_repo`'s second vault check, both made unreachable by `require_vault`.
+  - The single-use closure in `search overview`, and a four-line `resolve_thread_arg` (now one).
+  - `hours edit/rm` and `payments edit/rm` used to read the file again to find the record they had just found. The new `vault.find_record` returns the record together with its file's list.
+  - The first handler in `search.hours_in_window`, which could not trigger. **Kept:** the second. A hand-edited `startTime` that is not ISO reaches it, and without it `search activity` crashes with a traceback; a new test proves it is reachable.
+- **Validate or catch, not both:** `tasks.validate_date` and `validate_priority` are gone. `set-due` and `set-scheduled` stop directly, and `set-priority` takes `choices=H,M,L`, so a bad priority is now an argparse usage error (exit 2).
+- **Comments that told history** in `notes` and `render` now say what the code does, and `LEGACY_ACTION_RE` is `CHECKBOX_ACTION_RE`.
+- **`--since` and `--until` must be real dates** (`vault.iso_date`). `hours list --since x` used to be accepted, and bounded nothing.
+- **Verified on the vault copy:** `search` stream/overview/activity, `tasks`, `hours` and `payments` edit/rm, and the buffer's pending events are identical before and after. **765 passing.**
+
+## 2026-09-22 - review round 2, part R-B: the rest of the deduplication
+
+R-B1 and R-B3 went in with R-A.
+
+- **R-B2: one frontmatter parser.**
+  - `vault.parse_block` reads the small YAML subset the vault uses: scalars, block lists, lists of mappings, and one level of nested mapping. `parse_frontmatter_doc` and `read_config` both use it.
+  - `parse_frontmatter` and `read_frontmatter` are gone. (`lint`'s own schema parser is separate, as the story records.)
+  - **Visible change:** `people show --json` and `threads show --json` now list a file's `cadences` as `{key, frequency, description}` entries; they used to print `"cadences": ""`. That affects 13 people in the vault copy.
+  - An empty field is `""` everywhere.
+- **R-B4: `vault.check_currency`** replaces five copies of "upper-case it, or stop if it is not a 3-letter ISO code".
+- **R-B5:**
+  - `payments.billed` walks the hours records through `hours.collect` and `hours.money_of`. `search`'s two remaining hand-written date windows use `vault.in_window`.
+  - `lint`'s two ~35-line record-block validators are one `validate_record_block(text, path, label)`, driven by a table of the two kinds. `read_block` takes the label alone.
+  - "Resolve a thread or stop" is one `vault.find_thread`, which raises, and `resolve_target`, which dies.
+  - **Visible change:** `buffer` and `threads` now say `thread 'X' does not resolve to a thread file` like every other command. They used to say `does not resolve to threads/<Kind>/<Name>.md (expected …)` and `not found: X`.
+  - `people` and `threads` share `vault.CATEGORIES`, `today()`, `file_summary`, `file_json` and `rank_by_query`. `tasks.today_iso` became `V.today`.
+- **Verified on the vault copy:** thread and person lists and every `show --json`, hours, payments, search, tasks and lint are identical before and after, apart from the two visible changes above. **752 passing.**
+
+## 2026-09-22 - review round 2, part R-A: the bugs (with R-B1 and R-B3)
+
+Each fix has a test written to fail first.
+
+- **R-A1: `people delete` and `people show` accepted a path.** `people delete ../threads/Projects/Foo -y` deleted the thread file. Both now refuse a name with `/` or a leading `.`, as `new` does. `notes` refuses a stem with a leading `.` too. `threads` was safe: it only ever matches files it lists.
+- **R-A2: every thread and person check is case-exact.** A new `vault.vault_file(rel)` looks each part up in its folder's listing, so `..` cannot leave the vault either. `buffer add-ref` and `tend`, lint's wikilink and assignee checks, `people delete/show`, `notes new`'s people links and `vault.person_exists` all use it. On macOS, `buffer add-ref SGB Projects/sgb`, a note linking `[[Projects/sgb]]`, and `people delete "riaz arbi"` were all accepted. `threads new` and `people new` still ask the filesystem whether the name is taken, because on macOS `sgb` would overwrite `SGB`.
+- **R-A3 and R-B1: library functions no longer exit the process.**
+  - `buffer`'s add functions return the line they buffered and raise `ValueError` on bad input. `buffered()` prints or dies for the `cmd_*` functions.
+  - `buffer.tend(lines)` returns `(new_lines, violations)` and touches no file.
+  - `tasks.ingest(dry_run)` returns `(ingested, failed)`, and `tasks.report_ingest` prints them.
+  - `add_ref` is best-effort without redirecting output.
+  - Nothing in `src/` catches `SystemExit` or redirects stdout any more.
+  - `notes new` prints `buffered:` lines itself, and its `buffer_ref` wrapper is gone.
+- **R-B3: one ACTION attribute check.** `buffer add-action` runs its flags through `vault.parse_action_attrs`, so it now checks priority too. Its messages match `tasks`': `due must be YYYY-MM-DD`, where they said `--due must be`.
+- **R-A4: the minutes Summary goes before the first level-1 heading starting `# Content`,** so `# Contents` and `# Content and notes` get one. `## Content …` never does, and there is only ever one. All 111 notes in the vault copy use exactly `# Content`, so their renders are unchanged.
+- **R-A5:**
+  - `tasks` refuses an empty uuid prefix (`rm-depends X ""` removed the only dependency).
+  - Receipts are rounded to the cent before they are summed, as charges are. The review's example (2.675) already added up, but two receipts of 1.005 listed as 1 each and totalled 2.01.
+  - `hours edit` on an entry with a rate but no currency says what is wrong with the entry, not `--rate`. Such an entry could always be repaired with `-c` or `--rate 0`, and a test now proves it.
+  - The suggester's `main` has the usual shape and reports a bad `--today`.
+  - Every command's parser is built by `vault.command_parser(prog, …)`, and errors use that name, so `python -m adulting.notes` says `notes:`, not `notes.py:`.
+- **Verified on the vault copy:** the `buffer` add/tend/rm/flush, `tasks`, `hours log`, `notes list` and `notes minutes` flows give identical output and vault changes before and after. **753 passing.**
+
+## 2026-09-22 - review fixes, part E: the refactor story is current
+
+- `stories/2026-09-17-python-package-refactor.md`:
+  - The status line says the review is done: 705 tests, 96% coverage, `dev/ci` green.
+  - "Deferred bugs" explains the `# DEFERRED BUG <n>` markers and credits A8 for the two render bugs fixed.
+  - "Duplication left in place" now lists only what survives part B, and why.
+
+## 2026-09-22 - review fixes, part D (2 of 2): the rest of the test review, and two fixes it turned up
+
+- **Behaviour change: every command refuses a vault that is not a directory.** With `ADULTING_HOME` pointing at nothing, reads reported an empty vault, and `buffer add`, `people new` and `threads new` quietly started a new vault there, so a mistyped path went unnoticed. With it pointing at a file, those four crashed with a traceback. Every command now stops with `<command>: error: ADULTING_HOME is not a directory: <path>`, as `commit` already did, via a new `vault.require_vault()`.
+- **Behaviour change: `buffer suggest` quotes with `shlex.quote`.** It had its own `_shquote`, as the review suggested replacing. A quote in the text is now written `'it'"'"'s'` instead of `'it'\''s'`; both paste the same.
+- **One file per command, finished:**
+  - `test_tasks_output.py` merges into `test_tasks_cli.py`, and `test_search_output.py` into `test_search_cli.py`.
+  - The ten per-command `--help-json` tests become one parametrized test in the new `test_every_command.py`.
+  - The review's duplicates are deleted: ten in `tasks`, four in `search`, one in `commit`.
+- **Exact assertions** where the review found loose ones:
+  - `tasks`: the ingest failures, `next` showing exactly the first five, `done` stamping today's date, `rm-depends` refusing and writing nothing, and `add` writing the exact buffer line.
+  - `buffer rm` errors check the exit code and that the buffer is unchanged.
+  - The `commit` outputs, `people new`'s file, the whole meeting template, and `search overview --json`.
+- **Implementation details no longer tested directly:**
+  - Deleted, with each behaviour covered through the commands: the `tasks` sort keys, `lint._rotate_to_min`, `people._resolve_person` and `search`'s line regexes.
+  - Rewritten: the suggester tests assert which thread wins rather than weight numbers, and the fuzzy-score test asserts ranking order rather than thresholds.
+  - The manual-harvest test reads the section list from the script instead of splitting its source.
+- **New tests:**
+  - `test_no_prompts.py` runs every create and delete command with a real terminal on stdin and "y" already typed. Each must refuse, print nothing to stdout, and leave the vault byte-identical. A static check confirms nothing in `src/` reads stdin. Injecting a terminal-only prompt into `people delete` fails both.
+  - Whole-output unit tests for `render.header` and all three renderers.
+  - The notes ingest pre-pass on every subcommand but `new`, which failed when `last` was made to skip it.
+  - `buffer flush` warning after a real ingest failure, on a read-only notes folder.
+  - `payments log -d` filing its REF under that day.
+  - The vault check for all ten commands.
+- **Harness:**
+  - `Vault` gains `write`, `run_on_a_terminal`, `snapshot` and a `cwd` for `run`, and loses the unused `check`.
+  - A comment explains why isolation happens both per session and per test.
+  - Eight per-file `write` helpers, three `THREAD` constants, `commit`'s own `GitVault` and the notes tests' direct subprocess calls give way to the conftest helpers. The one exception is the pty test that needs stderr on the terminal, and a comment says why.
+  - Fixtures named `v` or `home` now say what they hold: `buffer_vault`, `notes_vault`, `tasks_home` and so on.
+  - The empty, untracked `tests/fixtures/threads/` is gone.
+- **705 passing.**
+
+## 2026-09-22 - review fixes, part D (1 of 2): one test file per command, duplicates gone, exact assertions
+
+The review found tests split across files by refactor unit rather than by command, with about 50 duplicates and many assertions that check a substring or only the exit code.
+
+- **One file per command:**
+  - `test_hours_output.py` merges into `test_hours_cli.py`, and `test_payments_output.py` into `test_payments_cli.py`, each grouped by subcommand.
+  - `test_threads_billing.py` merges into `test_threads_cli.py`.
+  - The lint tests from `test_lint_hours_file.py`, `test_lint_task_anchor.py`, `test_schema_task_anchor.py`, `test_payments_cli.py` and `test_hours_cli.py` join `test_lint_cli.py`, one section per schema.
+  - The PDF statement tests move from `unit/test_statement.py` to `test_payments_cli.py`, and the billing-party tests to `unit/test_vault.py`.
+- **Duplicates deleted** after checking each is covered elsewhere: seven in `hours`, seven in `payments` (including one in `unit/test_statement.py`), seven in `threads`, and the lint block-shape cases that `unit/test_lint.py` pins exactly. Where a "duplicate" covered one case nothing else did, that case moved into the surviving test: `hours log -c RANDS`, and `payments log` with amount 0.
+- **Exact assertions:**
+  - Every lint test now asserts the exact list of violation lines. That is 29 tests that checked a substring, including the cycle, duplicate-id and task-anchor checks.
+  - The PDF statement errors assert the exact message, with `--as-of` pinning the one that named today's date.
+  - `payments log` pins the stored record under a fixed timezone.
+  - The hours and payments buffer REFs assert the whole line.
+  - `hours edit` asserts the stored start, end, rate and currency.
+  - The ambiguous and wrongly cased `hours log` cases assert the message and that nothing was written.
+- **`unit/test_hours.py`:** the one test that appended, collected, found and priced entries is five tests, sharing a `utc` fixture that no longer undoes the suite's isolation.
+- **Fixture names say what they hold:** `hours_vault`, `payments_vault` and `billing_threads` replace the several meanings of `v` and `threads`.
+- **Harness fix:** `Vault.write_thread` wrote `kind: processe` for a Processes thread (`"Processes".rstrip('s')`); it now maps each kind directory to its frontmatter value.
+- **663 passing** (was 680: the difference is deleted duplicates, less new tests).
+
+## 2026-09-22 - review fixes, part C8: small tidy-ups
+
+- **Imports at the top of the file.** Moved: `json` in `search` (three copies), `math` and `argparse` in `suggester`, `datetime` in `payments._as_of`, `statement_pdf` in `payments`, and `suggester` in `buffer`. The two left inside functions, `buffer` → `tasks` and `tasks` → `buffer`, are there because each module imports the other, and a comment now says so.
+- **`hours.BY_START` and `payments.BY_RECEIVED`** were lambdas with a lint exemption; they are now plain functions, `by_start` and `by_received`.
+- **`search`:** the statements joined by semicolons in `activity` are one per line, a trailing-whitespace line is gone, and `r['date'] or '?'.ljust(10)` is now `(r['date'] or '?').ljust(10)`. That is the same output, since a date is always ten characters, but it now reads the way it runs. `suggester`'s own `main` names its parser `parser`.
+- **Verified on the vault copy:** `search` overview/activity/notes/logs/stream, `payments` statement (with and without `--thread` and `--as-of`) and list, `hours` list and edit, and `buffer suggest -y` give identical output before and after. **680 passing.**
+
+## 2026-09-22 - review fixes, parts C2 and C3: one main() shape, help for every argument
+
+- **Every command has the same `main()`:** it builds a parser named `parser`, with subcommands under `dest='subcommand'`, and ends `return args.func(args)` under `sys.exit(main())`. `notes`, `commit`, `hours`, `payments`, `people`, `search` and `threads` used to drop the result, and `lint` exited from inside `main`. Every `cmd_*` now returns an int: 56 bare or missing returns became `return 0`. Exit codes are unchanged, because None already exited 0.
+- **One `--since`/`--until`/`--json` helper, `vault.add_window_flags`,** for `hours list/report`, `payments list/statement` and every `search` subcommand; it replaces `search`'s local `add_range`.
+- **Every argument has help text.** 62 had none, mostly in `hours` and `payments` edit/show/rm, the `tasks` set-* commands and the `buffer` add commands. `--help`, the harvested manual and the agent tool definitions all now describe them. Each sentence was checked against the code, e.g. `hours edit -d` keeps the duration and `tasks rm-depends` matches a prefix of this task's dependencies first.
+- No behaviour change beyond the help text. **680 passing.** `dev/ci generate` will pick the new help text up into MANUAL.md and dev/tools the next time it runs.
+
+## 2026-09-22 - review fixes, parts C6 and C7: comments that say what the code does
+
+- **Stale comments rewritten.** Covered: `buffer`'s module docstring and flush comments, which still mentioned a task backend, taskwarrior and a subprocess; `payments` and `statement_pdf`, which named the old `_statement` module; a `suggester` comment that promised ranking done elsewhere; and `vault`'s docstring, which said it served only `hours` and `payments`.
+- **`buffer flush` no longer claims to be atomic.** Its docstring now says what happens: nothing is written if tend finds a problem, but past that point the logs are written one at a time and the buffer is cleared last.
+- **`render.py` describes itself, not the awk it replaced.** `records` → `split_lines`, `joined` → `join_lines`, `grep_sed_uniq` → `matching_lines`, with the awk/grep/sed wording gone from comments and test names. The module docstring keeps one sentence of history, because the output must still match the old scripts byte for byte and the render fixtures pin it. No behaviour change. **680 passing.**
+
+## 2026-09-22 - review fixes, part C5: dead code
+
+- **The `add-ref` suggestion that could never be made.** The suggester recognised REF wording ("see-also …", "link …"), then always gave up because it cannot name a REF target. `buffer` still had code to format and run the suggestion. The wording now goes straight to UNKNOWN, the outcome it always had, and the dead paths are gone: the `add-ref` branches in `buffer.format_suggestion` and `dispatch_proposal`, and the `ref_target`/`ref_summary` fields of a suggestion.
+- **Unused names:** `lint.TASK_RE`; the `ref` parameter of `hours.resolve_billing`; the unused record in `hours rm` and `payments rm`.
+- **Frontmatter reads that did nothing.** `hours` and `payments` edit and rm read the file's currency to pass to `write_records`, which only uses it when it creates a new file. They act on a file that already exists, so the read is gone.
+- **`hours.buffer_ref` and `payments.buffer_ref`** were one-line wrappers; both call `buffer.add_ref` directly.
+- **`helpjson`:** the subcommand-alias bookkeeping (no command has aliases) and a no-op expression are gone; every `--help-json` manifest is byte-identical.
+- **`search`:** `resolve_thread_arg` lost a catch-all that `resolve_target` already covers; `notes` and `logs` share one function; `stream` uses `window_default` instead of its own copy.
+- **`dev/`:** `manual-harvest` loses every branch for bash scripts, none of which remain. The command list, kept in `dev/ci`, `dev/manual-harvest` and `dev/manual-diff`, now lives once in `dev/commands.py`, and a test checks it against the console scripts in `pyproject.toml`. The harvested corpus is unchanged except that it drops the `interpreter` line, now always python3.
+- **Verified on the vault copy:** `hours` log/edit/show/rm, `payments` log/edit/rm, `buffer suggest` with and without `-y`, and `search` notes/logs/stream give identical output and identical vault changes before and after. **680 passing.**
+
+## 2026-09-22 - review fixes, part C4: no type hints
+
+- `tasks.py` was the only module with type hints; its functions no longer have them, to match the rest of the code. The `Anchor` dataclass keeps its field annotations, because a dataclass cannot declare fields without them; a comment says so. No behaviour change.
+
+## 2026-09-22 - an output folder that cannot be made is an error, not a traceback
+
+Found while checking the error-message change on the vault copy, and present before this refactor: `payments statement --pdf` into a folder that cannot be created printed a Python traceback. So did `notes pdf|minutes|agenda --out`.
+
+- **`vault.make_dir`** creates the folder or stops with `<command>: error: cannot create <folder>: <reason>`, e.g. `Not a directory`. Only these two commands create a folder the user named, and both now use it.
+- **Tests:** one for each command, both failing with the traceback before the fix. **679 passing.**
+
+## 2026-09-22 - review fixes, part C: every error looks the same
+
+Errors came in three shapes, depending on the command: `error: text is empty` (`buffer`, `tasks`, `commit`), `hours: empty description` (`hours`, `payments`, `notes`, `search`), and no prefix at all (`threads`, `people`: `not found: Nope`). Decided 2026-09-22: every message looks the same, behind one shared helper.
+
+- **Every fatal error is now `<command>: error: <message>`**, e.g. `hours: error: empty description`, `threads: error: not found: Nope`. That is the shape argparse already uses for usage errors (`buffer: error: unrecognized arguments`), so all errors now match. Warnings are `<command>: warning: <message>`. That changes the banking-details warning from `payments` (it had no prefix) and the task-ingest warning from `buffer flush` (it had no `warning:`). The message text after the prefix is unchanged, and exit codes are unchanged: 1, or 2 for `lint` with no schemas.
+- **One helper, `vault.die(msg)`, with `vault.warn(msg)`.** It takes the command name from `sys.argv[0]` the way argparse does, so shared code such as `vault.read_records` names the right command without being told. The four copies of `die()` and about 60 direct `sys.exit("...")` calls all go through it. The `tool` parameter of `resolve_target`, `resolve_currency`, `when_from_flags` and `statement_pdf.render`, and the `TOOL` constants, existed only to build prefixes; they are gone.
+- **The statement's self-checks** now say `statement check failed: …`; they used to be prefixed `statement:`, which named no command. A new test covers all three; none had one before.
+- **Tests:** about 90 expected messages updated. New tests cover `die` and `warn`, and the banking warning test asserts the whole line instead of a substring. **677 passing.**
+- **Verified on the vault copy:** every successful command's output is identical before and after. The errors differ only by the new prefix.
+
+## 2026-09-22 - review fixes, part B (B6): plain functions, not fake argparse results
+
+Commands called each other by building a fake `argparse.Namespace` to pass to the other's `cmd_*` function, so a reader had to find the argparse setup to learn what a call needed.
+
+- **The work now lives in plain functions with ordinary arguments:** `buffer.buffer_unknown(text)`, `buffer_text(thread, text)`, `buffer_ref(thread, target, summary, date)`, `buffer_action(thread, text, due, scheduled, priority, depends)`, `buffer.tend(quiet)` and `tasks.ingest(dry_run, quiet)`. Each `cmd_*` is now a one-line adapter from the parsed arguments.
+- **Callers use them directly:** `buffer flush` (tend, then ingest), `buffer suggest -y`, `buffer.add_ref` (used by `hours`, `payments` and `notes`), `tasks add`, and the pre-pass in `notes`. No `argparse.Namespace(` is left in `src/`.
+- **Verified on the vault copy:** the same run of `buffer add`, `add-text`, `add-ref`, `add-action`, `suggest` (with and without `-y`), `tend`, `flush` (with its ingest), `tasks add`, bare `tasks`, `hours log` and `notes new` gives identical output and identical vault changes before and after, ids and clock times masked. **674 passing.**
+
+## 2026-09-22 - review fixes, part B (B5): lint's record blocks
+
+- **One block reader for hours and payments files.** `validate_hours_block` and `validate_payments_block` each carried the same twenty lines: find the block, refuse a second one, parse the JSON, check its shape. `lint.read_block` does that once. The messages are unchanged, down to "tracker JSON" versus plain "JSON".
+- **`lint._find_block` is gone**; it duplicated `vault.find_block`.
+- **Renames.** `lint.unwiki` becomes `wikilink_target`, since it does not do what `vault.unwiki` does: it returns None for plain text. The id registry `'hours_ids'` becomes `'record_ids'` and `cross_check_hours` becomes `cross_check_record_ids`, since both check payment ids too.
+- **Tests:** a new test pins every block-shape message, for both kinds of file. It passes on the code before the change and fails when a message is altered. Four of those messages had no test before. **674 passing.**
+- **Verified on the vault copy:** `lint` output is identical before and after (381 files, 7 violations).
+
+## 2026-09-22 - review fixes, part B (B4): one frontmatter thread reader, one config reader
+
+- **`vault.note_threads(fm)`** reads the threads a note (`threads:`) or log (`thread:`) belongs to, wikilinks unwrapped. It replaces three copies, in `notes list`, `search`'s note records, and `tasks`' thread cache; `tasks.parse_frontmatter_threads` is gone.
+- **The owner comes from `vault.read_config()`.** `render.read_owner` was a second config reader used only for `owner:`. It differed only on odd configs: it kept single quotes and trailing spaces, and took the first of two `owner:` lines where `read_config` takes the last.
+- **Not merged: `parse_frontmatter` and `parse_frontmatter_doc`.** The review suggested it, but they read different things (thread files versus notes and logs), and merging them risks changing `threads show --json`. Left for a separate, measured change if ever wanted.
+- **Tests:** the thread reader and owner tests moved to the vault tests. **672 passing.**
+- **Verified on the vault copy:** `notes list` (text and JSON), `search activity`/`stream`, `tasks list` and `tasks --dry-run` give identical output before and after. So do all 116 minutes renders, and the text of all 228 PDFs matches.
+
+## 2026-09-22 - review fixes, part B (B3): one ACTION attribute parser
+
+`buffer` and `tasks` each parsed an ACTION's `due:`/`scheduled:`/`priority:`/`depends:` attributes, and each checked people files and dates with its own copy of the same code.
+
+- **`vault.parse_action_attrs(tokens)`** replaces both parsers. It follows `tasks`: a bad value is reported and left out, and a buffer timestamp token is skipped. `buffer` only ever used the error list, so its behaviour is unchanged.
+- **`vault.person_exists`, `vault.DATE_RE` and `vault.UUID8_RE`** replace the copies in `buffer` and `tasks`; `lint`'s task-anchor assignee check uses `person_exists` too. `tasks`' unused `ASSIGNEE_PREFIX_RE` is gone, and `tasks.gen_uuid8` gives way to `vault.new_id`, which it duplicated.
+- **Tests:** the parser and `person_exists` tests moved to the vault tests. **672 passing.**
+- **Verified on the vault copy:** `buffer add-action` (good attributes, a bad date, an unknown assignee), `buffer list`, `buffer flush`, `tasks --dry-run`, `tasks list` and `lint` give identical output before and after, ids and clock times masked.
+
+## 2026-09-22 - review fixes, part B (B1, B2): one copy of the shared helpers
+
+The review's part B lists code that several commands each kept their own copy of. These two steps move the simplest copies into `vault.py`. No output changes.
+
+- **B1: one `vault_home()`.** `commit`, `people`, `buffer`, `threads`, `lint`, `tasks` and the suggester each defined their own; all now import the vault's. Unused imports went with them.
+- **B2: shared record helpers.** `vault.HOURS_FENCE` and `vault.PAYMENTS_FENCE` replace five copies of the fence strings. `vault.minutes_of` replaces five copies of the minutes sum, and `vault.in_window` replaces four copies of the since/until check. `vault.is_currency_code` replaces seven copies of the ISO-code regex. Each command keeps its own error message; `search`'s record filter keeps its own date check, which also drops undated records.
+- **Tests:** `minutes_of` moved from the hours tests to the vault tests, with new tests for `in_window` and `is_currency_code`.
+- **Verified on the vault copy:** hours report and list, payments statement and list, and search activity and stream, with and without date windows, give identical output before and after (1,907 lines). **671 passing.**
+
+## 2026-09-22 - review fixes, parts D1 and D6: tests that can fail, and labelled deferred bugs
+
+The review found tests that pass whatever the code does, and deferred bugs whose tests either were not labelled or presented the bug as intended. This fixes both.
+
+- **Rewritten so they can fail.** Each was checked by breaking the code it covers and watching it fail, then restoring the code.
+  - The `notes` ingest unit tests assert that an ACTION became a TASK anchor, and that a failing one was left alone. They used to assert only silence.
+  - `commit.has_head` is tested false on a repo with no commits, and `require_repo` refuses a plain directory.
+  - `one_thread_statement` asserts exact charges, payments, balance and lines, and `find_payment` has a hit case.
+  - The lint cycle and task cross-check tests assert exact lists. A new test covers the one case the cycle de-duplication exists for: a task listing the same dependency twice.
+  - Both "a failed render leaves no stale file" tests, for the statement and for notes, now make the render fail for real: pandoc runs with no xelatex on PATH, via a new `harness.without_program`. The statement test used to pass a successful render, and the notes one only failed because of deferred bug 1.
+  - The harness tests assert the exact `.venv/bin/<name>` path. A missing command used to resolve `Path("None")` inside the repo and pass. The vacuous root-scripts loop became a check that no executable sits at the repo root.
+  - The id tests match `[0-9a-f]{8}` exactly instead of `int(x, 16) >= 0`.
+  - The task-anchor schema tests assert lint's exit code and every violation line.
+- **Deleted, as tests that could not usefully fail:** `test_smoke.py` (each test duplicated another), the two random-id collision tests, the five "help no longer mentions X" tests, and the five "removed flag is rejected" tests.
+- **Every deferred bug is now pinned by a test carrying `# DEFERRED BUG n`:** 1-8, 10 and 11, one grep away. The pins for bugs 4 (`notes copy`) and 8 (badly dated thread entries) were named as if the behaviour were intended; they are renamed.
+- Unused imports removed across the tests; `harness.own_bin_dirs` explains why it keeps the repo root (dev/testbed's old implementation). **669 passing.**
+
+## 2026-09-22 - action tables say whether each action is open or done
+
+Minutes and PDF action tables listed completed actions (`DONE:`, `- [x]`) alongside open ones with nothing to tell them apart. That was deferred bug 9 until it was decided: list every action, open and done, and say which.
+
+- **A Status column**, `Open` for `ACTION:`, `TASK:` and `- [ ]`, `Done` for `DONE:` and `- [x]`. The heading row is `| Assignee | Task | Status |`, and the empty minutes row becomes `| None | None | None |`. The same task open and done in one note is listed both ways, so nothing is hidden.
+- **Tests:** a unit test covers every action form and the both-ways case, another covers the table in `pdf` and `minutes`, and deferred bug 2's pin gains the column. All three failed before the change. Seven fixture expected files changed, and a script confirmed that every changed line is an action-table line.
+- **Verified on the vault copy:** all 348 renders still match the old output except that 109 differ, and in each of those only action-table lines changed. PDF outcomes are unchanged. **686 passing.**
+
+## 2026-09-22 - review fixes, part A: the bugs
+
+A third-party review of the refactor (`stories/2026-09-22-refactor-review-findings.md`) found bugs the tests missed. Every one in its part A was reproduced on a scratch vault first, then fixed with a test written to fail before the fix. All but A4 predate the refactor, which carried them over faithfully.
+
+- **A1: the PDF statement charged unbilled and foreign-currency time.** It listed unbilled time as a line and charged a USD entry on a ZAR thread as ZAR. It now takes only entries in the statement's currency, as the text statement did.
+- **A2: the text statement and PDF could differ by cents.** `hours report` and the text statement summed unrounded amounts; the PDF rounds each line. All three now use `statement.charge_of`, so three 20-minute entries at 2500 are 2499.99 everywhere. No figure changes on the vault copy, whose entries are all whole cents.
+- **A3: money went through `float` before display.** A hand-edited 2.675 listed as 2.67 while the statement showed 2.68. Rows keep the Decimal; only `--json` and `show` convert, with their output unchanged.
+- **A4: a relative `notes pdf --out` lost the PDF.** pandoc runs from a scratch directory; the output directory and both paths handed to pandoc are now absolute. This one was mine, from unit 12.
+- **A5: thread names were checked three ways.** `buffer` and `tasks` asked the filesystem, so `Projects/sgb` passed on macOS and flush wrote a wikilink that breaks on Linux. Every command now resolves through `vault.resolve_thread`, stored names are checked with the new `vault.is_thread`, and `threads` drops its own copy of the resolver. `buffer add-*` now accept a bare name and store the canonical `Kind/Name`. `threads`' ambiguity message is now the vault's.
+- **A6: `people new` / `threads new` could write outside their folder.** `--name ../x` wrote outside it and `a/b` crashed. Names with `/` or a leading `.` are refused.
+- **A7: `hours edit` skipped two checks `hours log` makes.** A rate on unbilled time, and an empty description, are now refused.
+- **A8: render bugs frozen in the expected-output files.** Measured against the vault copy first:
+  - **Fixed:** a second Summary before any line containing `# Content`, and `#  Details` for a note with no type. No real note triggers either; four expected files change by exactly those lines.
+  - **Deferred, with `# DEFERRED BUG` tests and story entries:** completed actions listed as Action Items (42 notes), the PDF replacing a note's own Summary (2 notes), and non-person links as attendees (none). Deferred bug 2, the `[#H]` action row, gets its own pinned test.
+- **A9: small bugs.** `tasks rm-depends` can remove a dependency on a deleted task. One non-UTF-8 file no longer aborts the ingest; it is skipped and reported as failed. `search overview --limit 0` means all. The `--depends` help no longer says "prefix". The review's A9.4, `?` date padding, was not a bug: the padding applies exactly when the date is missing.
+- **Verified:** `dev/ci` green. All 116 vault-copy notes through all three renderers are still 348 of 348 identical to the old output. Reports, statements, tasks, threads and buffer compare identical on the vault copy apart from the intended changes. **686 passing, 96% coverage.**
+
+## 2026-09-18 - refactor unit 13: commands call each other directly, and the last bash goes
+
+The cleanup unit. Commands no longer run each other as subprocesses, the duplicated readers are gone, `ci.sh` is `dev/ci`, and the Dockerfile and README describe a package rather than a directory of scripts.
+
+- **Direct calls instead of PATH lookups.** `hours`, `payments` and `notes` call a new `buffer.add_ref()`; `tasks add` calls `buffer.cmd_add_action`; `buffer flush` calls `tasks.cmd_default`. `add_ref` holds the best-effort rule in one place: it never raises, and stays silent for `hours` and `payments`, where a warning on stderr would cost the caller its stdout. A failing ingest after a flush now reports itself instead of being lost, and cannot fail the flush: the entries are already in the logs. **The suite runs in half the time** as a result, 96s against 195s.
+- **Duplication removed.** `read_frontmatter` and `fuzzy_score` were identical in `threads` and `people`; both now live in `vault`. `tasks` used its own frontmatter thread parser and now uses `vault.parse_frontmatter_doc`, checked against the old one with `tasks list`, `next`, `--overdue`, `--thread` and `search activity` on the vault copy: identical. Their tests moved to `tests/unit/test_vault.py`. What stays duplicated, and why, is recorded in the story.
+- **`ci.sh` is now `dev/ci`, in Python.** Same stages, same PASS/FAIL lines, same single corpus harvest shared by both generators. The repo has no bash left. `dev/manual-diff` and the manual prompt refer to it by its new name.
+- **Dockerfile.** The image cannot install the package, because the source arrives at runtime as a bind mount, so each command gets a wrapper around `python3 -m adulting.<name>` and `PYTHONPATH` points at the mounted source. Edits on the host still take effect with no rebuild. **taskwarrior is dropped**: no command has shelled out to `task` since tasks became source-of-truth. Verified without Docker by running the same wrappers, `PYTHONPATH` and a system Python against a scratch vault: all ten commands answer `--help-json`, and a note, flush, hours entry and `lint` all behave.
+- **pipx verified for real.** `pipx install .` into a scratch `PIPX_HOME`, then `notes new`, `buffer flush`, `tasks list`, `threads list`, `lint` and `notes minutes` against a scratch vault, with nothing installed into the real `~/.local/bin`. The PDF step correctly reported that pandoc was missing from that stripped PATH.
+- **README** documents installing with pipx, the editable venv for development, Python 3.11+ with no runtime dependencies, and the command names being generic enough to clash. The design goals no longer claim one file per utility or forbid pip. INTEGRATIONS.md no longer refers to a task backend to set up.
+- **The story** (`stories/2026-09-17-python-package-refactor.md`) records the finished state, the eight deferred bugs, each pinned by a test, and the duplication left deliberately in place.
+- **Still to do, needing `claude`:** MANUAL.md and `dev/tools/` are generated from the tools themselves and are stale — MANUAL still describes the pickers and prompts. Run `dev/ci generate` to rebuild both. `dev/tools/notes.json` was already rewritten by hand in unit 12 so the gate passes.
+- **655 passing, 96% coverage.**
+
+## 2026-09-17 - refactor unit 12: the renderers move to Python and the bash is gone
+
+`notes pdf`, `notes minutes` and `notes agenda` are ported to `src/adulting/render.py`, `notes` becomes this package's command, and the six bash scripts are deleted. The repo has no operator bash left.
+
+- **`notes pdf|minutes|agenda <stem> [--out DIR]`** writes `<stem>.md` and `<stem>.md.pdf` and prints both paths. Renders default to `~/Downloads`, as before; `--out` puts them elsewhere. Nothing opens Preview.
+- **`render.py` is a line-by-line port.** Each function names the awk, grep or sed step it replaces: awk's record splitting and `print` newline, `extract_meta`'s quote unescaping, the `people:` list rules, the `--{10,}` section boundary (eleven hyphens or more), `grep | sed | uniq`, the action-table python, the empty-H3 pass and `pad_note_rules`. Files are read and written with `errors='surrogateescape'`, so a note that is not valid UTF-8 survives as it did through awk.
+- **Two mistakes caught while porting, before any test ran:** awk's `print` adds a newline after the Summary block that `minutes` inserts, and a real `AGREED:` line reading like the "no agreements" placeholder would have been mistaken for it. Both are covered by tests.
+- **Verified against every note in the vault copy: 348 of 348 identical.** All 116 notes through all three renderers, markdown byte for byte, with the same PDF successes and failures. The old outputs were captured by driving the old picker; the old `open` calls were intercepted by a scratch script so nothing launched.
+- **Old bugs found, pinned rather than fixed:**
+  - **A topic containing a colon or a quote breaks the PDF.** It goes into the pandoc metadata unquoted, so the YAML will not parse. Two real notes are affected: `Recs x Exp: Interference Analysis` and `Principles for Autonomous System Design: OpenClaw Deep Dive`. Six of the 348 renders produce no PDF for this reason, in old and new alike. The markdown is still written.
+  - **A `TASK:` line with a priority renders as `| Riaz Arbi | [#H] (Riaz Arbi) Circulate minutes |`.** The `[#H]` stops the assignee matching, so the name stays in the task text and the row is credited to the vault owner.
+  - `  -` with nothing after it is not a list item: awk wants a space after the dash.
+- **Changed:** a PDF left from an earlier render is removed first, so a failed render cannot leave a stale file looking current. A failed render exits 1 with pandoc's message, where the bash ignored the failure.
+- **New `tests/cli/test_notes_render.py`** (24 tests). Six synthetic fixture notes in `tests/fixtures/render/` cover every rule; each `<name>.<kind>.expected.md` beside them is the old bash output, and 18 tests compare the port with those files byte for byte. The rest cover the PDF, the two paths printed, the stale-PDF removal, the `~/Downloads` default, a missing note and `--help-json`.
+- **New `tests/unit/test_render.py`** (10 tests) covers the rules one at a time: awk record semantics, quote unescaping, people lists, the owner lookup, horizontal rules and padding, section cutting and filling (ten hyphens are not a boundary, eleven are), `grep | sed | uniq` ordering, action-row dedup and owner fallback, and empty-heading stripping.
+- **`notes` is now the package's console script.** Deleted: `notes`, `notes_new`, `notes_pdf`, `notes_minutes`, `notes_agenda`, `notes_strip`. `notes strip`, `edit` and `nano` are gone, as agreed. `ci.sh` no longer has a bash-tools list, and shellcheck now runs on itself only.
+- **Agent tools:** every `notes` subcommand used to be blocked because all of them needed a terminal. They no longer do, so the agent may use them; only `delete` stays blocked, as for `threads` and `people`. `dev/tools/notes.json` was rewritten by hand to match, and is regenerated with the rest in the cleanup unit.
+- README's notes section now documents the stem-based subcommands. `render.py` coverage 99%, `notes.py` 97%. **656 passing.**
+
+## 2026-09-17 - refactor unit 11: `notes new` from flags
+
+`notes new` joins `src/adulting/notes.py`. Every answer the old prompts asked for is now a flag, and it prints the new note's path instead of opening Obsidian. As in unit 10, it runs as `python -m adulting.notes` until the renderers are ported and `notes` switches to Python.
+
+- **`notes new --type T --topic X --thread T [--thread …] [--person NAME …] [--counterparty X] [--location X]`.** `--type` is one of the seven note types. `--thread` accepts a name, `Kind/Name` or a wikilink, and is repeatable; a repeat is written once. The flags follow the old prompts: `--person` only for Meeting and Correspondence, `--counterparty`/`--location` only for Meeting. Using them elsewhere exits 1 and writes nothing.
+- **The note is written exactly as before:**
+  - **fields:** topic, type, threads, timestamp, aliases; then for a Meeting, counterparty if given and a `location:` line always, even an empty one; then people.
+  - **quoting:** the topic unquoted. In `aliases` and in the names of people without a file, only `"` is escaped.
+  - **people:** a person with a file is linked as `[[people/Name]]`.
+  - **ending:** `# Content` and a blank line.
+- **One buffer REF per thread**, in the order given, with the buffer's output passed through as before. `notes new` still skips the ingest pre-pass.
+- **Changed:** an empty `--topic` exits 1 (the old prompt accepted one and wrote a note `lint` rejects). A missing `--type`, `--topic` or `--thread` is a usage error (exit 2) and never falls back to reading stdin. A note already existing at the new timestamp is refused rather than overwritten; the old script overwrote it silently.
+- **New `tests/cli/test_notes_new.py`** (23 tests) pins, against output captured by feeding the old prompts on stdin:
+  - **each note shape:** a full Meeting (quoting and escaping included), the empty location line, all six other types, and Correspondence people
+  - **the rest of `new`:** buffer REF order, thread deduplication, and the note passing `lint`
+  - **errors:** five that write nothing, three missing flags, an unknown type, and that `new` does not ingest
+- **`tests/unit/test_notes.py`** gains quoting, people linking, and note text for a Log and a Meeting.
+- **Verified on the vault copy with real threads and people.** Four notes were created through the old prompts and again through the new flags: a Meeting with quotes, colons, a linked and an unlinked person, counterparty and location; a Meeting with nothing optional; Correspondence with a person; and a two-thread Report. With timestamps masked, all four note files and their buffer REFs were identical. The old script's Obsidian `open` calls were intercepted by a scratch `open` on PATH, used only for that check.
+- `tests/cli/test_notes_cli.py`'s `--help-json` expectation now includes `new`. The unit 10 entry below had its passing count corrected to 596. **622 passing.**
+
+## 2026-09-17 - `notes` warns about a failed ingest only on a terminal
+
+Unit 10's ingest pre-pass printed its warning to stderr whenever an ACTION line failed to ingest. The agent harness discards a command's stdout whenever stderr is non-empty, so a single malformed ACTION anywhere in the vault would have made every `notes cat` the agent ran come back empty.
+
+- **The warning now prints only when stderr is a terminal.** Run by hand, you still see it; run by the agent or in a pipe, `notes` stays silent, as the old `2>/dev/null || true` always was.
+- **Tests.** One CLI test checks that stderr stays empty when it is a pipe. Another attaches stderr to a real pseudo-terminal (Python's `pty`) and checks for the one-line warning; with the warning disabled, that test fails. The unit test now expects silence.
+- The real vault has no failing ACTION lines today, so nothing was affected in the meantime. **596 passing.**
+
+## 2026-09-17 - refactor unit 10: `notes list/cat/last/copy/delete` in Python, named by stem
+
+The first notes subcommands move to `src/adulting/notes.py`, without the numbered picker. A note is named by its stem (`2026-09-10-14-30-00`, with `.md` tolerated), and `notes list` shows the stems.
+
+- **Not yet the `notes` command.** The bash `notes new`, `pdf`, `minutes` and `agenda` only work when launched by the bash `notes` dispatcher, whose exported shell functions they depend on. So the bash `notes` stays on PATH, and the new module runs as `python -m adulting.notes` until those are ported. `notes` switches to Python at the end of unit 12.
+- **`notes list [filter] [--json]`** replaces the picker. It shows stem, date, type, threads and topic, oldest first by the frontmatter `timestamp` (the stem when that is missing or malformed), with a case-insensitive filter over every column.
+- **`notes cat <stem>`** prints the note, as before.
+- **`notes last`** prints the newest note's path instead of opening Obsidian. The old picker sorted on the first ten characters of the timestamp and then on the threads/type/topic text, so on a day with several notes "last" wasn't necessarily the latest. The new one is ordered by full timestamp.
+- **`notes copy <stem>`** copies to a new timestamp exactly as before: every line starting with `topic:` gets ` COPY`, body lines included, and the frontmatter `timestamp` is kept. Both are pinned rather than changed. It now refuses to overwrite a note that already has the new timestamp, where the old `cp` would have clobbered it.
+- **`notes delete <stem>`** needs `-y` and prints `deleted: <path>`. The old one deleted silently after the picker.
+- **Every subcommand still ingests ACTION lines first**, now in-process rather than by shelling out to `tasks`. If any ACTION fails to ingest, it prints `notes: warning: some ACTION lines were not ingested; run \`tasks\` to see why` to stderr and carries on; the old `2>/dev/null || true` hid the failure. `--help-json` does not ingest.
+- **Old bug that goes away: the picker could act on the wrong note.** With a filter (`notes cat zeta`) it showed a filtered, renumbered list but selected from the unfiltered one. Choosing `2` from a list of Zeta notes returned an SGB note, and `notes delete <filter>` could have deleted a note that was never on screen.
+- **Why the tests were not run against the old script:** its interface was a picker, so tests of the stem interface can't. What the new code keeps from it was checked by driving the old picker with stdin on the same fixtures (`cat` verbatim, `copy`'s ` COPY` lines, the ingest pre-pass), then on real data.
+- **New `tests/cli/test_notes_cli.py`** (17 tests) covers:
+  - **`list`:** timestamp order over filename order, the filter and its empty messages, the JSON row, and untimestamped notes.
+  - **`cat` and `last`:** `cat` after ingest, a trailing `.md`, three bad stems, and `last` including with no notes.
+  - **`copy` and `delete`:** `copy` content, and `delete` with and without `-y`.
+  - **the ingest pre-pass:** it warns once and carries on, runs before `list`, and `--help-json` skips it.
+- **New `tests/unit/test_notes.py`** (6 tests) covers stem resolution, frontmatter reading, the sort fallback, and the silent and failing ingest.
+- **Verified on the vault copy.** `list` shows all 116 notes. `cat` output was identical to the old picker's for a 17-note sample spread across the vault. `copy` produced identical files for the oldest, a middle and the newest note. `last` names the note with the newest timestamp.
+- `notes.py` coverage 97%. **595 passing.**
+
+## 2026-09-17 - refactor unit 9: `tasks` moves into the package
+
+`tasks` moves to `src/adulting/tasks.py` with a console-script entry point. It has no interactivity, so this is a pure port. It is the highest-risk command for data because it rewrites notes and logs in place, so the verification centres on the lines it writes. With this unit every Python command is packaged. What remains at the repo root is the bash `notes` family.
+
+- **Characterised before the port.** New `tests/cli/test_tasks_output.py` has 19 tests, all green against the old script:
+  - **ingest:** exact `--dry-run` output with the file untouched; `--dry-run --quiet`; and a real ingest. That ingest rewrote two good ACTIONs in place, byte for byte around them, and left five failing ones. Those fail on a bad attr set (reported one error per attr), an unknown assignee, an empty body, a note with no threads, and a thread that doesn't resolve, and each gets its exact stderr line. Also: the 60-character summary truncation, the two-space hard break, and the nothing-to-do case.
+  - **`list`, `next`, `show`:** the exact table, with multi-thread `+1`, unthreaded `-`, padding and trailing-space stripping; the thread, priority and assignee filters and `(no tasks)`; `next` order; and `show` detail, including threads from a log's singular `thread:`.
+  - **uuid prefixes:** the ambiguous and not-found errors.
+  - **mutations:** every mutation's output and the exact line it leaves in a log file, including `already done`, `already depends on`, `did not depend on`, and a `people/` prefix on `set-assignee`. Six mutation errors leave the file untouched.
+  - **`tasks add`:** passes every flag to `buffer` and returns its exit code. `--help-json` is covered too.
+- **Two cosmetic inconsistencies pinned, not fixed:** `set-due`/`set-scheduled` say `date must be YYYY-MM-DD, got …` with a comma where other errors use a semicolon, and the ambiguous-prefix error names files by basename rather than vault path.
+- **`ADULTING_HOME` is read per call.** An unused `INTERNAL_DIR` constant is gone. `tasks add` still reaches `buffer` through PATH, and `buffer flush` still reaches `tasks` the same way. Both become direct calls in the cleanup unit, alongside `hours`, `payments` and `notes`.
+- **New `tests/unit/test_tasks.py`** (15 tests) covers: anchor parsing of every field; the format round-trip with its hard break; five lines that must not parse (attrs out of order, indented, and others); attr parsing that tolerates the buffer's timestamp and drops bad values; `threads:` lists and a singular `thread:`; priority/due/entry and thread sort keys; the thread cell; validators; and uuid generation. Against a real temp vault it also covers skipping dot-files and dot-dirs, prefix resolution, a mutation rewriting exactly one line with no `.tmp` left behind, and the threads cache.
+- **Verified on the vault copy:**
+  - **Reads and mutations:** old and new are identical for `list` (plain, `--overdue`, `--priority H`, `--thread "Projects/SANA Partners"`), `next`, `--dry-run` and `--help-json`, and for `show`, `done`, `set-priority`, `set-due` and `set-description` on a real task.
+  - **Ingest:** ACTION lines were appended to a real 238-line note and a real AXA DORA log, three good and one with an unknown assignee. Old and new then produced identical stdout, stderr and file changes once the fresh uuids were masked.
+- **`ci.sh`** no longer lists root Python scripts; there are none left. `tasks.py` coverage 92% → 99%. **572 passing.**
+
+## 2026-09-17 - refactor unit 8: `buffer` moves into the package; `suggest` stops prompting
+
+`buffer` moves to `src/adulting/buffer.py` with a console-script entry point. It was the least-tested core command: every capture, `tend` and `flush` pass through it, and the suggester behind `buffer suggest` had no tests at all.
+
+- **`buffer suggest` never prompts.** With `-y` it runs the suggestion, as before. Without `-y` it prints the suggested command and stores the raw text as UNKNOWN, with `not accepted (pass -y to accept); storing as UNKNOWN.` That was already the behaviour with no terminal attached, under the message `rejected (no tty, no --yes)`. On a terminal it used to ask `accept? [Y/n]`.
+- **`buffer` and `suggester` read `ADULTING_HOME` per call.** `flush` still runs `tasks` from PATH, as before; that becomes a direct call once `tasks` is ported. The `hours` and `payments` REF calls now resolve to the packaged `buffer`.
+- **Characterised before the port.** New `tests/cli/test_buffer_cli.py` has 35 tests:
+  - **33 kept behaviours, green against the old script.** Covered: every `add-*` line shape, including the fixed attr order and sorted depends; `add-ref --date` filing; all 12 `add-*` errors, none of which writes a buffer; REF targets of every record kind; `list` numbering, filtering and empty messages; `rm` and its errors. For `tend`: the exact regrouped file (groups by thread and date, then UNKNOWN and UNPARSED sections), all nine violation types with the exact stderr, idempotence, and clean and quiet output. For `flush`: the exact log file it creates, appending to an existing log that lacks a trailing newline, attrs carried into the ingested anchor, refusal while `tend` fails, and empty and quiet flushes. For `suggest`: `-y`, no suggestion, and no terminal.
+  - **2 changes, failing against the old script first:** `suggest` on a real pseudo-terminal (Python's `pty`, with `y` waiting on stdin) must not prompt, and its help must not mention prompting.
+- **Quirks found and pinned, not fixed:**
+  - `buffer tend` creates an empty `buffer.md` when there is none.
+  - `--quiet` does not silence the `add-*` commands.
+  - `buffer --quiet flush` still prints the `tasks` ingest summary, because the `tasks` it runs isn't passed `--quiet`.
+  - In the suggester, `!!` never marks high priority: the pattern wraps `!!+` in `\b` word boundaries, which never match around punctuation. URGENT and ASAP work.
+- **New `tests/unit/test_buffer.py`** (10 tests) covers attr parsing and its errors, deterministic attr formatting and round-trip, stamps, line classification, regroup order, thread/assignee/REF-target resolution, entry validation, buffer file reads and writes, and shell-quoted suggestions.
+- **New `tests/unit/test_suggester.py`** (29 tests) covers the rules pipeline against a pinned today: twelve date phrasings (due vs scheduled, never-today weekdays, past months rolling to next year), priority, eight intent classifications, person matching with surname disambiguation, assignee prefixes, explicit `Kind/Name` directives and their spans, body construction, BM25 ranking on rare terms, the vault loaders and thread index, an end-to-end suggestion, and bailing to UNKNOWN.
+- **Verified on the vault copy.** `eval/suggester/score.py` gives identical output for the old and new code against the real vault: 77% full match, 82% thread, 100% out-of-scope, which passes its bar. Old vs new `buffer` was identical for `list`, `list sana`, `tend` and `rm 2`. `flush` differed only in the fresh task uuid from the ingest it triggers, and touched the same files. The `add-*` commands and `suggest -y` differed only in capture timestamps. `suggest` without `-y` and `--help-json` changed only as specified.
+- `buffer.py` coverage 55% → 96%, `suggester.py` 0% → 90%; total 82% → 95%. **538 passing.**
+
+## 2026-09-17 - `payments` validates `statement --as-of`; `edit` keeps the date or time you don't change
+
+Two quirks pinned in unit 7, fixed.
+
+- **`payments statement --as-of` is validated in the text view.** A malformed value like `5 July` used to be compared against dates as a string, so it bounded nothing: the whole statement printed with exit 0. It now exits 1 with `payments: bad --as-of '5 July'; expected YYYY-MM-DD`, as `--pdf` already did.
+- **`payments edit` keeps whichever of date and time you don't change**, as `hours edit` does. `-t` without `-d` used to be ignored. `-d` without `-t` reset the time to the moment of the edit, which was found while writing the test for the first bug.
+- **The two unit 7 tests that pinned the quirks now assert the fixes**, plus one for `-d` alone. All three failed before the change. Valid input behaves as before: on the vault copy, old vs new are identical for `statement --as-of`, `statement --thread … --as-of … --json`, `edit -d … -t …` and `edit -a`. `edit -t` alone now changes the file where the old code changed nothing.
+- **464 passing.**
+
+## 2026-09-17 - refactor unit 7: `payments` moves into the package and stops prompting
+
+`payments` moves to `src/adulting/payments.py` with a console-script entry point and loses its interactivity, following `hours`. `vault.prompt` and `vault.pick_thread` had no callers left and are deleted.
+
+- **`payments log` requires a thread.** Without one it exits 2 with argparse's usage error and writes nothing; previously it opened the thread picker and prompted for amount, date, account and note. `log --all` is gone. A thread with no amount still exits 1 with `payments: amount is required`, as before.
+- **`payments rm` refuses without `-y`.** It exits 1 with `payments: refusing to delete <id> without -y` and leaves the payment, even if stdin says `y`.
+- **The buffer REF finds `buffer` on PATH**, for the same reason as `hours`: the old lookup next to the script would have failed silently inside the package.
+- **Characterised before the port.** New `tests/cli/test_payments_output.py` has 24 tests:
+  - **20 kept behaviours, green against the old script:** the `log` line with and without an account; six `log` errors, none of which writes a file (including the full no-currency hint); the `list` table, filters, empty output and JSON row; `show` text and a missing id; `edit` of several fields; `edit` errors; `rm -y`; the `statement` table with per-currency totals and a negative outstanding; `--as-of` bounding the text view; the empty statement; and `--help-json`
+  - **4 changes, each failing against the old script first:** no picker, `--all` removed, no delete confirmation, and help without "interactive"
+- **Two quirks found and pinned, not fixed:**
+  - `statement --as-of "5 July"` is not validated in the text view. The bad value is compared as a string and bounds nothing, so the whole statement prints with exit 0. `--pdf` rejects the same value.
+  - `edit <id> -t HH:MM` without `-d` silently changes nothing.
+- **The one prompt-driven test in `tests/cli/test_payments_cli.py` was removed.** The other 24 pass unchanged, as do the PDF statement tests.
+- **New `tests/unit/test_payments.py`** (7 tests) covers amount parsing, JSON amounts dropping `.00`, blank optional fields omitted, `--as-of` parsing, and billed totals being exact Decimals that skip unbilled time. Also collect/find and a single-thread statement against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list` (text and JSON), `statement` (text, `--json`, `--as-of`), `show` (text and JSON), `edit -a` and `rm -y` on a real payment. `statement --thread "SANA Partners" --pdf` gave the same summary line and file. `log` differed only in the fresh id, and touched the same files.
+- **Side effect of unit 0, seen here:** the old `statement --pdf` printed a `SyntaxWarning` to stderr (the `\l` in `_statement_pdf.py`'s docstring) whenever Python recompiled it. The agent harness discards stdout when stderr is non-empty, so that could cost the agent the summary line. The new code prints nothing to stderr.
+- README's payments table updated. `payments.py` coverage 85% → 97%; total 81% → 82%. **463 passing.**
+
+## 2026-09-17 - refactor unit 6: `hours` moves into the package and stops prompting
+
+`hours` moves to `src/adulting/hours.py` with a console-script entry point and loses its interactivity.
+
+- **`hours log` requires a thread.** Without one it exits 2 with argparse's usage error and writes nothing. Previously it opened a numbered thread picker followed by description, minutes and rate prompts. `log --all`, which only widened that picker, is gone and is now an unrecognised argument.
+- **`hours rm` refuses without `-y`.** It exits 1 with `hours: refusing to delete <id> without -y` and leaves the entry, even if stdin says `y`.
+- **The buffer REF finds `buffer` on PATH.** It used to look for a `buffer` file next to its own script, which doesn't exist inside the package. The best-effort call would then have failed silently and every `hours log` would have lost its log pointer. An install puts all the commands in one bin directory, and the test harness puts this checkout's commands first. If `buffer` can't be found at all, the REF is skipped, as for any other buffer failure. This becomes a direct function call once `buffer` is ported. The existing REF tests cover it: log, directory-form kind, flush, unbilled, backdated, and split across days.
+- **Characterised before the port.** New `tests/cli/test_hours_output.py` has 20 tests:
+  - **16 kept behaviours, green against the old script:** the `log` line for billed, config-rated and unbilled entries (with `hours.minutes`/`hours.rate` from config); five `log` errors, none of which writes a file; the `list` table, filters and JSON row; the `report` table, with per-currency totals and `TOTAL unbilled` first; `report` filters and empty output; `show` text and a missing id; `edit` moving date and time while keeping duration, and upper-casing currency; the `edit` errors; `rm -y`; and `--help-json`
+  - **4 changes, each failing against the old script first:** no thread picker, `--all` removed, no delete confirmation, and help without "interactive"
+- **The two prompt-driven tests in `tests/cli/test_hours_cli.py` were removed**; the no-prompt behaviour they covered is specified above. The other 35 tests pass unchanged.
+- **New `tests/unit/test_hours.py`** (6 tests) covers duration, Decimal money, unbilled entries omitting `currency`, the rate cascade (flag, thread, config, default), billing resolution and its two refusals, and append/collect/find against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list` (plain, `--json`, `"SANA Partners" --since`), `report` (plain and `--since … --json`), `show` (text and JSON), `edit -m` and `rm -y` on a real entry. `log` differed only in the fresh entry id, and touched the same files. `--help-json` changed only as specified.
+- README's hours table updated. `hours.py` coverage 81% → 98%; total 80% → 81%. **433 passing.**
+
+## 2026-09-17 - refactor unit 5: `threads` moves into the package and stops prompting
+
+`threads` moves to `src/adulting/threads.py` with a console-script entry point and loses its interactivity, following `people`.
+
+- **`threads new` requires `--name`, `--kind` and `--category`.** Missing any of them exits 2 with argparse's usage error, reads nothing from stdin and writes nothing. Previously each missing field opened a prompt, and currency and rate were also prompted unless all three were given.
+- **One behaviour removed with the prompts:** giving a currency at the prompt and leaving the rate blank used to write `rate: 2500` into the thread file. With flags, `--currency` without `--rate` writes no rate. Logged hours come out the same: `hours` falls back to `.adulting/config.yaml` `hours.rate`, then 2500, and a test pins that a new billable thread logs at 2500 immediately.
+- **`threads delete` refuses without `-y`.** It exits 1 with `refusing to delete <path> without -y` and leaves the file, even if stdin says `y`.
+- **Bug fixed: `--name` is now stripped**, as for `people`. `--name "  "` no longer creates `  .md`, and `--name ""` no longer falls through to a prompt.
+- **Characterised before the port.** New `tests/cli/test_threads_cli.py` has 28 tests:
+  - **22 kept behaviours, green against the old script:** the `list` table in kind-then-name order, `--all`, `--json` fields, fuzzy queries, the empty messages, and `show` as raw text and JSON. Resolution by bare name, `Kind/Name`, wikilink and padded name; case-sensitive misses; an unknown kind directory. The ambiguity error when a bare name exists in two kinds. The exact file `new` writes, with and without billing, plus the duplicate and bad currency/rate/kind errors. `delete -y` by wikilink, not-found and ambiguous deletes, and `--help-json`.
+  - **6 changes, each failing against the old script first.**
+- **`tests/cli/test_threads_billing.py`:** its 5 prompt-driven tests now use flags, and it gained a test that currency without rate writes no rate. All 10 passed against the old script before the port.
+- **New `tests/unit/test_threads.py`** (6 tests) covers thread discovery order and filtering, resolution by path, wikilink and bare name, misses, ambiguity, and frontmatter reading.
+- **Verified on the vault copy.** Old vs new were identical for:
+  - `list` (plain, `--all --json`, two fuzzy queries)
+  - `show` (bare `SGB`, `AXA DORA`, `[[Projects/SANA Partners]] --json`, `Projects/Agent --json`)
+  - `delete "Personal Finance" -y`
+  - `new` for an unbilled topic and a ZAR project with a rate, and `new` refusing the existing SANA Partners
+
+  `--help-json` changed only as specified.
+- **Docs.** README's threads section now documents the required flags and the rate fallback. Found while doing it: MANUAL.md names the fallback key `time.rate`, but the code reads `hours.rate`. MANUAL is regenerated in the cleanup unit.
+- Dropped an unused `shutil` import. `threads.py` coverage 48% → 96%; total 78% → 80%. **409 passing.**
+
+## 2026-09-17 - refactor unit 4: `people` moves into the package and stops prompting
+
+`people` moves to `src/adulting/people.py` with a console-script entry point. It is the first command to lose its interactivity, per the refactor decisions: every value comes from arguments, and a delete needs `-y`.
+
+- **`people new` requires `--name` and `--category`.** Missing either exits 2 with argparse's usage error; nothing is read from stdin and no file is written. Previously each missing field opened a prompt.
+- **`people delete` refuses without `-y`.** It exits 1 with `refusing to delete <path> without -y` and leaves the file, even if stdin says `y`. Previously it asked for confirmation, and with no terminal attached it crashed with an `EOFError` traceback.
+- **Bug fixed: `--name` is now stripped.** Only the prompt path stripped whitespace, so `people new --name "  "` created a file named `  .md`, and `--name ""` fell through to the prompt. A blank name now exits 1 with `empty name`, and `" Igor Novak "` creates `Igor Novak.md`.
+- **Characterised before the port.** `people` had no tests. New `tests/cli/test_people_cli.py` has 20 tests:
+  - **15 kept behaviours, green against the old script:** the `list` table, `--all`, `--json` fields, fuzzy query ranking, the empty messages, `show` as raw text and JSON (with the `people/` prefix), a missing person, the exact file `new` writes (and that it passes `lint`), creating `people/`, refusing duplicates and unknown categories, `delete -y`, and `--help-json`
+  - **5 changes, each failing against the old script first:** no name prompt, no category prompt, no delete confirmation, the blank-name fix, and help text without prompt wording
+- **New `tests/unit/test_people.py`** (5 tests) covers the fuzzy-score ladder, wikilink-prefix stripping, frontmatter reading, and person discovery against a real temp vault.
+- **Verified on the vault copy.** Old vs new were identical for `list`, `list --all --json`, two fuzzy queries, `show` (raw, and `people/…` with `--json`), `new --name … --category …`, and `delete … -y`. `--help-json` changed only as specified.
+- README's people table updated. `people.py` coverage 32% → 99%; total 75% → 78%. **374 passing.**
+
+## 2026-09-17 - `search stream --thread` matches whole thread names
+
+`stream --thread Processes/SGB` also returned every event of `Processes/SGB Extra`. The filter asked whether the resolved ref appeared anywhere inside the event's thread text, which is the event's threads joined with `, `. It now splits that text and compares whole names. An event on several threads still matches each of them.
+
+- **Never triggered in the current vault.** No thread's `Kind/Name` is the start of another's. The one name pair that shares a prefix, `Projects/Agent` and `Topics/Agentic Engineering`, differs in kind, so it never collided. Old vs new `stream` output is identical on the vault copy for the full year, and for `--thread` on SANA Partners, AXA DORA, Agent and Personal Finance.
+- **The unit 3 test that pinned the bug now asserts the fix.** `--thread Processes/SGB` returns only SGB events and the multi-thread note. `--thread "SGB Extra"` returns only its own.
+- No thread name in the vault contains `, `, the separator the split relies on. **349 passing.**
+
+## 2026-09-17 - refactor unit 3: `search` moves into the package; `vault` reads the vault per call
+
+`search` moves to `src/adulting/search.py` with a console-script entry point. `adulting.vault` stops freezing `ADULTING_HOME` at import. No behaviour change.
+
+- **Characterised before the port.** The existing 23 search tests almost all checked `--json`. New `tests/cli/test_search_output.py` (18 tests), run green against the old script first, pins the text people read:
+  - the `notes` and `logs` tables and their match snippets
+  - the `activity` table and its default 7-day window
+  - the `overview` report, with and without a window and `--limit`
+  - the full `stream` chronology: day headers, clock times in local time, the `N more not shown` footer, `--text`, `--reverse`, `--until`, and the empty-window message
+  - case-folded thread resolution, the unresolvable-thread and unknown-kind errors, and an empty vault
+  - notes dated from their filename when `timestamp` is malformed, and logs that recover their thread from their path
+- **Bug found and pinned, not fixed:** `stream --thread` is a substring match. `--thread Processes/SGB` also returns every event of `Processes/SGB Extra`, because the filter asks whether the resolved ref appears inside the event's thread text. It is pinned so the port can't change it silently; fixing it is a separate decision.
+- **Also pinned:** within one day, `stream` orders events reverse-alphabetically by kind (`task` before `note` before `done`). This is a side effect of sorting the whole key newest-first.
+- **`vault.vault_home()`** replaces the import-time `HOME`, `THREADS_DIR` and `CONFIG` constants. `hours` and `payments`, still scripts, pick this up with their tests unchanged. `tests/unit/test_statement.py` no longer reloads the module to change vaults.
+- **New `tests/unit/test_search.py`** (12 tests). Covers event dates, snippets, filters and their newest-first order, the anchor/buffer/self-ref line patterns, and the record readers against a real temp vault: frontmatter-less notes skipped, log thread recovered from the path, self-refs dropped, entities needing a valid `started`, and pending entries. Also thread resolution.
+- **Verified on the vault copy.** Old vs new were identical in exit code, stdout, stderr and files touched for `notes` (all, and with `--type`/`--text`), `logs` (all, and `--text`), `activity` (default and since January), `overview` (AXA DORA; Personal Finance windowed), and `stream`. The `stream` runs covered the full year (867 events), `--today`, `--kind hours,payment,pending --json`, and `--thread "SANA Partners" --reverse`. `hours report`, `payments statement` and `--help-json` were checked too.
+- `search.py` coverage 84% → 94%; total 72% → 75%. **349 passing.**
+
+## 2026-09-17 - refactor unit 2: `lint` and its schemas move into the package
+
+`lint` moves to `src/adulting/lint.py` with a console-script entry point. `schemas/` moves to `src/adulting/schemas/` and ships as package data, so an installed `lint` finds its schemas without a repo checkout. No behaviour change.
+
+- **Characterised before the port.** New `tests/cli/test_lint_cli.py` (29 tests), run green against the old script first. It covers:
+  - **the command surface:** the exact summary line, the `path:line: message` format and exit codes, `--quiet`, explicit paths, a missing path, exit 2 on an empty `--schemas` dir, an alternative `--schemas` dir, the walk skipping dot-dirs, dot-files and `.bak`, and `--help-json`
+  - **threads, people and logs:** closed without `ended`, missing required fields, regex constraints, every cadence rule, `thread_entry` lines, and log thread resolution
+  - **notes:** thread and people wikilinks, and `ACTION:` description and assignee checks
+  - **records:** payments and hours block errors not covered elsewhere
+- **Two quirks pinned rather than fixed.** A thread body line like `- 2026-13 — ...` isn't checked at all: it fails `thread_entry`'s `applies_when`, so it is never reported as malformed. A wrong-kind or plain entry in a note's `threads:` is reported twice, once by the field regex and once by wikilink resolution.
+- **New `tests/unit/test_lint.py`** (18 tests). It covers the frontmatter parser (scalars, lists, lists of mappings), markdown tables with escaped pipes, and every constraint form. It also pins the prose-becomes-enum trap from 2026-09-07. Further tests: all 10 packaged schemas load, `applies_when`, value and cadence validation, schema matching by directory, filename and type, file discovery, cycle detection, and the vault-wide task and record-id checks.
+- **`ADULTING_HOME` is read on every call** (`vault_home()`), as in `commit`.
+- **Verified as an installed package.** A wheel built from the tree contains all 10 schemas and the entry point. Installed into a fresh venv, its `lint` validated a scratch vault correctly.
+- **Verified on the vault copy.** `lint` and `lint --quiet` produced identical output and exit codes, old vs new: 381 files, 7 violations. `--help-json` and the harvested corpus differ only in the default schemas path shown in `--schemas` help.
+- **Tooling:** `dev/manual-harvest` reads schemas from the new location and recognises `vault_home() / '...'` when listing a tool's vault paths. README points at `src/adulting/schemas/`.
+- `lint.py` coverage 79% → 96%. **319 passing.**
+
+## 2026-09-17 - refactor unit 1: `commit` is the first packaged command
+
+`commit` moves from a root script to `src/adulting/commit.py` and is installed as a console script (`[project.scripts]`). No behaviour change: `commit` never prompted, so nothing was removed.
+
+- **Characterised before the port.** 12 CLI tests added and run green against the old script first. They cover: a vault that isn't a directory, a vault that is a subdirectory of a repo (refused before `git add -A` can sweep in outside files), an empty message, and the exact `review`, `save` and `--dry-run` output. Also renames shown as `old -> new`, a repo with no commits yet, filenames with spaces and non-ASCII, a real pre-commit hook making `git commit` fail, and `--help-json`.
+- **Found dead code.** Current git emits a header even for an empty new file, so `review`'s `[new empty file: ...]` fallback is never reached. The test pins what actually happens. The fallback stays until the cleanup pass.
+- **`ADULTING_HOME` is read on every call** (`vault_home()`), not frozen at import, so functions can be unit-tested against a temp repo. The git argv is built per call for the same reason.
+- **New `tests/unit/test_commit.py`** (10 tests). Covers `describe`, `split_diff`, `cap_block`, and `status_entries` parsing modified, untracked and renamed paths from a real repo. Also `require_repo` accepting the root and refusing a subdirectory.
+- **Verified on the vault copy.** A note was edited, a person file deleted, and a non-ASCII file added in a new directory. Old and new then produced identical `review` output (40 lines), `save --dry-run` output, commit subject and author, and a clean tree afterwards. The only difference was the commit sha. `--help-json` is identical, and the harvested manual corpus differs only in two quoted source lines (`HOME` → `home`).
+- **Tooling follows ported commands.** `ci.sh` puts `.venv/bin` and the repo root on PATH and calls each tool by name. `dev/manual-harvest` finds a tool's source and executable in either place, and treats a `.py` module as Python.
+- `commit.py` coverage 90% → 96%. **272 passing.**
+
+## 2026-09-17 - refactor unit 0: shared modules move into the `adulting` package
+
+First step of the Python-only refactor (`stories/2026-09-17-python-package-refactor.md`, branch `refactor2`). The five shared modules every command imports now live in `src/adulting/`, so each command can be ported on its own without a `sys.path` hack pointing back at the repo root.
+
+- **Moved and renamed:** `_vault.py` → `vault.py`, `_argparse_helpjson.py` → `helpjson.py`, `_statement.py` → `statement.py`, `_statement_pdf.py` → `statement_pdf.py`, `_suggester.py` → `suggester.py`. Contents unchanged apart from imports and one docstring.
+- **Root scripts import `adulting.*`** and their `sys.path.insert` lines are gone. So are the ones in `eval/suggester/score.py` and `tests/unit/test_statement.py`. The scripts now run only under the project venv's Python. `~/bin/adulting` is unaffected.
+- **`statement_pdf.py` docstring is a raw string.** Its `\linewidth` raised a `SyntaxWarning` on every import.
+- **Verified identical on real data.** `dev/testbed compare` ran 15 commands against the vault copy, old code vs new: `hours report|list`, `payments statement|list`, `search stream|activity|overview`, `tasks list|next|--dry-run`, `threads list --all`, `people list --all`, `buffer list|tend`, `commit review`. Exit code, stdout, stderr and files touched were identical for all of them. `buffer suggest -y` differed only in its capture timestamp.
+- **New `tests/unit/test_vault.py`** (22 tests) pins the helpers that don't touch the vault, quirks included: `parse_frontmatter` ignores keys with capitals or digits, and an unclosed block reports no body. The later merge of the five frontmatter parsers can't change them unnoticed.
+- **Coverage now reports unimported package files.** `suggester.py` had silently dropped out of the report, making the total read 78%. It is 72%, with `suggester.py` at 0%.
+- **`ci.sh`** puts `.venv/bin` first on PATH and syntax-checks `src/adulting/*.py`.
+- **250 passing.**
+
+## 2026-09-17 - refactor harness: isolated tests, a vault testbed, coverage in CI
+
+Groundwork for the Python-only refactor. Production code was reaching the test suite, and nothing could safely compare the old implementation with the new one on real data.
+
+- **Two leaks, now closed.** Your shell resolves commands from `~/bin/adulting`, and `buffer flush`, `tasks add` and `notes` call sibling commands by name. The suite therefore ran production code whenever one command called another. Separately, the shell exports `ADULTING_HOME=~/vault`, so any child process that didn't override it wrote to the real vault.
+- **New `tests/harness.py`.** `isolated_env()` points HOME and ADULTING_HOME at chosen directories and refuses the production vault. It builds a PATH with this repo first and drops any directory holding another copy of the commands. `command_path()` fails if a command would resolve outside the repo.
+- **`tests/conftest.py` isolates the whole session.** `os.environ` is replaced before any test module is imported, so even code that reads the environment at import time can't see production. Every test then gets its own HOME and vault.
+- **Tripwire on the production vault.** Every adulting-managed file in `~/vault` is fingerprinted by size and mtime at session start and compared at the end. Any difference fails the run and names the files. Checked against a fake vault that a probe test wrote to.
+- **Tests split into `tests/unit/`, `tests/cli/` and `tests/dev/`**, plus 8 harness tests in `tests/unit/test_harness.py`.
+- **New `dev/testbed`.** It copies the vault's adulting content to `~/projects/adulting-testbed`. Secrets, `.agent`, `.obsidian`, `.git` and sync markers are never copied. The copy is kept read-only as `pristine/`, with a git-initialised working copy beside it. The reference implementation is extracted with `git archive 119f90b` rather than taken from `~/bin/adulting`, which is a commit behind. `run old|new`, `diff` and `compare` run either implementation against the copy and report what changed.
+- **Packaging skeleton:** `pyproject.toml` (setuptools, src layout, no runtime dependencies, `pytest` and `coverage` as dev extras) and an empty `src/adulting/`.
+- **`./ci.sh test` reports coverage.** It runs pytest under `coverage run` in the venv, and coverage follows the CLI subprocesses (`patch = ["subprocess"]`), so a command counts as covered whether a test imports it or runs it. A per-file table is printed and an HTML report written to `htmlcov/`. 72% overall. Lowest: `suggester` 0%, `people` 32%, `threads` 48%, `buffer` 55%.
+- **Refactor plan** in `stories/2026-09-17-python-package-refactor.md`: ranking, per-command loop, and decisions (deletes need `-y`, notes named by stem, no apps opened, `notes` keeps running `tasks` but warns on failure, command names unchanged).
+- **228 passing.**
+
+## 2026-09-17 - `tasks list` groups by thread
+
+`tasks list` ordered purely by priority, due and entry, so one thread's tasks were scattered through the table. It now sorts alphabetically by thread first.
+
+- **Sorts on the thread the table shows** — the first of a task's threads, case-insensitive — so the order matches what you see. Tasks with no thread sort last.
+- **Priority, due and entry still order tasks within each thread.**
+- **`tasks next` is unchanged.** It answers "what should I do now", which is a question across all threads, so it stays priority-first.
+- 1 new test. **220 passing.**
+
 ## 2026-09-11 - `search stream` — one chronology of the whole vault
 
 Every store answered its own question and nothing put them side by side: `hours list` showed hours, `tasks list` tasks, `search logs` logs. When a check-in reported four time entries and wrote one, nothing surfaced the gap. `stream` merges every dated record into a single time-ordered view.

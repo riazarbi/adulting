@@ -39,11 +39,6 @@ REPO = Path(__file__).resolve().parent.parent
 HARVEST = REPO / 'dev' / 'manual-harvest'
 PROMPT = REPO / 'dev' / 'tools-prompt.md'
 
-# Fields the agent's loader accepts. It calls DisallowUnknownFields, so
-# anything else here is a hard load error on the agent side.
-ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
-                  'prepend_args', 'forbidden_args', 'allow_user_args'}
-
 API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
 
 # Safety policy. Deliberately hand-maintained: these fields are the blast
@@ -56,26 +51,14 @@ API_KEY_VARS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
 #                   the same word used as a filter, which is an acceptable
 #                   trade for not letting an agent delete a note.
 POLICY = {
-    # Interactive paths that CANNOT be expressed here, because forbidden_args
-    # matches an argv element and these turn on an argument being *absent*:
-    #   hours log / payments log  with no thread -> interactive capture
-    #   threads new / people new  with fields missing -> prompts per field
-    # All four are needed non-interactively, so blocking the subcommand would
-    # remove the capability. They fail cleanly on EOF ("aborted"), and the
-    # generated descriptions state the requirement instead.
+    # No command prompts: a missing argument is an argparse usage error, and
+    # tests/cli/test_no_prompts.py runs every create and delete command on a
+    # terminal to prove it. So the only blocks here are destructive ones.
     'tasks': {},
-    # Every notes subcommand is unusable without a terminal, for one of two
-    # reasons, and several for both:
-    #   picker    reads a selection from stdin. Bash `read` takes EOF and
-    #             carries on with a garbage selection instead of failing.
-    #   external  launches an application — `last` and `edit` open Obsidian,
-    #             `nano` opens nano, and pdf/minutes/agenda `open -g` the
-    #             rendered PDF.
-    # That is the complete subcommand list, so nothing here is callable. The
-    # agent reads notes with read_file and rg instead.
-    'notes': {'forbidden_args': ['new', 'copy', 'strip', 'edit', 'nano',
-                                 'last', 'delete', 'cat', 'pdf', 'minutes',
-                                 'agenda']},
+    # notes no longer prompts or opens applications: a note is named by its
+    # stem and every subcommand runs from flags, so the agent can use them.
+    # delete is blocked for the same reason as threads and people.
+    'notes': {'forbidden_args': ['delete']},
     # Read-only by construction: it never writes, never prompts, never
     # launches anything. Nothing to block.
     'search': {'read_only': True},
@@ -86,9 +69,7 @@ POLICY = {
     # enough to be worth doing by hand.
     'hours': {'forbidden_args': ['rm']},
     'payments': {'forbidden_args': ['rm']},
-    # suggest prompts for accept/reject unless -y is passed. Nothing routes
-    # through it, so block it rather than rely on the flag being remembered.
-    'buffer': {'forbidden_args': ['suggest']},
+    'buffer': {},
     'lint': {'read_only': True},
     'commit': {},
 }

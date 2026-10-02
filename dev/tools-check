@@ -12,6 +12,9 @@ Checks, all fatal:
   scope      exactly one file per operator tool; no extras, none missing
   content    description non-empty, names every subcommand the tool reports,
              and mentions each of the tool's own flags
+  truth      no description claims a command prompts or reads stdin. Nothing
+             here does, and a stale claim that one does teaches the agent to
+             avoid a command that is safe to call
   hygiene    no absolute filesystem paths baked into a description
   policy     forbidden_args name real subcommands of that tool, and the
              description declares exactly those blocks — so what the agent
@@ -34,6 +37,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / 'dev'))
+from surface import interactivity_claims  # noqa: E402
 
 ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
                   'prepend_args', 'forbidden_args', 'allow_user_args'}
@@ -42,7 +47,6 @@ LIST_FIELDS = {'prepend_args', 'forbidden_args'}
 
 # Matches an absolute path that would have come from the build machine.
 ABS_PATH_RE = re.compile(r'(?<![\w/])/(?:Users|home|private|var|opt)/\S+')
-
 
 def operator_tools(corpus_json=None):
     """The harvested view of the repo, so scope has one definition."""
@@ -111,6 +115,10 @@ def main():
         for m in ABS_PATH_RE.findall(desc):
             errors.append(f"{path.name}: description leaks a build-machine "
                           f"path: {m}")
+
+        for said in interactivity_claims(desc):
+            errors.append(f"{path.name}: description says the command is "
+                          f"interactive, and none of them are: {said!r}")
 
         manifest = manifests.get(tool, {})
         subs = [s['name'] for s in manifest.get('subcommands', [])]

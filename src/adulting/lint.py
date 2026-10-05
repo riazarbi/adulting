@@ -53,6 +53,7 @@ def parse_frontmatter(text):
 
     Handles:
       - flat scalars `key: value` (with surrounding quotes stripped)
+      - one-line lists `key: [a, "b"]`, read as vault.parse_block reads them
       - list of scalars (each line `  - "value"`)
       - list of mappings (each list item with `  key: val` lines)
     """
@@ -77,7 +78,8 @@ def parse_frontmatter(text):
             # advance past the block — _read_block_children returns end index
             i = mode
         else:
-            fm[key] = unquote(val)
+            items = V.flow_list(val)
+            fm[key] = unquote(val) if items is None else items
             i += 1
     return fm, body_start
 
@@ -180,8 +182,7 @@ def parse_schema(path):
         'name': fm.get('schema'),
         'scope': fm.get('scope', 'file'),
         'applies_when': fm.get('applies_when', ''),
-        'filename': fm.get('filename', ''),
-        'directory': fm.get('directory', ''),  # optional dir scope
+        'where': fm.get('path', ''),  # where the file lives: a vault.LAYOUT pattern
         'shape': fm.get('shape', ''),
         'fields': {},
         'path': str(path),
@@ -316,24 +317,17 @@ def wikilink_exists(target):
 # ---------- file validation ----------
 
 def find_file_schema(path, fm, schemas):
-    """Match by filename + applies_when + (new) directory scope."""
+    """The schema whose `path:` pattern the file's place in the vault
+    matches and whose `applies_when` its frontmatter satisfies."""
     # `V.rel` resolves both sides: ADULTING_HOME is often reached through a
     # symlink (/tmp and /var are symlinks on macOS, and a synced vault is
     # frequently one), and an unresolved file under a resolved home is
     # relative to nothing, which used to match no schema at all.
-    rel_str = V.rel(path)
+    rel_str = Path(V.rel(path)).as_posix()
     for s in schemas.values():
         if s['scope'] != 'file':
             continue
-        # Directory scope (if set)
-        sdir = s.get('directory', '')
-        if sdir:
-            top = rel_str.split(os.sep, 1)[0]
-            if top != sdir:
-                continue
-        # Filename pattern
-        fpattern = s.get('filename')
-        if fpattern and not re.search(fpattern, path.name):
+        if not s['where'] or not V.layout_regex(s['where']).match(rel_str):
             continue
         applies = s.get('applies_when')
         if applies and not eval_when(applies, fm):
@@ -357,8 +351,18 @@ def validate_file(path, schemas, registry=None):
 
     schema = find_file_schema(path, fm, schemas)
     if not schema:
-        yield (0, "no matching file schema")
+        yield (0, "no matching file schema; is it where the vault layout puts it?")
         return
+
+    # A file in a thread's folder belongs to that thread: a log's or record
+    # file's `thread`, or the first of a note's `threads`, names the folder.
+    home = V.thread_of(path)
+    if home and schema['name'] != 'thread':
+        named = V.note_threads(fm)
+        if named and named[0] != home:
+            yield (0, f"filed under {home} but its first thread is {named[0]}")
+    if registry is not None and schema['name'].startswith('note_'):
+        registry.setdefault('note_stems', {}).setdefault(path.stem, []).append((path, 0))
 
     # Required fields.
     for fname, spec in schema['fields'].items():
@@ -580,6 +584,12 @@ def cross_check_record_ids(registry):
     yield from report_duplicates(registry.get('record_ids', {}), 'record id')
 
 
+def cross_check_note_stems(registry):
+    """A note is named by its stem alone, wherever it is filed, so no two
+    notes may share one."""
+    yield from report_duplicates(registry.get('note_stems', {}), 'note stem')
+
+
 # ---------- task_anchor: per-line + vault-wide rules ----------
 
 def _task_anchor_per_line(captures):
@@ -693,7 +703,10 @@ def _rotate_to_min(seq):
 # ---------- file discovery ----------
 
 def discover_files():
-    for sub in ('notes', 'threads', 'people', 'logs', 'hours', 'payments'):
+    # notes/, logs/, hours/ and payments/ at the root are where those files
+    # lived before they moved into thread folders. They are walked so that a
+    # file left behind is reported, not silently ignored.
+    for sub in ('threads', 'people', 'notes', 'logs', 'hours', 'payments'):
         d = V.vault_home() / sub
         if not d.is_dir():
             continue
@@ -741,6 +754,11 @@ def main():
             print(f"{V.full(path)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_record_ids(registry):
+        total += 1
+        if not args.quiet:
+            print(f"{V.full(path)}:{line_no}: {msg}")
+
+    for path, line_no, msg in cross_check_note_stems(registry):
         total += 1
         if not args.quiet:
             print(f"{V.full(path)}:{line_no}: {msg}")

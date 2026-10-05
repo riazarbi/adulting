@@ -4,12 +4,12 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 
 ## Conceptual model
 
-- **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in `~/vault/notes/` and have YAML frontmatter (topic, type, thread, timestamp, etc.) plus a free-form body.
-- **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). Threads live in `~/vault/threads/{Projects,Processes,Topics}/`.
+- **Note** — a persisted piece of information. The workhorse object: meeting records, correspondence, reports, ad-hoc logs, research. Notes live in the folder of the first thread they name, `~/vault/threads/<Kind>/<Name>/notes/`, and have YAML frontmatter (topic, type, threads, timestamp, etc.) plus a free-form body.
+- **Thread** — an organising lens for notes. Three kinds: `project` (bounded), `process` (ongoing), `topic` (interest area / catchall). A thread is a file, `~/vault/threads/<Kind>/<Name>.md` (`<Kind>` is Projects, Processes or Topics), and a folder beside it, `~/vault/threads/<Kind>/<Name>/`, that holds everything belonging to the thread: its notes, logs, hours and payments. Closing a thread is setting `status: closed`; nothing moves.
 - **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
-- **Time entry** — a billable (or unbillable) session of work on a thread. Entries live in `~/vault/hours/` as JSON inside a ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker format renders them natively.
-- **Payment** — money received against a thread. Records live in `~/vault/payments/`, same shape as hours.
-- **Log** — a per-thread, per-day file at `~/vault/logs/<Kind>/<Name>/<date>.md`, written by `buffer flush`. Its body is a list of statements: `TEXT:` observations, `REF:` pointers to other vault files, and the `TASK:`/`DONE:` anchors that `tasks` manages.
+- **Time entry** — a billable (or unbillable) session of work on a thread. Entries live in the thread's `hours.md` as JSON inside a ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker format renders them natively.
+- **Payment** — money received against a thread. Records live in the thread's `payments.md`, same shape as hours.
+- **Log** — a per-thread, per-day file at `~/vault/threads/<Kind>/<Name>/logs/<date>.md`, written by `buffer flush`. Its body is a list of statements: `TEXT:` observations, `REF:` pointers to other vault files, and the `TASK:`/`DONE:` anchors that `tasks` manages.
 - **Action** — a task. Notes and logs contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source files are the only store — there is no backend.
 
 ### Notes, logs and hours
@@ -82,7 +82,7 @@ Nothing to install — task state lives in source notes themselves. The vault lo
 
 ## notes
 
-Markdown note taker. Notes live in `~/vault/notes/` as `<timestamp>.md` files with YAML frontmatter and a free-form body.
+Markdown note taker. Notes live in their first thread's folder, `~/vault/threads/<Kind>/<Name>/notes/`, as `<timestamp>.md` files with YAML frontmatter and a free-form body. The stem is unique across the vault, so a note is named by its stem alone.
 
 ### Frontmatter
 
@@ -132,7 +132,6 @@ Skeleton management for thread files. Daily-review / tail / overdue tooling will
 | Command                              | What it does                                                  |
 |--------------------------------------|---------------------------------------------------------------|
 | `threads new --name N --kind K --category C [--currency X --rate R]` | Create a thread file; name, kind and category required |
-| `threads delete <thread> -y`         | Delete a thread; refuses without `-y`                         |
 | `threads list [--json]`              | List all threads (kind, status, category, name)               |
 | `threads show <thread> [--json]`     | Print frontmatter + body (or JSON of frontmatter)             |
 
@@ -153,11 +152,11 @@ Same skeleton shape, applied to people files.
 
 ## tasks
 
-Bridge from `ACTION:` lines in notes/logs into anchored `TASK:` lines, plus per-anchor mutations. Source notes are the entire store — there is no backend.
+Bridge from `ACTION:` lines in notes and logs into anchored `TASK:` lines, plus per-anchor mutations. Source notes are the entire store — there is no backend.
 
 | Command                  | What it does                                                                                |
 |--------------------------|---------------------------------------------------------------------------------------------|
-| `tasks`                  | Walk notes/logs, validate every `ACTION:` line, ingest valid ones (rewrite in place to `TASK:` anchors with a fresh uuid and `entry:<today>`) |
+| `tasks`                  | Walk every thread's notes and logs, validate every `ACTION:` line, ingest valid ones (rewrite in place to `TASK:` anchors with a fresh uuid and `entry:<today>`) |
 | `tasks --dry-run`        | Show what would be ingested without writing                                                 |
 | `tasks --quiet`          | Suppress per-action output                                                                  |
 | `tasks <subcommand>`     | See `tasks --help` for `done`, `set-{description,assignee,due,scheduled,priority}`, `add-depends`, `rm-depends`, `list`, `next`, `show` |
@@ -177,7 +176,7 @@ Failures are printed; the source line is left as `ACTION:` so you can fix and re
 
 ## hours
 
-Consulting time tracking. One file per thread at `~/vault/hours/<Kind>/<Thread>.md`, holding a ` ```simple-time-tracker ` fenced JSON block in the format Obsidian's Super Simple Time Tracker plugin reads — so entries render natively and you can build your own views over the raw data.
+Consulting time tracking. One file per thread at `~/vault/threads/<Kind>/<Thread>/hours.md`, holding a ` ```simple-time-tracker ` fenced JSON block in the format Obsidian's Super Simple Time Tracker plugin reads — so entries render natively and you can build your own views over the raw data.
 
 | Command | What it does |
 |---|---|
@@ -236,7 +235,7 @@ The frontmatter `currency` and the per-entry `currency` are both optional: a fil
 
 ## payments
 
-Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thread>.md`, holding an ` ```adulting-payments ` fenced JSON block — same structure as `hours`, but its own fence since no external plugin is involved.
+Money received, per thread. One file per thread at `~/vault/threads/<Kind>/<Thread>/payments.md`, holding an ` ```adulting-payments ` fenced JSON block — same structure as `hours`, but its own fence since no external plugin is involved.
 
 | Command | What it does |
 |---|---|
@@ -250,7 +249,7 @@ Money received, per thread. One file per thread at `~/vault/payments/<Kind>/<Thr
 
 `log` flags: `-c/--currency`, `-d/--date`, `-t/--time`, `-a/--account`, `-n/--note`.
 
-`statement` is the payoff: it reads the `hours/` side for billed and the `payments/` side for received, and reports the difference per thread and currency. It never sums across currencies.
+`statement` is the payoff: it reads each thread's `hours.md` for billed and `payments.md` for received, and reports the difference per thread and currency. It never sums across currencies.
 
 Amounts accept `47300`, `47300.50`, or `47,300.50`, and must be positive — a refund is not a negative payment. All money arithmetic uses `decimal.Decimal`, so `hours report` and `payments statement` agree exactly rather than drifting by float error.
 
@@ -313,24 +312,22 @@ Schemas live in `src/adulting/schemas/` as markdown files with YAML frontmatter 
 ├── .obsidian/                  # Obsidian vault config
 ├── .adulting/                  # operational state (hidden, like .git or .obsidian)
 │   └── config.yaml             # vault-wide config (owner, etc.)
-├── notes/                      # markdown notes (one file per note)
 ├── threads/
 │   ├── Projects/               # bounded efforts
-│   ├── Processes/              # ongoing operations
-│   └── Topics/                 # interest areas / catchalls
+│   │   ├── SGB.md              # the thread file
+│   │   └── SGB/                # everything that belongs to the thread
+│   │       ├── notes/          # its notes, <timestamp>.md
+│   │       ├── logs/           # its daily logs, <YYYY-MM-DD>.md
+│   │       ├── hours.md        # its billable time
+│   │       └── payments.md     # money received against it
+│   ├── Processes/              # ongoing operations (same shape)
+│   └── Topics/                 # interest areas / catchalls (same shape)
 ├── people/                     # people files (relationship link targets)
-├── hours/                      # billable time, one file per thread
-│   ├── Projects/
-│   ├── Processes/
-│   └── Topics/
-├── payments/                   # money received, one file per thread
-│   ├── Projects/
-│   ├── Processes/
-│   └── Topics/
+├── assets/                     # images and attachments, linked by name
 └── buffer.md                   # quick-capture inbox (processed by an agent ritual; not yet automated)
 ```
 
-The visible top level (what Obsidian shows in its sidebar) is only user content: notes, threads, people, logs, and the buffer. Tooling state lives in the hidden `.adulting/` subdir, the same pattern `.git/` and `.obsidian/` use in the same directory.
+The visible top level (what Obsidian shows in its sidebar) is only user content: threads, people, assets and the buffer. Everything about one thread is in one place: the thread file and the folder beside it. A note in several threads is filed under the first it names; its `threads:` frontmatter says which threads it belongs to. People stay global, because the people who matter most span threads. Tooling state lives in the hidden `.adulting/` subdir, the same pattern `.git/` and `.obsidian/` use in the same directory.
 
 # Schemas
 
@@ -339,15 +336,15 @@ The visible top level (what Obsidian shows in its sidebar) is only user content:
 | `note_meeting.md`             | Meeting notes                                                   |
 | `note_correspondence.md`      | Correspondence notes                                            |
 | `note_simple.md`              | Workshop / Report / Log / Research / Recipe notes                |
-| `log.md`                      | Per-thread per-day log files in `logs/`                         |
-| `thread.md`                   | Thread files in `threads/{Projects,Processes,Topics}/`          |
+| `log.md`                      | Per-day log files in a thread's `logs/`                         |
+| `thread.md`                   | Thread files, `threads/<Kind>/<Name>.md`                        |
 | `person.md`                   | Person files in `people/`                                       |
 | `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |
-| `task_anchor.md`              | `TASK:`/`DONE:` lines in notes/logs (uuid, attrs, depends)      |
-| `hours_file.md`                | Time files in `hours/` (tracker block, entry objects)            |
-| `payments_file.md`            | Payments files in `payments/` (payments block, payment objects) |
+| `task_anchor.md`              | `TASK:`/`DONE:` lines in notes and logs (uuid, attrs, depends)  |
+| `hours_file.md`               | A thread's `hours.md` (tracker block, entry objects)            |
+| `payments_file.md`            | A thread's `payments.md` (payments block, payment objects)      |
 
-Each schema is a markdown file with YAML frontmatter (`schema`, `scope`, `directory`, `filename`, optionally `applies_when`) and a `## Fields` table describing required fields, types, and constraints. Pipes inside cells (e.g. inside a regex) must be escaped as `\|`.
+Each schema is a markdown file with YAML frontmatter (`schema`, `scope`, `path` — where its files live, one of the patterns in `vault.LAYOUT` — optionally `applies_when`) and a `## Fields` table describing required fields, types, and constraints. Pipes inside cells (e.g. inside a regex) must be escaped as `\|`.
 
 Constraint cell DSL (single cell, semicolon-separated):
 - `regex=<pattern>` — value must match
@@ -396,7 +393,7 @@ What's done:
 
 What remains:
 - **Topic-discoverable filenames.** Notes are timestamp-named (`2024-04-29-09-03-15.md`); the file picker is opaque without an `aliases:` field. Adding `aliases: [<topic>]` in frontmatter makes Cmd-O find notes by topic without renaming files. Unimplemented.
-- **Compiled views.** A future `threads tail` / `report` / `overdue` should query notes data, not thread bodies. Skeleton today is just `new` / `delete` / `list` / `show`.
+- **Compiled views.** A future `threads tail` / `report` / `overdue` should query notes data, not thread bodies. Skeleton today is just `new` / `list` / `show`.
 
 # Known issues
 

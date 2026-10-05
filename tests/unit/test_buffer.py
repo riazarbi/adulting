@@ -61,11 +61,15 @@ def test_regroup_lines_orders_groups_then_unknowns_then_unparsed():
         "junk"]
 
 
+STEM = "2026-09-10-14-30-00"
+
+
 @pytest.fixture
 def buffer_home():
     h = B.V.vault_home()
-    for rel in ("threads/Projects/SGB.md", "people/Riaz Arbi.md", "notes/n.md",
-                "hours/Projects/SGB.md"):
+    for rel in ("threads/Projects/SGB.md", "people/Riaz Arbi.md",
+                f"threads/Projects/SGB/notes/{STEM}.md", "threads/Projects/SGB/hours.md",
+                "threads/Projects/SGB/payments.md", "threads/Projects/SGB/logs/2026-09-10.md"):
         (h / rel).parent.mkdir(parents=True, exist_ok=True)
         (h / rel).write_text("x")
     return h
@@ -73,11 +77,35 @@ def buffer_home():
 
 def test_resolvers(buffer_home):
     assert B.canonical_thread("[[Projects/SGB]]") == "Projects/SGB"
-    assert B.ref_target_resolves("notes/n") == buffer_home / "notes/n.md"
+    assert B.ref_target_resolves(STEM) == buffer_home / f"threads/Projects/SGB/notes/{STEM}.md"
     assert B.ref_target_resolves("Projects/SGB") == buffer_home / "threads/Projects/SGB.md"
-    assert B.ref_target_resolves("hours/Projects/SGB") == buffer_home / "hours/Projects/SGB.md"
-    for bad in ("", "notes/nope", "assets/x"):
+    assert B.ref_target_resolves("Projects/SGB/hours") == buffer_home / "threads/Projects/SGB/hours.md"
+    for bad in ("", "nope", "assets/x"):
         assert B.ref_target_resolves(bad) is None, bad
+
+
+def test_every_ref_target_form_resolves_and_the_old_forms_do_not(buffer_home):
+    """A REF target names a thread, a file in a thread's folder, a note by
+    its bare stem, or a person. The pre-thread-folder forms (notes/<stem>,
+    hours/<Kind>/<Name>, ...) name folders that no longer exist, and do not
+    resolve even if a leftover file is still there."""
+    sgb = buffer_home / "threads/Projects/SGB"
+    for target, path in (
+            ("Projects/SGB", buffer_home / "threads/Projects/SGB.md"),
+            ("Projects/SGB/hours", sgb / "hours.md"),
+            ("Projects/SGB/payments", sgb / "payments.md"),
+            ("Projects/SGB/logs/2026-09-10", sgb / "logs/2026-09-10.md"),
+            (f"Projects/SGB/notes/{STEM}", sgb / f"notes/{STEM}.md"),
+            (STEM, sgb / f"notes/{STEM}.md"),
+            ("people/Riaz Arbi", buffer_home / "people/Riaz Arbi.md")):
+        assert B.ref_target_resolves(target) == path, target
+    for rel in (f"notes/{STEM}.md", "hours/Projects/SGB.md", "payments/Projects/SGB.md",
+                "logs/Projects/SGB/2026-09-10.md"):
+        (buffer_home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (buffer_home / rel).write_text("x")
+    for old in (f"notes/{STEM}", "hours/Projects/SGB", "payments/Projects/SGB",
+                "logs/Projects/SGB/2026-09-10"):
+        assert B.ref_target_resolves(old) is None, old
 
 
 def entry(line):
@@ -93,7 +121,7 @@ def test_validate_entry(buffer_home):
         "timestamp '2026-09-99T15:00:00' is not YYYY-MM-DDTHH:MM:SS",
         "ACTION assignee 'Ghost' does not resolve to people/Ghost.md"]
     assert list(B.validate_entry(entry(
-        "- [[Projects/SGB]] REF: [[notes/n]] x <!--2026-09-10T15:00:00 due:2026-09-20-->"))) == [
+        "- [[Projects/SGB]] REF: [[2026-09-10-14-30-00]] x <!--2026-09-10T15:00:00 due:2026-09-20-->"))) == [
         "REF entries do not accept attrs; got 'due:2026-09-20'"]
 
 
@@ -126,9 +154,9 @@ def test_a_bad_input_raises_and_writes_nothing(buffer_home, capsys):
 
 
 def test_add_ref_is_best_effort_and_silent(buffer_home, capsys):
-    assert B.add_ref("SGB", "notes/missing", "x") is None
-    assert B.add_ref("SGB", "notes/n", "x", "2026-08-04").startswith(
-        "- [[Projects/SGB]] REF: [[notes/n]] x <!--2026-08-04T")
+    assert B.add_ref("SGB", "missing", "x") is None
+    assert B.add_ref("SGB", STEM, "x", "2026-08-04").startswith(
+        f"- [[Projects/SGB]] REF: [[{STEM}]] x <!--2026-08-04T")
     assert capsys.readouterr() == ("", "")
 
 

@@ -34,8 +34,11 @@ HAS_PANDOC = shutil.which("pandoc") is not None and shutil.which("xelatex") is n
 @pytest.fixture
 def render_vault(vault):
     (vault.home / ".adulting" / "config.yaml").write_text('owner: "Riaz Arbi"\n', encoding="utf-8")
+    # The fixtures are filed under the one thread any of them names.
+    folder = vault.home / "threads" / "Projects" / "SGB" / "notes"
+    folder.mkdir(parents=True)
     for note in NOTES:
-        shutil.copy(note, vault.home / "notes" / note.name)
+        shutil.copy(note, folder / note.name)
     return vault
 
 
@@ -102,7 +105,7 @@ def test_renders_default_to_downloads(render_vault):
 def test_render_of_a_missing_note(render_vault):
     r = render_vault.run("minutes", "nope", cli="notes")
     assert r.returncode == 1
-    assert r.stderr == f"notes: error: no note 'nope' in {render_vault.home / 'notes'}\n"
+    assert r.stderr == "notes: error: no note 'nope'\n"
 
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="needs pandoc and xelatex")

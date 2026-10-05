@@ -1,15 +1,14 @@
 ---
 schema: hours_file
 scope: file
-directory: hours
-filename: ^[^.]+\.md$
+path: threads/<Kind>/<Name>/hours.md
 ---
 
 # Hours file
 
-Billable time for one thread. One file per thread, living at
-`~/vault/hours/{Projects,Processes,Topics}/<Thread>.md` — mirroring the
-`threads/` layout so that thread → path is a pure function.
+Billable time for one thread. One file per thread, `hours.md` in the
+thread's folder: `~/vault/threads/<Kind>/<Name>/hours.md`, beside the
+thread file, so that thread → path is a pure function.
 
 The body carries exactly one ` ```simple-time-tracker ` fenced block containing
 JSON in the shape Obsidian's Super Simple Time Tracker plugin reads, so the
@@ -48,6 +47,7 @@ Each element of `entries` is one logged session.
 - `thread` must be a wikilink to `Projects/X`, `Processes/X`, or `Topics/X`, and
   must resolve to an existing thread file. `lint` enforces resolution for any
   scalar `thread` field, so the constraint cell is deliberately empty.
+  It must also name the thread whose folder the file is in; `lint` checks.
 
 - `name` holds the description, not a label. It is the only field the plugin
   renders, and these descriptions are invoice line items.

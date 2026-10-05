@@ -63,7 +63,7 @@ def test_log_lines(hours_vault):
 def test_log_errors_write_nothing(hours_vault, argv, message):
     r = hours_vault.run("log", *argv, cli="hours")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message)
-    assert list((hours_vault.home / "hours").rglob("*.md")) == []
+    assert list(hours_vault.home.rglob("hours.md")) == []
 
 
 def test_log_defaults_are_60_minutes_and_2500(vault):
@@ -93,7 +93,7 @@ def test_ambiguous_thread_fails(vault):
     r = vault.run("log", "Dup", "x", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "hours: error: ambiguous thread 'Dup'; matches: Projects/Dup, Processes/Dup\n"
-    assert list((vault.home / "hours").rglob("*.md")) == []
+    assert list(vault.home.rglob("hours.md")) == []
 
 
 def test_qualified_path_disambiguates(vault):
@@ -110,7 +110,7 @@ def test_thread_resolution_is_case_sensitive(vault):
     r = vault.run("log", "Arbi family trust", "x", cli="hours")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "hours: error: thread 'Arbi family trust' does not resolve to a thread file\n"
-    assert list((vault.home / "hours").rglob("*.md")) == []
+    assert list(vault.home.rglob("hours.md")) == []
 
 
 def test_currency_flag_satisfies_missing_thread_currency(vault):
@@ -155,7 +155,7 @@ def test_log_without_currency_records_unbilled(vault):
 def test_unbilled_hours_file_omits_currency_frontmatter(vault):
     vault.write_thread("Topics", "Reading")
     vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
-    assert "currency:" not in vault.read("hours/Topics/Reading.md")
+    assert "currency:" not in vault.read("threads/Topics/Reading/hours.md")
 
 
 def test_rate_without_currency_is_refused(vault):
@@ -167,7 +167,7 @@ def test_rate_without_currency_is_refused(vault):
     assert r.stderr == ("hours: error: --rate needs a currency\n"
                         "  pass --currency, or set `currency:` on the thread; "
                         "omit --rate to log the time as unbilled\n")
-    assert list((vault.home / "hours").rglob("*.md")) == []
+    assert list(vault.home.rglob("hours.md")) == []
 
 
 def test_edit_an_unbilled_entry(vault):
@@ -274,8 +274,8 @@ def test_show_text_and_missing(hours_vault, logged):
 def stored(vault, entry_id):
     """The entry as it sits in the hours file."""
     for kind in ("Projects", "Processes", "Topics"):
-        for f in (vault.home / "hours" / kind).glob("*.md"):
-            for e in vault.entries(kind, f.stem):
+        for f in (vault.home / "threads" / kind).glob("*/hours.md"):
+            for e in vault.entries(kind, f.parent.name):
                 if e["id"] == entry_id:
                     return e
 
@@ -298,7 +298,7 @@ def test_edit_moves_the_entry_and_keeps_its_duration(hours_vault, logged):
     assert (e["startTime"], e["endTime"], e["rate"], e["currency"]) == (
         "2026-08-07T08:00:00.000Z", "2026-08-07T09:30:00.000Z", 3000, "USD")
     # The file keeps its original ZAR frontmatter; the entry carries USD.
-    assert "currency: ZAR" in hours_vault.read("hours/Projects/SANA.md")
+    assert "currency: ZAR" in hours_vault.read("threads/Projects/SANA/hours.md")
 
 
 def test_edit_errors(hours_vault, logged):
@@ -353,7 +353,7 @@ def test_log_writes_a_buffer_ref(vault):
     vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
     vault.run("log", "Projects/SANA", "Reviewed the finance pack", "-m", "90",
               cli="hours")
-    assert re.fullmatch(r"- \[\[Projects/SANA\]\] REF: \[\[hours/Projects/SANA\]\] "
+    assert re.fullmatch(r"- \[\[Projects/SANA\]\] REF: \[\[Projects/SANA/hours\]\] "
                         r"1h 30m Reviewed the finance pack \([0-9a-f]{8}\) "
                         r"<!--\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d-->\n",
                         vault.read("buffer.md"))
@@ -364,9 +364,9 @@ def test_the_ref_survives_a_flush_into_the_log(vault):
     vault.run("log", "Projects/SANA", "Reviewed the finance pack", "-m", "90",
               cli="hours")
     assert vault.run("flush", cli="buffer").returncode == 0
-    logs = list((vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    logs = list((vault.home / "threads" / "Projects" / "SANA" / "logs").glob("*.md"))
     assert logs, "no log file was written"
-    assert "REF: [[hours/Projects/SANA]]" in logs[0].read_text()
+    assert "REF: [[Projects/SANA/hours]]" in logs[0].read_text()
 
 
 def test_a_failing_buffer_never_breaks_the_hours_write(vault, monkeypatch):
@@ -391,9 +391,9 @@ def test_backdated_entry_refs_into_the_right_days_log(vault):
     vault.run("log", "Projects/SANA", "Backdated work", "-m", "90",
               "-d", "2026-08-04", cli="hours")
     vault.run("flush", cli="buffer")
-    day = vault.home / "logs" / "Projects" / "SANA" / "2026-08-04.md"
+    day = vault.log_path("Projects/SANA", "2026-08-04")
     assert day.is_file(), sorted(
-        p.name for p in (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+        p.name for p in (vault.home / "threads" / "Projects" / "SANA" / "logs").glob("*.md"))
     assert "Backdated work" in day.read_text()
 
 
@@ -405,7 +405,7 @@ def test_entries_on_different_days_split_across_log_files(vault):
               cli="hours")
     vault.run("flush", cli="buffer")
     days = sorted(p.stem for p in
-                  (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+                  (vault.home / "threads" / "Projects" / "SANA" / "logs").glob("*.md"))
     assert days == ["2026-08-01", "2026-08-09"], days
 
 
@@ -445,7 +445,7 @@ def test_a_thread_rate_that_is_not_a_whole_number_is_refused(vault):
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == (f"hours: error: rate in {p} "
                         "must be a whole number; got '1,000'\n")
-    assert list((vault.home / "hours").rglob("*.md")) == []
+    assert list(vault.home.rglob("hours.md")) == []
 
 
 def test_a_config_rate_that_is_not_a_whole_number_is_refused(vault):
@@ -480,7 +480,7 @@ def test_an_unbilled_entry_writes_a_buffer_ref_too(vault):
     """The REF is written for every entry, billed or not."""
     vault.write_thread("Topics", "Wellness")
     vault.run("log", "Topics/Wellness", "5k run", "-m", "30", cli="hours")
-    assert re.fullmatch(r"- \[\[Topics/Wellness\]\] REF: \[\[hours/Topics/Wellness\]\] "
+    assert re.fullmatch(r"- \[\[Topics/Wellness\]\] REF: \[\[Topics/Wellness/hours\]\] "
                         r"0h 30m 5k run \([0-9a-f]{8}\) <!--\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d-->\n",
                         vault.read("buffer.md"))
 

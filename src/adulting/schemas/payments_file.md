@@ -1,15 +1,14 @@
 ---
 schema: payments_file
 scope: file
-directory: payments
-filename: ^[^.]+\.md$
+path: threads/<Kind>/<Name>/payments.md
 ---
 
 # Payments file
 
-Money received against one thread. One file per thread, at
-`~/vault/payments/{Projects,Processes,Topics}/<Thread>.md` — mirroring the
-`threads/` layout, the same way `hours/` does.
+Money received against one thread. One file per thread, `payments.md` in
+the thread's folder: `~/vault/threads/<Kind>/<Name>/payments.md`, beside
+`hours.md`.
 
 The body carries exactly one ` ```adulting-payments ` fenced block containing
 JSON. Unlike `hours`, there is no external plugin to be compatible with, so the
@@ -46,6 +45,7 @@ greppable in the same way. Written and maintained by the `payments` CLI.
 - `thread` must be a wikilink to `Projects/X`, `Processes/X`, or `Topics/X`, and
   must resolve. `lint` enforces resolution for any scalar `thread` field, so the
   constraint cell is deliberately empty.
+  It must also name the thread whose folder the file is in; `lint` checks.
 - `id` shares one namespace with `hours` entry ids — an id is never reused
   across the two tools, and `lint` checks uniqueness across both.
 - `amount` is stored as a JSON number but is only ever *computed* with

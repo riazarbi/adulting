@@ -69,14 +69,14 @@ def search_home():
     for rel, text in {
         "threads/Processes/SGB.md": "---\nstatus: open\nstarted: 2026-01-05\n---\n",
         "people/Riaz Arbi.md": "---\nstatus: open\nstarted: bad\n---\n",
-        "notes/2026-08-22-09-00-00.md":
+        "threads/Processes/SGB/notes/2026-08-22-09-00-00.md":
             '---\ntopic: Agenda\ntype: Meeting\nthreads:\n  - "[[Processes/SGB]]"\n'
             "timestamp: 2026-08-27-16-30-00\n---\n\nTASK: Chase <!--aaaa1111 entry:2026-08-27-->\n",
-        "notes/2026-08-23-09-00-00.md": "no frontmatter\n",
-        "logs/Processes/SGB/2026-08-28.md":
-            "---\ndate: 2026-08-28\ntype: Log\n---\n\nTEXT: one\nREF: [[hours/Processes/SGB]] x\nACTION: two\n",
+        "threads/Processes/SGB/notes/2026-08-23-09-00-00.md": "no frontmatter\n",
+        "threads/Processes/SGB/logs/2026-08-28.md":
+            "---\ndate: 2026-08-28\ntype: Log\n---\n\nTEXT: one\nREF: [[Processes/SGB/hours]] x\nACTION: two\n",
         "buffer.md": "- [[Processes/SGB]] TEXT: Pending <!--2026-08-30T10:05:00-->\n"
-                     "- [[Processes/SGB]] REF: [[hours/Processes/SGB]] 1h <!--2026-08-30T10:06:00-->\n"
+                     "- [[Processes/SGB]] REF: [[Processes/SGB/hours]] 1h <!--2026-08-30T10:06:00-->\n"
                      "not a buffer line\n",
     }.items():
         (h / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -129,8 +129,8 @@ def test_hours_in_window_stops_on_a_malformed_time(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["search"])
     V = S.V
     home = V.vault_home()
-    (home / "hours" / "Projects").mkdir(parents=True)
-    (home / "hours" / "Projects" / "Alpha.md").write_text(
+    (home / "threads" / "Projects" / "Alpha").mkdir(parents=True)
+    (home / "threads" / "Projects" / "Alpha" / "hours.md").write_text(
         '---\nthread: "[[Projects/Alpha]]"\n---\n\n```simple-time-tracker\n'
         '{"entries": [{"id": "aaaa0001", "startTime": "9am", "endTime": "2026-08-26T10:00:00.000Z"},\n'
         '{"id": "aaaa0002", "startTime": "2026-08-26T09:00:00.000Z", "endTime": "2026-08-26T10:00:00.000Z"}]}\n```\n')

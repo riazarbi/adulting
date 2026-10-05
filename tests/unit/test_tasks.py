@@ -40,12 +40,12 @@ def test_parse_anchor_rejects_other_lines(line):
 def tasks_home():
     h = T.V.vault_home()
     files = {
-        "notes/2026-01-01-00-00-00.md": '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\n'
+        "threads/Projects/SGB/notes/2026-01-01-00-00-00.md": '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\n'
                                         "TASK: one <!--aaaa0001 entry:2026-01-01-->\nplain\n",
-        "notes/.hidden.md": "TASK: hidden <!--bbbb0001 entry:2026-01-01-->\n",
-        "logs/Projects/SGB/2026-01-02.md": '---\nthread: "[[Projects/SGB]]"\n---\n\n'
+        "threads/Projects/SGB/notes/.hidden.md": "TASK: hidden <!--bbbb0001 entry:2026-01-01-->\n",
+        "threads/Projects/SGB/logs/2026-01-02.md": '---\nthread: "[[Projects/SGB]]"\n---\n\n'
                                            "DONE: two <!--aaaa0002 entry:2026-01-02 end:2026-01-03-->\n",
-        "logs/.trash/2026-01-03.md": "TASK: trashed <!--cccc0001 entry:2026-01-01-->\n",
+        "threads/Projects/SGB/logs/.trash/2026-01-03.md": "TASK: trashed <!--cccc0001 entry:2026-01-01-->\n",
         "threads/Projects/SGB.md": "x",
         "people/Riaz Arbi.md": "x",
     }
@@ -70,19 +70,19 @@ def test_find_anchor(tasks_home):
 def test_mutate_anchor_rewrites_only_that_line(tasks_home):
     a = T.find_anchor("aaaa0001")
     T.mutate_anchor(a, priority="M", due="2026-02-01")
-    assert (tasks_home / "notes/2026-01-01-00-00-00.md").read_text().split("\n")[4:] == [
+    assert (tasks_home / "threads/Projects/SGB/notes/2026-01-01-00-00-00.md").read_text().split("\n")[4:] == [
         "", "TASK: [#M] one <!--aaaa0001 entry:2026-01-01 due:2026-02-01-->  ", "plain", ""]
     assert not list(tasks_home.rglob("*.tmp"))
 
 
 def test_threads_cache_and_resolvers(tasks_home):
     cache = T.build_threads_cache()
-    assert cache["notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
+    assert cache["threads/Projects/SGB/notes/2026-01-01-00-00-00"] == ["Projects/SGB"]
     assert T.threads_for(T.find_anchor("aaaa0002"), cache) == ["Projects/SGB"]
 
 
 def test_ingest_returns_what_it_did_and_prints_nothing(tasks_home, capsys):
-    note = tasks_home / "notes" / "2026-01-05-00-00-00.md"
+    note = tasks_home / "threads/Projects/SGB/notes/2026-01-05-00-00-00.md"
     note.write_text('---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: (Riaz Arbi) Draft it\nACTION:  \n')
     ingested, failed = T.ingest()
     [(uuid, where, body, line)] = ingested
@@ -94,7 +94,7 @@ def test_ingest_returns_what_it_did_and_prints_nothing(tasks_home, capsys):
 
 
 def test_ingest_dry_run_writes_nothing(tasks_home):
-    note = tasks_home / "notes" / "2026-01-05-00-00-00.md"
+    note = tasks_home / "threads/Projects/SGB/notes/2026-01-05-00-00-00.md"
     text = '---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: Draft it\n'
     note.write_text(text)
     ingested, failed = T.ingest(dry_run=True)

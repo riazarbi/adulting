@@ -96,7 +96,8 @@ def test_collect_filters_by_date(appended):
 
 def test_find_entry_returns_its_file_and_thread(appended):
     path, ref, _, e = H.STORE.find("aaaa0001")
-    assert (path.name, ref, e["id"]) == ("SANA.md", "Projects/SANA", "aaaa0001")
+    assert (path, ref, e["id"]) == (H.V.vault_home() / "threads/Projects/SANA/hours.md",
+                                    "Projects/SANA", "aaaa0001")
 
 
 def test_find_entry_refuses_an_unknown_id(appended, monkeypatch, capsys):

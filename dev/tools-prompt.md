@@ -72,6 +72,9 @@ If a tool has no subcommands, replace the `Subcommands:` block with a
    these definitions are produced.
 8. Descriptions are plain text, not markdown. Use blank lines and two-space
    indentation for structure. Newlines inside a JSON string are `\n`.
+9. **Vault paths come from the "Vault layout" table only.** Where a
+   description says where a file lives, use that table's path, relative to
+   the vault. A path spelt any other way is checked for and rejected.
 
 ## Voice
 

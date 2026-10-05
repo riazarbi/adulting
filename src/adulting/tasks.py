@@ -1,11 +1,11 @@
-"""Bridge ACTION: lines from notes/logs into anchored TASK: lines, and
+"""Bridge ACTION: lines from notes and logs into anchored TASK: lines, and
 expose source-line mutations as subcommands. Source notes ARE the store;
 there is no backend.
 
 No-arg invocation (used as a pre-pass by `notes`):
-  Walk notes/ + logs/, find every ACTION: line, validate it (thread
-  resolves, assignee resolves, attrs well-formed), and rewrite each in
-  place to a `TASK: [#X] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD
+  Walk every thread's notes/ and logs/, find every ACTION: line,
+  validate it (thread resolves, assignee resolves, attrs well-formed), and
+  rewrite each in place to a `TASK: [#X] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD
   ...-->` anchor. The uuid8 is freshly generated and checked against
   the existing vault for uniqueness.
 
@@ -128,20 +128,10 @@ def format_anchor(a):
 # ---------- walking / locating ----------
 
 def discover_source_files():
-    """Yield .md files in notes/ (flat) and logs/ (recursive). Sorted
+    """Yield every note, then every log, across all thread folders. Sorted
     for deterministic ordering. Skips dotfiles."""
-    notes_dir = V.vault_home() / 'notes'
-    logs_dir = V.vault_home() / 'logs'
-    if notes_dir.is_dir():
-        for f in sorted(notes_dir.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
-                yield f
-    if logs_dir.is_dir():
-        for root, dirs, files in os.walk(logs_dir):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            for fname in sorted(files):
-                if fname.endswith('.md') and not fname.startswith('.'):
-                    yield Path(root) / fname
+    yield from V.note_files()
+    yield from V.log_files()
 
 
 def walk_anchors():

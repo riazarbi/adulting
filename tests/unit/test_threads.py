@@ -62,18 +62,3 @@ def test_new_refuses_a_name_already_taken_in_any_case(capsys, monkeypatch):
     with pytest.raises(SystemExit):
         T.cmd_new(new_args())
     assert capsys.readouterr().err.startswith("threads: error: already exists: ")
-
-
-def test_delete_needs_yes(capsys, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["threads"])
-    T.cmd_new(new_args())
-    capsys.readouterr()
-    path = T.threads_dir() / "Projects" / "SGB.md"
-    with pytest.raises(SystemExit):
-        T.cmd_delete(Args(thread="Projects/SGB", yes=False))
-    assert capsys.readouterr().err == f"threads: error: refusing to delete {path} without -y\n"
-    assert path.exists()
-
-    assert T.cmd_delete(Args(thread="Projects/SGB", yes=True)) == 0
-    assert capsys.readouterr().out == f"deleted: {path}\n"
-    assert not path.exists()

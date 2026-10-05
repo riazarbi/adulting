@@ -99,11 +99,15 @@ content — never emit an empty heading.
 A timeline of Riaz's activity across threads, drawn from the note
 and log files in the review output.
 
-| Source | Thread from | Date from | Summarise from |
-|--------|-------------|-----------|----------------|
-| `logs/<Kind>/<Name>/<date>.md` | the path | the filename | `TEXT:` / `TASK:` / `REF:` lines |
-| `notes/<timestamp>.md` | `threads:` frontmatter | `timestamp` frontmatter | `topic` frontmatter + body |
-| `hours/<Kind>/<Thread>.md` | the path | each entry's `startTime` | each **added** entry's `name` and duration |
+Every one of these files lives in a thread's folder,
+`threads/<Kind>/<Name>/`, so the path always names the thread: take
+`<Kind>/<Name>`, the two folders after `threads/`.
+
+| Source | Date from | Summarise from |
+|--------|-----------|----------------|
+| `threads/<Kind>/<Name>/logs/<date>.md` | the filename | `TEXT:` / `TASK:` / `REF:` lines |
+| `threads/<Kind>/<Name>/notes/<timestamp>.md` | `timestamp` frontmatter | `topic` frontmatter + body |
+| `threads/<Kind>/<Name>/hours.md` | each entry's `startTime` | each **added** entry's `name` and duration |
 
 Hours files matter as much as the other two. Much of Riaz's day leaves no
 note and no log — it is captured only as time, and a timeline that skipped
@@ -136,12 +140,13 @@ Threads themselves in alphabetical order.
   logging them.
 ```
 
-Thread paths are already canonical `Kind/Name` in log paths — use
-them verbatim, no `threads list` call needed. Note frontmatter
-wraps them as `"[[Projects/AXA DORA]]"`; strip the brackets and
-quotes.
+The `Kind/Name` in the path is already canonical — use it verbatim,
+no `threads list` call needed.
 
-A note carrying several `threads:` entries appears under each one.
+A note can belong to several threads. It is filed under the first,
+and its `threads:` frontmatter lists them all (as
+`"[[Projects/AXA DORA]]"`; strip the brackets and quotes). List it
+under each one.
 
 ### Vault changes
 

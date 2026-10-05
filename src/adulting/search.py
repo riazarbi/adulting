@@ -48,7 +48,7 @@ STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
 # REF lines pointing at these are the record's own pointer back into the
 # log. The record is already a stream event read from its own file, so
 # counting the REF too would list it twice.
-SELF_REF_RE = re.compile(r'^REF:\s*\[\[(hours|payments)/')
+SELF_REF_RE = re.compile(r'^REF:\s*\[\[(?:Projects|Processes|Topics)/[^\]/]+/(?:hours|payments)\]\]')
 
 DEFAULT_LIMIT = 20
 DEFAULT_WINDOW_DAYS = 7
@@ -83,10 +83,7 @@ def read_or_skip(path):
 def note_records():
     """Every parseable note, as a dict. Unparseable files are skipped."""
     out = []
-    notes_dir = V.vault_home() / 'notes'
-    if not notes_dir.is_dir():
-        return out
-    for path in sorted(notes_dir.glob('*.md')):
+    for path in V.note_files():
         text = read_or_skip(path)
         if text is None:
             continue
@@ -107,10 +104,7 @@ def note_records():
 
 def log_records():
     out = []
-    logs_dir = V.vault_home() / 'logs'
-    if not logs_dir.is_dir():
-        return out
-    for path in sorted(logs_dir.rglob('*.md')):
+    for path in V.log_files():
         text = read_or_skip(path)
         if text is None:
             continue
@@ -120,11 +114,8 @@ def log_records():
         t = fm.get('thread') or ''
         if isinstance(t, list):
             t = t[0] if t else ''
-        ref = V.unwiki(str(t)) or str(t)
-        if not ref:
-            # logs/<Kind>/<Name>/<date>.md — recover the thread from the path
-            rel = path.relative_to(logs_dir).parts
-            ref = '/'.join(rel[:2]) if len(rel) >= 3 else ''
+        # With no thread in the frontmatter, the folder the log is in says.
+        ref = V.unwiki(str(t)) or str(t) or V.thread_of(path)
         out.append({
             'kind': 'log',
             'path': str(path),
@@ -202,24 +193,23 @@ def stream_records():
 
 def stream_entities():
     """Threads opened and people added, from their `started:` date."""
+    found = [('thread', V.thread_ref(k, n), path) for k, n, path in V.discover_threads()]
+    people_dir = V.vault_home() / 'people'
+    if people_dir.is_dir():
+        found += [('person', path.stem, path) for path in sorted(people_dir.glob('*.md'))
+                  if not path.name.startswith('.')]
     out = []
-    for sub, kind in (('threads', 'thread'), ('people', 'person')):
-        base = V.vault_home() / sub
-        if not base.is_dir():
+    for kind, name, path in found:
+        text = read_or_skip(path)
+        if text is None:
             continue
-        for path in sorted(base.rglob('*.md')):
-            text = read_or_skip(path)
-            if text is None:
-                continue
-            fm, _ = V.parse_frontmatter_doc(text)
-            started = str(fm.get('started') or '')[:10]
-            if not LEADING_DATE_RE.match(started):
-                continue
-            rel = path.relative_to(base).with_suffix('')
-            thread = str(rel) if kind == 'thread' else '-'
-            verb = 'thread opened' if kind == 'thread' else 'person added'
-            out.append(_event(kind, started, thread, f"{verb}: {rel}",
-                              str(path)))
+        fm, _ = V.parse_frontmatter_doc(text)
+        started = str(fm.get('started') or '')[:10]
+        if not LEADING_DATE_RE.match(started):
+            continue
+        thread = name if kind == 'thread' else '-'
+        verb = 'thread opened' if kind == 'thread' else 'person added'
+        out.append(_event(kind, started, thread, f"{verb}: {name}", str(path)))
     return out
 
 

@@ -54,6 +54,29 @@ DENIAL_RE = re.compile(r"\b(not|never|nothing|none|no\ command|no\ adulting\ com
                        re.I | re.X)
 
 
+# Where files lived before they moved into thread folders. The layout is
+# declared once, in vault.LAYOUT, and nothing compares prose with it except
+# this: a path that starts at one of these old roots describes a vault that
+# no longer exists. Matched only where it is unmistakably a path — after a
+# vault prefix (`~/vault/`, `$ADULTING_HOME/`, `/vault/`), or followed by a
+# placeholder, a thread kind or a date — so that prose such as "notes/logs"
+# and a thread's own `notes/` folder are left alone.
+RETIRED_ROOTS = ('notes', 'logs', 'hours', 'payments')
+_ROOT = '(?:' + '|'.join(RETIRED_ROOTS) + ')'
+STALE_PATH_RE = re.compile(
+    rf"""(?:~/vault/|\$ADULTING_HOME/|(?<![\w.])/vault/){_ROOT}\b
+       | (?<![\w/.-]){_ROOT}/(?:<|\{{|Projects\b|Processes\b|Topics\b|\d)
+    """, re.X)
+
+
+def stale_paths(text):
+    """(line number, line) for every line naming a vault path in the layout
+    the vault had before thread folders."""
+    for n, line in enumerate(text.splitlines(), start=1):
+        if STALE_PATH_RE.search(line):
+            yield n, line.strip()
+
+
 def manifest(tool):
     """The tool's own description of its surface, from the installed command."""
     exe = REPO / '.venv' / 'bin' / tool

@@ -2,12 +2,12 @@
 schema: note_meeting
 scope: file
 applies_when: type == Meeting
-filename: \d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.md
+path: threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md
 ---
 
 # Meeting note
 
-A note recording a meeting with one or more counterparties. Lives in `~/vault/notes/`.
+A note recording a meeting with one or more counterparties. Lives in the folder of the first thread it names, at `~/vault/threads/<Kind>/<Name>/notes/<stem>.md`.
 
 ## Fields
 
@@ -21,7 +21,7 @@ A note recording a meeting with one or more counterparties. Lives in `~/vault/no
 | location     | no       | string |                                           |
 | people       | no       | list   |                                           |
 
-`threads` is a list of wikilinks; each entry must resolve to a thread file under `threads/<Kind>/<Name>.md` (Projects / Processes / Topics). A note can belong to multiple threads. `people` is a list whose entries may be wikilinks `[[people/X]]` (validated to resolve) or plain strings (untracked attendees).
+`threads` is a list of wikilinks; each entry must resolve to a thread file at `threads/<Kind>/<Name>.md` (Projects / Processes / Topics). A note can belong to multiple threads; it is filed under the first, and `lint` checks that the folder it is in is that first thread's. `people` is a list whose entries may be wikilinks `[[people/X]]` (validated to resolve) or plain strings (untracked attendees).
 
 ## Body
 

@@ -64,7 +64,7 @@ def test_log_errors_write_nothing(payments_vault, argv, message):
     # A message naming a file to edit names it absolutely.
     assert (r.returncode, r.stdout, r.stderr) == (
         1, "", message.format(home=payments_vault.home))
-    assert list((payments_vault.home / "payments").rglob("*.md")) == []
+    assert list(payments_vault.home.rglob("payments.md")) == []
 
 
 def test_log_records_a_payment(vault):
@@ -102,9 +102,9 @@ def test_payment_writes_a_buffer_ref(vault):
     vault.write_thread("Projects", "SANA", currency="ZAR", rate=2500)
     vault.run("log", "Projects/SANA", "15000", "-a", "Business current",
               cli="payments")
-    # The target is the directory form, payments/Projects/..., not the
-    # frontmatter kind, payments/project/...
-    assert re.fullmatch(r"- \[\[Projects/SANA\]\] REF: \[\[payments/Projects/SANA\]\] "
+    # The target is the directory form, Projects/SANA/payments, not the
+    # frontmatter kind, project/SANA/...
+    assert re.fullmatch(r"- \[\[Projects/SANA\]\] REF: \[\[Projects/SANA/payments\]\] "
                         r"15000 ZAR received \([0-9a-f]{8}\) <!--\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d-->\n",
                         vault.read("buffer.md"))
 
@@ -403,10 +403,10 @@ def test_a_backdated_payment_refs_into_that_days_log(vault):
     vault.write_thread("Projects", "SANA", currency="ZAR")
     vault.run("log", "Projects/SANA", "15000", "-d", "2026-08-04", cli="payments")
     vault.run("flush", cli="buffer")
-    logs = sorted(p.name for p in (vault.home / "logs" / "Projects" / "SANA").glob("*.md"))
+    logs = sorted(p.name for p in (vault.home / "threads" / "Projects" / "SANA" / "logs").glob("*.md"))
     assert logs == ["2026-08-04.md"]
-    assert re.fullmatch(r"REF: \[\[payments/Projects/SANA\]\] 15000 ZAR received \([0-9a-f]{8}\)",
-                        vault.lines("logs/Projects/SANA/2026-08-04.md")[-2])
+    assert re.fullmatch(r"REF: \[\[Projects/SANA/payments\]\] 15000 ZAR received \([0-9a-f]{8}\)",
+                        vault.lines("threads/Projects/SANA/logs/2026-08-04.md")[-2])
 
 
 def test_receipts_are_rounded_to_the_cent_before_they_are_summed(vault):

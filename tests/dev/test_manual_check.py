@@ -234,3 +234,25 @@ def test_the_generation_stage_checks_what_it_generated():
     tools = ci[ci.index("def stage_tools("):ci.index("def main(")]
     assert "manual-build" in manual and "manual-check" in manual
     assert "tools-build" in tools and "tools-check" in tools
+
+
+# ---------- old-layout paths in what the manual is generated from ----------
+
+def test_the_manuals_sources_include_the_code_schemas_and_readme():
+    names = {p.relative_to(REPO).as_posix() for p in CHECK.INPUTS}
+    assert "src/adulting/buffer.py" in names
+    assert "src/adulting/schemas/log.md" in names
+    assert "README.md" in names
+
+
+def test_a_stale_path_in_a_docstring_is_reported_with_its_place(tmp_path):
+    # The docstring cmd_flush had until the gate read the sources.
+    src = tmp_path / "buffer.py"
+    src.write_text('"""Tend, then if clean, write each (thread, date) group to\n'
+                   '    logs/<thread>/<date>.md (append if exists) and clear the buffer."""\n')
+    assert list(CHECK.stale_input_paths([src])) == [
+        (f"{src}:2", "logs/<thread>/<date>.md (append if exists) and clear the buffer.\"\"\"")]
+
+
+def test_the_committed_sources_name_no_old_layout_path():
+    assert list(CHECK.stale_input_paths()) == []

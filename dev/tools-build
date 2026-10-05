@@ -57,12 +57,13 @@ POLICY = {
     'tasks': {},
     # notes no longer prompts or opens applications: a note is named by its
     # stem and every subcommand runs from flags, so the agent can use them.
-    # delete is blocked for the same reason as threads and people.
+    # delete is blocked for the same reason as people.
     'notes': {'forbidden_args': ['delete']},
     # Read-only by construction: it never writes, never prompts, never
     # launches anything. Nothing to block.
     'search': {'read_only': True},
-    'threads': {'forbidden_args': ['delete']},
+    # No destructive subcommand: removing a thread is done by hand.
+    'threads': {},
     'people': {'forbidden_args': ['delete']},
     # rm destroys a billing record. Correcting is what is actually wanted
     # nine times in ten, and `edit` covers that; a genuine deletion is rare

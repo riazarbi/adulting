@@ -1,8 +1,7 @@
 ---
 schema: person
 scope: file
-directory: people
-filename: ^[^.]+\.md$
+path: people/<Name>.md
 ---
 
 # Person file

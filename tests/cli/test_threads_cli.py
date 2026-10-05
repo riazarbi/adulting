@@ -1,5 +1,5 @@
-"""The `threads` command: list, show, new (with billing defaults) and
-delete, each driven entirely by arguments."""
+"""The `threads` command: list, show and new (with billing defaults), each
+driven entirely by arguments."""
 
 import json
 import re
@@ -150,25 +150,6 @@ def test_new_error_messages(vault):
     assert r.returncode == 2 and "invalid choice" in r.stderr
 
 
-# ---------- delete ----------
-
-def test_delete_with_yes(threads_vault):
-    path = threads_vault.home / "threads" / "Topics" / "Old Idea.md"
-    r = threads_vault.run("delete", "[[Topics/Old Idea]]", "-y", cli="threads")
-    assert (r.returncode, r.stdout) == (0, f"deleted: {path}\n")
-    assert not path.exists()
-
-
-def test_delete_not_found_and_ambiguous(threads_vault):
-    threads_vault.write_thread("Topics", "SGB")
-    before = threads_vault.snapshot()
-    for ref, message in (("Nope", "thread 'Nope' does not resolve to a thread file"),
-                         ("SGB", "ambiguous thread 'SGB'; matches: Projects/SGB, Topics/SGB")):
-        r = threads_vault.run("delete", ref, "-y", cli="threads")
-        assert (r.returncode, r.stdout, r.stderr) == (1, "", f"threads: error: {message}\n")
-    assert threads_vault.snapshot() == before
-
-
 # ---------- nothing prompts ----------
 
 
@@ -179,14 +160,6 @@ def test_new_strips_the_name_and_refuses_a_blank_one(vault):
     assert list((vault.home / "threads").rglob("*.md")) == []
     assert vault.run("new", *FLAGS, "--name", " Acme ", cli="threads").returncode == 0
     assert (vault.home / "threads" / "Projects" / "Acme.md").exists()
-
-
-def test_delete_without_yes_refuses_even_if_stdin_says_yes(threads_vault):
-    path = threads_vault.home / "threads" / "Projects" / "SGB.md"
-    r = threads_vault.run("delete", "SGB", input="y\n", cli="threads")
-    assert r.returncode == 1
-    assert r.stderr == f"threads: error: refusing to delete {path} without -y\n"
-    assert path.exists()
 
 
 @pytest.mark.parametrize("name", ["../escaped", "a/b", ".hidden"])

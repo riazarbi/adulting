@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-AGENDA = "notes/2026-08-22-09-00-00.md"
-REPORT = "notes/2026-08-25-09-00-00.md"
-LOG = "logs/Processes/SGB/2026-08-28.md"
+AGENDA = "threads/Processes/SGB/notes/2026-08-22-09-00-00.md"
+REPORT = "threads/Processes/SGB Extra/notes/2026-08-25-09-00-00.md"
+LOG = "threads/Processes/SGB/logs/2026-08-28.md"
 
 
 def path(vault, rel):
@@ -41,7 +41,7 @@ def stocked(vault):
                      threads=["Projects/Alpha"], topic="Alpha kickoff",
                      type_="Meeting")
 
-    log = vault.home / "logs" / "Processes" / "SGB" / "2026-08-28.md"
+    log = vault.log_path("Processes/SGB", "2026-08-28")
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text('---\nthread: "[[Processes/SGB]]"\ndate: 2026-08-28\n'
                    'type: Log\n---\n\n# log\n\n'
@@ -64,21 +64,21 @@ def search_vault(vault):
     vault.write_thread("Projects", "Alpha", started="2026-03-01")
     vault.write("people/Riaz Arbi.md",
           "---\nstatus: open\ncategory: personal\nstarted: 2026-01-02\n---\n")
-    vault.write("notes/2026-08-22-09-00-00.md",
+    vault.write(AGENDA,
           '---\ntopic: Agenda\ntype: Meeting\nthreads:\n  - "[[Processes/SGB]]"\n'
           '  - "[[Projects/Alpha]]"\ntimestamp: 2026-08-27-16-30-00\n---\n\n'
           + "word " * 60 + "asbestos survey needed " + "tail " * 40
           + "\nTASK: (Riaz Arbi) Chase it <!--aaaa1111 entry:2026-08-27-->\n")
     # A singular `thread:` and a malformed timestamp: the filename supplies the date.
-    vault.write("notes/2026-08-25-09-00-00.md",
+    vault.write(REPORT,
           '---\ntopic: Interim report\ntype: Report\nthread: "[[Processes/SGB Extra]]"\n'
           'timestamp: bad\n---\n\nDONE: Filed <!--bbbb2222 entry:2026-08-20 end:2026-08-25-->\n')
-    # No `thread:` in the log: it is recovered from logs/<Kind>/<Name>/.
-    vault.write("logs/Processes/SGB/2026-08-28.md",
+    # No `thread:` in the log: it is recovered from threads/<Kind>/<Name>/logs/.
+    vault.write(LOG,
           "---\ndate: 2026-08-28\ntype: Log\n---\n\n"
           "TEXT: Roof needs an asbestos survey.\n"
-          "REF: [[hours/Processes/SGB]] 1h 0m Spec (cccc3333)\n"
-          "REF: [[notes/2026-08-22-09-00-00]] Agenda\n"
+          "REF: [[Processes/SGB/hours]] 1h 0m Spec (cccc3333)\n"
+          "REF: [[2026-08-22-09-00-00]] Agenda\n"
           "ACTION: Ring the council\n")
     vault.write_hours_file("Projects", "Alpha", entries=[{
         "name": "Spec work", "id": "aaaa1111", "rate": 1000, "currency": "ZAR",
@@ -88,13 +88,13 @@ def search_vault(vault):
         "amount": 4500.5, "currency": "ZAR"}])
     vault.write("buffer.md",
           "- [[Processes/SGB]] TEXT: Pending thought <!--2026-08-30T10:05:00-->\n"
-          "- [[Projects/Alpha]] REF: [[payments/Projects/Alpha]] 4500.5 ZAR received "
+          "- [[Projects/Alpha]] REF: [[Projects/Alpha/payments]] 4500.5 ZAR received "
           "(dddd4444) <!--2026-08-29T10:15:00-->\n")
     return vault
 
 
 def _log_with(vault, kind, name, day, body):
-    p = vault.home / "logs" / kind / name / f"{day}.md"
+    p = vault.log_path(f"{kind}/{name}", day)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(f'---\nthread: "[[{kind}/{name}]]"\ndate: {day}\n'
                  f'type: Log\n---\n\n# log\n\n{body}\n', encoding="utf-8")
@@ -106,8 +106,9 @@ def _log_with(vault, kind, name, day, body):
 def test_notes_table(search_vault):
     r = search_vault.run("notes", cli="search")
     assert r.returncode == 0
+    w = len(path(search_vault, REPORT))
     assert r.stdout == (
-        f"{path(search_vault, AGENDA)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
+        f"{path(search_vault, AGENDA).ljust(w)}  2026-08-27  Meeting  Processes/SGB, Projects/Alpha  Agenda\n"
         f"{path(search_vault, REPORT)}  2026-08-25  Report  Processes/SGB Extra  Interim report\n")
 
 
@@ -127,7 +128,7 @@ def test_logs_table_counts_every_entry_kind(search_vault):
 def test_logs_text_match(search_vault):
     r = search_vault.run("logs", "--text", "asbestos", cli="search")
     assert r.stdout.split("\n")[1] == (
-        "    TEXT: Roof needs an asbestos survey. REF: [[hours/Processes/SGB]] "
+        "    TEXT: Roof needs an asbestos survey. REF: [[Processes/SGB/hours]] "
         "1h 0m Spec (cccc3333) RE…")
 
 
@@ -141,15 +142,15 @@ def test_unresolvable_thread_fails(search_vault):
 
 def test_thread_and_type_filter_together(stocked):
     r = stocked.run("notes", "--thread", "Processes/SGB", "--type", "Meeting", "--json", cli="search")
-    assert [x["path"] for x in json.loads(r.stdout)] == [path(stocked, "notes/2026-08-22-09-00-00.md")]
+    assert [x["path"] for x in json.loads(r.stdout)] == [str(stocked.note_path("2026-08-22-09-00-00", "Processes/SGB"))]
 
 
 def test_thread_accepts_bare_name(stocked):
     """`SGB` must resolve without a `threads list` round-trip first."""
     r = stocked.run("notes", "--thread", "SGB", "--json", cli="search")
     assert [x["path"] for x in json.loads(r.stdout)] == [
-        path(stocked, "notes/2026-08-22-09-00-00.md"),
-        path(stocked, "notes/2026-08-25-09-00-00.md")]
+        str(stocked.note_path("2026-08-22-09-00-00", "Processes/SGB")),
+        str(stocked.note_path("2026-08-25-09-00-00", "Processes/SGB"))]
 
 
 def test_type_is_case_insensitive(stocked):
@@ -158,8 +159,8 @@ def test_type_is_case_insensitive(stocked):
     for typed in ("meeting", "Meeting", "MEETING"):
         r = stocked.run("notes", "--type", typed, "--json", cli="search")
         assert [x["path"] for x in json.loads(r.stdout)] == [
-            path(stocked, "notes/2026-08-22-09-00-00.md"),
-            path(stocked, "notes/2026-08-26-09-00-00.md")], typed
+            str(stocked.note_path("2026-08-22-09-00-00", "Processes/SGB")),
+            str(stocked.note_path("2026-08-26-09-00-00", "Projects/Alpha"))], typed
 
 
 def test_text_miss_reports_no_matches(stocked):
@@ -175,17 +176,19 @@ def test_limit_caps_results(stocked):
 def test_date_range_filters(stocked):
     r = stocked.run("notes", "--since", "2026-08-27", "--json", cli="search")
     assert [(x["path"], x["date"]) for x in json.loads(r.stdout)] == [
-        (path(stocked, "notes/2026-08-22-09-00-00.md"), "2026-08-27")]
+        (str(stocked.note_path("2026-08-22-09-00-00", "Processes/SGB")), "2026-08-27")]
 
 
 def test_unparseable_file_is_skipped_not_fatal(stocked):
-    (stocked.home / "notes" / "2026-08-29-09-00-00.md").write_text(
+    stocked.note_path("2026-08-29-09-00-00", "Processes/SGB").write_text(
         "no frontmatter at all\n", encoding="utf-8")
     r = stocked.run("notes", "--json", cli="search")
     assert (r.returncode, r.stderr) == (0, "")
     assert [x["path"] for x in json.loads(r.stdout)] == [
-        path(stocked, f"notes/{stem}.md")
-        for stem in ("2026-08-22-09-00-00", "2026-08-26-09-00-00", "2026-08-25-09-00-00")]
+        str(stocked.note_path(stem, home))
+        for stem, home in (("2026-08-22-09-00-00", "Processes/SGB"),
+                           ("2026-08-26-09-00-00", "Projects/Alpha"),
+                           ("2026-08-25-09-00-00", "Processes/SGB"))]
 
 
 def test_empty_vault_everywhere(vault):
@@ -209,7 +212,7 @@ def test_activity_table(search_vault):
 
 
 def test_activity_defaults_to_the_last_seven_days(search_vault):
-    search_vault.write("notes/2020-01-01-00-00-00.md",
+    search_vault.write("threads/Projects/Alpha/notes/2020-01-01-00-00-00.md",
           f'---\ntopic: Recent\ntype: Log\nthread: "[[Projects/Alpha]]"\n'
           f"timestamp: {(date.today() - timedelta(days=7)).isoformat()}-09-00-00\n---\n")
     r = search_vault.run("activity", cli="search")
@@ -243,6 +246,7 @@ def test_activity_surfaces_threads_with_only_hours(vault):
 
 def test_overview_text(search_vault):
     r = search_vault.run("overview", "SGB", cli="search")
+    w = max(len(path(search_vault, LOG)), len(path(search_vault, AGENDA)))
     assert r.stdout == (
         "Processes/SGB\n"
         "\n"
@@ -253,8 +257,8 @@ def test_overview_text(search_vault):
         "  last       2026-08-28\n"
         "\n"
         "  recent:\n"
-        f"    {path(search_vault, LOG)}  2026-08-28  Log  4 entries\n"
-        f"    {path(search_vault, AGENDA).ljust(len(path(search_vault, LOG)))}  2026-08-27  Meeting  Agenda\n")
+        f"    {path(search_vault, LOG).ljust(w)}  2026-08-28  Log  4 entries\n"
+        f"    {path(search_vault, AGENDA).ljust(w)}  2026-08-27  Meeting  Agenda\n")
 
 
 def test_overview_with_a_window_and_limit(search_vault):
@@ -296,7 +300,7 @@ def test_stream_text(search_vault):
         "  payment  Projects/Alpha                 4500.5 ZAR received  (10:15)\n"
         "\n2026-08-28\n"
         "  log      Processes/SGB                  Roof needs an asbestos survey.\n"
-        "  log      Processes/SGB                  [[notes/2026-08-22-09-00-00]] Agenda\n"
+        "  log      Processes/SGB                  [[2026-08-22-09-00-00]] Agenda\n"
         "\n2026-08-27\n"
         "  task     Processes/SGB, Projects/Alpha  (Riaz Arbi) Chase it\n"
         "  note     Processes/SGB, Projects/Alpha  Agenda\n"
@@ -329,7 +333,7 @@ def test_stream_thread_filter_matches_whole_thread_names(search_vault):
         "  pending  Processes/SGB  TEXT: Pending thought  (10:05)\n"
         "\n2026-08-28\n"
         "  log      Processes/SGB  Roof needs an asbestos survey.\n"
-        "  log      Processes/SGB  [[notes/2026-08-22-09-00-00]] Agenda\n"
+        "  log      Processes/SGB  [[2026-08-22-09-00-00]] Agenda\n"
         "\n6 event(s); window 2026-01-01 to today\n"
         "3 more not shown — raise --limit\n")
     rows = json.loads(search_vault.run("stream", "--since", "2026-01-01", "--thread",
@@ -398,6 +402,57 @@ def test_hours_appear_once_before_and_after_flush(stocked):
     assert len(before) == 1, before
     assert len(after) == 1, after
     assert after[0]["kind"] == "hours"
+
+
+def test_only_thread_files_open_threads_in_the_stream(stocked):
+    """A thread folder sits beside its thread file and holds notes, logs,
+    hours and payments. None of those is a thread, even with a `started:`
+    date that would qualify it."""
+    stocked.write_payments_file("Projects", "Alpha")
+    folder = stocked.home / "threads" / "Projects" / "Alpha"
+    for rel in ("hours.md", "payments.md"):
+        f = folder / rel
+        f.write_text(f.read_text().replace("---\n\n", "started: 2026-04-01\n---\n\n", 1))
+    stocked.write("threads/Projects/Alpha/notes/2026-04-01-09-00-00.md",
+                  "---\nstarted: 2026-04-01\ntopic: Trap\ntype: Log\n"
+                  'timestamp: 2026-04-01-09-00-00\nthreads:\n  - "[[Projects/Alpha]]"\n---\n')
+    stocked.write("threads/Projects/Alpha/logs/2026-04-01.md",
+                  '---\nstarted: 2026-04-01\nthread: "[[Projects/Alpha]]"\n'
+                  "date: 2026-04-01\n---\n\nTEXT: trap\n")
+    rows = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                                  "--kind", "thread", "--json", cli="search").stdout)
+    assert sorted((r["date"], r["summary"], r["path"]) for r in rows) == [
+        ("2026-01-01", "thread opened: Processes/SGB",
+         str(stocked.home / "threads/Processes/SGB.md")),
+        ("2026-01-01", "thread opened: Projects/Alpha",
+         str(stocked.home / "threads/Projects/Alpha.md"))]
+
+
+def test_a_ref_to_a_threads_hours_is_a_self_reference_pending_or_flushed(stocked):
+    """`[[<Kind>/<Name>/hours]]` and `/payments` point at a record that is
+    already its own stream event, so neither the buffered nor the flushed
+    REF is shown. A REF to anything else still is."""
+    stocked.write_payments_file("Projects", "Alpha")
+    stocked.write("buffer.md",
+                  "- [[Projects/Alpha]] REF: [[Projects/Alpha/hours]] 1h 0m Spec "
+                  "<!--2026-08-26T10:00:00-->\n"
+                  "- [[Projects/Alpha]] REF: [[Projects/Alpha/payments]] 10 ZAR received "
+                  "<!--2026-08-26T10:01:00-->\n"
+                  "- [[Projects/Alpha]] REF: [[Processes/SGB]] Kept "
+                  "<!--2026-08-26T10:02:00-->\n")
+
+    def refs():
+        rows = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                                      "--kind", "pending,log", "--json",
+                                      cli="search").stdout)
+        return [(r["kind"], r["summary"]) for r in rows if r["thread"] == "Projects/Alpha"]
+
+    assert refs() == [("pending", "REF: [[Processes/SGB]] Kept")]
+    r = stocked.run("flush", cli="buffer")
+    assert r.returncode == 0, r.stderr
+    log = stocked.read("threads/Projects/Alpha/logs/2026-08-26.md")
+    assert "REF: [[Projects/Alpha/hours]] 1h 0m Spec" in log
+    assert refs() == [("log", "[[Processes/SGB]] Kept")]
 
 
 def test_unflushed_buffer_entries_show_as_pending(stocked):
@@ -533,7 +588,7 @@ def test_overview_lists_five_recent_items_by_default(vault):
 def test_stream_shows_a_hundred_events_by_default(vault):
     vault.write_thread("Projects", "SGB")
     body = "\n".join(f"TEXT: entry {i}" for i in range(101))
-    vault.write("logs/Projects/SGB/2026-09-10.md",
+    vault.write("threads/Projects/SGB/logs/2026-09-10.md",
                 '---\nthread: "[[Projects/SGB]]"\ndate: 2026-09-10\ntype: Log\n---\n\n' + body + "\n")
     r = vault.run("stream", "--since", "2026-01-01", cli="search")
     # 101 log lines plus the thread-opened event: 100 shown, 2 not.
@@ -546,10 +601,11 @@ def one_good_one_unreadable(vault):
     """A readable note and a log, and an unreadable one of each beside them."""
     vault.write_thread("Projects", "SGB")
     vault.write_note("2026-09-10-14-30-00", "TEXT: readable", threads=["Projects/SGB"])
-    vault.write("logs/Projects/SGB/2026-09-10.md",
+    vault.write("threads/Projects/SGB/logs/2026-09-10.md",
                 '---\nthread: "[[Projects/SGB]]"\ndate: 2026-09-10\n---\n\n'
                 "TEXT: a readable log line\n")
-    for rel in ("notes/2026-09-12-08-00-00.md", "logs/Projects/SGB/2026-09-12.md"):
+    for rel in ("threads/Projects/SGB/notes/2026-09-12-08-00-00.md",
+                "threads/Projects/SGB/logs/2026-09-12.md"):
         bad = vault.home / rel
         bad.parent.mkdir(parents=True, exist_ok=True)
         bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
@@ -584,5 +640,5 @@ def test_a_skipped_file_is_named_on_a_terminal(one_good_one_unreadable):
     `notes` already tells them about a failed ingest."""
     r, said = one_good_one_unreadable.run_with_stderr_on_a_terminal("notes", cli="search")
     assert r.returncode == 0
-    bad = one_good_one_unreadable.home / "notes" / "2026-09-12-08-00-00.md"
+    bad = one_good_one_unreadable.note_path("2026-09-12-08-00-00", "Projects/SGB")
     assert said == f"search: warning: {bad} is not valid UTF-8; skipped\n"

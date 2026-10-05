@@ -16,6 +16,7 @@ Checks, all fatal:
              here does, and a stale claim that one does teaches the agent to
              avoid a command that is safe to call
   hygiene    no absolute filesystem paths baked into a description
+  layout     no vault path in the layout the vault had before thread folders
   policy     forbidden_args name real subcommands of that tool, and the
              description declares exactly those blocks — so what the agent
              is told and what the loader enforces cannot drift apart
@@ -38,7 +39,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'dev'))
-from surface import interactivity_claims  # noqa: E402
+from surface import interactivity_claims, stale_paths  # noqa: E402
 
 ALLOWED_FIELDS = {'builtin', 'command', 'description', 'read_only',
                   'prepend_args', 'forbidden_args', 'allow_user_args'}
@@ -119,6 +120,10 @@ def main():
         for said in interactivity_claims(desc):
             errors.append(f"{path.name}: description says the command is "
                           f"interactive, and none of them are: {said!r}")
+
+        for _, line in stale_paths(desc):
+            errors.append(f"{path.name}: description names a path in the old "
+                          f"vault layout: {line!r}")
 
         manifest = manifests.get(tool, {})
         subs = [s['name'] for s in manifest.get('subcommands', [])]

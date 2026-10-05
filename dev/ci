@@ -43,6 +43,7 @@ PY = REPO / '.venv' / 'bin' / 'python'
 sys.path.insert(0, str(REPO / 'dev'))
 from commands import COMMANDS as TOOLS  # noqa: E402
 DEV_TOOLS = ['manual-harvest', 'manual-build', 'manual-check', 'manual-diff',
+             'migrate-layout',
              'tools-build', 'tools-check', 'agent-check', 'testbed', 'ci']
 
 BOLD, GREEN, RED, YELLOW, OFF = '\033[1m', '\033[32m', '\033[31m', '\033[33m', '\033[0m'

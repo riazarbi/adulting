@@ -1,8 +1,8 @@
 """Money received, per thread, for the adulting vault.
 
-Records live in $ADULTING_HOME/payments/<Kind>/<Thread>.md as JSON inside an
-```adulting-payments fence — the same shape `hours` uses, so both are readable,
-greppable, and produce clean git diffs.
+Records live in $ADULTING_HOME/threads/<Kind>/<Thread>/payments.md, one file
+per thread, as JSON inside an ```adulting-payments fence — the same shape
+`hours` uses, so both are readable, greppable, and produce clean git diffs.
 
   payments log <thread> <amount>       record a receipt
   payments list / show / edit / rm
@@ -75,8 +75,8 @@ def append_payment(kind, name, payment):
     STORE.save(path, STORE.read(path) + [payment], ref, payment['currency'])
     # A REF in the buffer puts this payment in the thread's daily log on the
     # next flush, filed under the day it was received. Best-effort and
-    # silent: see buffer.add_ref. `ref` is already the directory form.
-    B.add_ref(ref, f"payments/{ref}",
+    # silent: see buffer.add_ref. `ref` is the folder form.
+    B.add_ref(ref, f"{ref}/payments",
                f"{V.fmt_money(amount_of(payment), payment['currency'])} "
                f"received ({payment['id']})",
                date=V.local(payment['received'], STORE.stamp_name(payment)).strftime('%Y-%m-%d'))

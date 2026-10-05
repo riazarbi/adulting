@@ -1,8 +1,17 @@
-"""Manage thread files in ~/vault/threads/{Projects,Processes,Topics}/.
+"""Manage thread files at ~/vault/threads/<Kind>/<Name>.md, where <Kind> is
+Projects, Processes or Topics.
 
-Non-interactive: every value comes from arguments, and deleting needs -y.
+Beside each thread file is the thread's folder, threads/<Kind>/<Name>/,
+holding its notes, logs, hours and payments. The other commands fill it;
+this one manages the thread file only.
 
-Skeleton: just create / delete / list / show. The richer reporting tools
+Non-interactive: every value comes from arguments.
+
+Closing a thread is setting `status: closed` (and `ended:`) in its
+frontmatter; nothing moves. There is no delete: removing a thread means
+removing its file and its folder, by hand.
+
+Skeleton: just create / list / show. The richer reporting tools
 (daily review, tail, overdue, report) are intentionally omitted — they'll
 be rebuilt when we know what views we actually want from notes data.
 """
@@ -12,7 +21,7 @@ import sys
 from adulting import vault as V
 
 def threads_dir():
-    return V.vault_home() / 'threads'
+    return V.threads_root()
 
 
 def cmd_new(args):
@@ -48,15 +57,6 @@ def cmd_new(args):
         encoding='utf-8',
     )
     print(f"created: {V.full(path)}")
-    return 0
-
-
-def cmd_delete(args):
-    kind, name, path = V.resolve_target(args.thread)
-    if not args.yes:
-        V.die(f"refusing to delete {V.full(path)} without -y")
-    path.unlink()
-    print(f"deleted: {V.full(path)}")
     return 0
 
 
@@ -108,12 +108,6 @@ def main():
     p.add_argument('--currency', help="Default currency for `hours` (3-letter ISO). Optional.")
     p.add_argument('--rate', type=int, help="Default hourly rate for `hours`. Needs --currency.")
     p.set_defaults(func=cmd_new)
-
-    p = sub.add_parser('delete', help="Permanently delete a thread file.")
-    p.add_argument('thread', help="Thread name or 'Kind/Name'.")
-    p.add_argument('-y', '--yes', action='store_true',
-                          help="Required: confirms the permanent delete.")
-    p.set_defaults(func=cmd_delete)
 
     args = V.parse_command(parser)
     return args.func(args)

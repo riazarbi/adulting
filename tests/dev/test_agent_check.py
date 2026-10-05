@@ -142,3 +142,27 @@ def test_every_committed_skill_has_the_shape_the_agent_wants():
         assert front["name"] == directory.name
         assert front["description"].strip()
         assert not set(front) - CHECK.ALLOWED_KEYS, directory.name
+
+
+# ---------- paths in the layout the vault had before thread folders ----------
+
+@pytest.mark.parametrize("stale", [
+    "| `logs/<Kind>/<Name>/<date>.md` | the path | the filename |",
+    "| `notes/<timestamp>.md` | `threads:` frontmatter |",
+    "Read `hours/<Kind>/<Thread>.md` for the added entries.",
+    "Notes live in `~/vault/notes/`.",
+    "REF: [[hours/Processes/SGB]] 1h 0m",
+])
+def test_a_path_in_the_old_layout_is_reported(stale):
+    found = problems(stale)
+    assert len(found) == 1 and "old vault layout" in found[0], found
+
+
+@pytest.mark.parametrize("fine", [
+    "| `threads/<Kind>/<Name>/logs/<date>.md` | the path |",
+    "Search notes/logs, then read the file.",
+    "Every thread's notes/ and logs/ are walked.",
+    "REF: [[Processes/SGB/hours]] 1h 0m",
+])
+def test_a_path_in_the_thread_folder_layout_passes(fine):
+    assert problems(fine) == []

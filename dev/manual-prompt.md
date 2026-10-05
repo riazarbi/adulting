@@ -76,8 +76,9 @@ text on disk that you can read, grep and back up yourself.
 ### How the pieces fit
 
 Under 250 words. Name each object in the model — note, thread, person, time
-entry, payment, action/task — say in one line what it is, and say which
-directory holds it. Then a short list of the relationships that matter (which
+entry, payment, action/task — say in one line what it is, and say where it
+lives, taking paths only from the corpus's "Vault layout" table: everything
+that belongs to a thread lives in the thread's folder beside its thread file. Then a short list of the relationships that matter (which
 objects link to which). This section exists so that everything below it makes
 sense; it is not a tutorial.
 
@@ -130,7 +131,7 @@ them. The heading is the schema's name exactly as the corpus spells it, wrapped 
 backticks, so the note_meeting schema becomes a heading reading
 "### `note_meeting`". Do not merge, split or rename schemas,
 even where two are nearly identical. For each: one sentence on what it is,
-where the files live, and a table of fields (`Field | Required | Meaning`).
+where the files live (as the "Vault layout" table gives it), and a table of fields (`Field | Required | Meaning`).
 No regular expressions. State that the checker tool enforces these.
 
 ### Troubleshooting

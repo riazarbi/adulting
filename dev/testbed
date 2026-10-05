@@ -7,6 +7,10 @@
     dev/testbed run old CMD ...   run the reference (pre-refactor) command
     dev/testbed diff              what changed in the working vault since reset
     dev/testbed compare CMD ...   reset, run old, reset, run new; report differences
+    dev/testbed layout-compare CMD ...
+                                  as compare, but new runs on a vault moved into
+                                  the thread-folder layout, and old's paths are
+                                  mapped to where the files went
     dev/testbed env new|old       print the isolated environment (for eyeballing)
 
 Layout (default ~/projects/adulting-testbed, override with ADULTING_TESTBED):
@@ -32,14 +36,17 @@ import subprocess
 import sys
 import tarfile
 import io
+import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'tests'))
 from harness import PRODUCTION_VAULT, is_inside, isolated_env  # noqa: E402
 
-# The last commit on main before the refactor began. `run old` executes this.
-BASELINE_COMMIT = '119f90b'
+# What `run old` executes: by default the last commit on main before the
+# package refactor began. A later refactor sets ADULTING_BASELINE to its own
+# starting point (and ADULTING_TESTBED to a testbed of its own).
+BASELINE_COMMIT = os.environ.get('ADULTING_BASELINE', '119f90b')
 
 TESTBED = Path(os.environ.get('ADULTING_TESTBED',
                               Path.home() / 'projects' / 'adulting-testbed'))
@@ -95,6 +102,13 @@ def cmd_create(args):
                              capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(BASELINE, filter='tar')
+    # A baseline from after the package refactor has console scripts, not
+    # root scripts: give it a venv of its own, where own_bin_dirs looks.
+    if (BASELINE / 'pyproject.toml').exists():
+        subprocess.run(['uv', 'venv', '-q', str(BASELINE / '.venv')], check=True)
+        subprocess.run(['uv', 'pip', 'install', '-q', '--python',
+                        str(BASELINE / '.venv' / 'bin' / 'python'), '-e', str(BASELINE)],
+                       check=True)
 
     cmd_reset(args)
     print(f"testbed created at {TESTBED}")
@@ -203,6 +217,59 @@ def cmd_compare(args):
     sys.exit(0 if same else 1)
 
 
+def migrate_working_vault():
+    """Move the working vault into the thread-folder layout, and return the
+    moves as {old absolute path: new absolute path}."""
+    mapping = TESTBED / 'layout-map.json'
+    p = subprocess.run([sys.executable, str(REPO / 'dev' / 'migrate-layout'), str(VAULT),
+                        '--map', str(mapping)], capture_output=True, text=True)
+    if p.returncode != 0:
+        die(f"migrate-layout failed:\n{p.stdout}{p.stderr}")
+    # The vault's own git history must not count the migration as a change
+    # the command made.
+    git('add', '-A', cwd=VAULT)
+    git('commit', '-qm', 'migrate layout', cwd=VAULT)
+    moves = json.loads(mapping.read_text())
+    return {str(VAULT / old): str(VAULT / new) for old, new in moves.items()}
+
+
+def cmd_layout_compare(args):
+    """Old on the old layout, new on the migrated one, with the old output's
+    paths rewritten to where those files went. What remains is a real
+    difference in what the command found."""
+    cmd_reset(args)
+    old = run('old', args.argv, capture=True)
+    cmd_reset(args)
+    moves = migrate_working_vault()
+    new = run('new', args.argv, capture=True)
+    cmd_reset(args)
+
+    def moved(text):
+        # Longest first, so a path is never rewritten by a prefix of itself.
+        for o in sorted(moves, key=len, reverse=True):
+            text = text.replace(o, moves[o])
+        return text
+
+    same = True
+    for label, o, n in (('exit code', old.returncode, new.returncode),
+                        ('stdout', moved(old.stdout), new.stdout),
+                        ('stderr', moved(old.stderr), new.stderr)):
+        if o == n:
+            print(f"same            {label}")
+        elif isinstance(o, str) and sorted(o.splitlines()) == sorted(n.splitlines()):
+            print(f"same, reordered {label}")
+        else:
+            same = False
+            print(f"DIFFERS         {label}")
+            if isinstance(o, str):
+                for line in difflib.unified_diff(o.splitlines(), n.splitlines(),
+                                                 'old', 'new', lineterm=''):
+                    print(f"    {line}")
+            else:
+                print(f"    old: {o}\n    new: {n}")
+    sys.exit(0 if same else 1)
+
+
 def cmd_env(args):
     for k, v in sorted(env_for(args.impl).items()):
         if k in ('HOME', 'ADULTING_HOME', 'PATH') or k.startswith('GIT_'):
@@ -223,13 +290,18 @@ def main():
     d.add_argument('-p', '--patch', action='store_true', help='Show text diffs.')
     cp = sub.add_parser('compare', help='Run old and new from a fresh reset; compare.')
     cp.add_argument('argv', nargs=argparse.REMAINDER)
+    lc = sub.add_parser('layout-compare',
+                        help='Run old on the old layout and new on the migrated one; '
+                             'compare with paths mapped.')
+    lc.add_argument('argv', nargs=argparse.REMAINDER)
     e = sub.add_parser('env', help='Show the environment a run gets.')
     e.add_argument('impl', choices=['new', 'old'])
     args = p.parse_args()
-    if args.cmd in ('run', 'compare') and not args.argv:
+    if args.cmd in ('run', 'compare', 'layout-compare') and not args.argv:
         p.error('give a command to run')
     {'create': cmd_create, 'reset': cmd_reset, 'run': cmd_run, 'diff': cmd_diff,
-     'compare': cmd_compare, 'env': cmd_env}[args.cmd](args)
+     'compare': cmd_compare, 'layout-compare': cmd_layout_compare,
+     'env': cmd_env}[args.cmd](args)
 
 
 if __name__ == '__main__':

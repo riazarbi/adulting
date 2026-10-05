@@ -15,6 +15,8 @@ leaks in anyway:
                 and a `--flag` is a real flag of some command
   truth         nothing claims a command prompts or reads stdin. Nothing
                 does, and the skills said otherwise for months
+  layout        no vault path in the layout the vault had before thread
+                folders
   shape         the agent's own rules: SKILL.md present, frontmatter `name`
                 equal to the folder name, description non-empty, no keys
                 outside the spec whitelist
@@ -32,7 +34,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'dev'))
 from commands import COMMANDS  # noqa: E402
 from surface import (EXEMPT_FLAGS, FLAG_RE, interactivity_claims,  # noqa: E402
-                     manifest, real_names)
+                     manifest, real_names, stale_paths)
 
 # The agent rejects a skill carrying any other key (README: "Unknown keys are
 # rejected"), so a typo here is a skill that silently never loads.
@@ -112,6 +114,8 @@ def problems(path, text, surfaces):
 
     for said in interactivity_claims(text):
         out.append(f"says a command is interactive, and none of them are: {said!r}")
+    for n, line in stale_paths(text):
+        out.append(f"line {n} names a path in the old vault layout: {line!r}")
     return out
 
 

@@ -14,7 +14,7 @@ SURFACE = {
                "set-priority", "add-depends", "rm-depends", "list", "next", "show"]),
     "notes": (["--help-json"], ["new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]),
     "search": (["--help-json"], ["notes", "logs", "activity", "overview", "stream"]),
-    "threads": (["--help-json"], ["list", "show", "new", "delete"]),
+    "threads": (["--help-json"], ["list", "show", "new"]),
     "people": (["--help-json"], ["list", "show", "new", "delete"]),
     "hours": (["--help-json"], ["log", "list", "report", "show", "edit", "rm"]),
     "payments": (["--help-json"], ["log", "list", "statement", "show", "edit", "rm"]),
@@ -171,12 +171,12 @@ def test_every_subcommand_answers_help_json_too(vault, cli):
 # ---------- a file nothing can read ----------
 
 STORES = [
-    ("notes/2026-09-12-08-00-00.md", ["notes", "list"]),
+    ("threads/Projects/SGB/notes/2026-09-12-08-00-00.md", ["notes", "list"]),
     ("threads/Projects/Broken.md", ["threads", "list"]),
     ("people/Broken.md", ["people", "list"]),
-    ("hours/Projects/Broken.md", ["hours", "list"]),
-    ("payments/Projects/Broken.md", ["payments", "list"]),
-    ("logs/Projects/SGB/2026-09-12.md", ["search", "stream"]),
+    ("threads/Projects/Broken/hours.md", ["hours", "list"]),
+    ("threads/Projects/Broken/payments.md", ["payments", "list"]),
+    ("threads/Projects/SGB/logs/2026-09-12.md", ["search", "stream"]),
 ]
 
 
@@ -228,7 +228,7 @@ def test_a_skipped_file_is_not_counted_as_a_failed_action(vault):
     it; nobody can know whether it did."""
     vault.write_thread("Projects", "SGB")
     vault.write_note("2026-09-10-14-30-00", "ACTION: do it", threads=["Projects/SGB"])
-    bad = vault.home / "logs" / "Projects" / "SGB" / "2026-09-12.md"
+    bad = vault.log_path("Projects/SGB", "2026-09-12")
     bad.parent.mkdir(parents=True, exist_ok=True)
     bad.write_bytes(b"---\nthread: x\n---\n\n\xff\xfe bad bytes\n")
 

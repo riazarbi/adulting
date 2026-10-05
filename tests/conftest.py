@@ -12,7 +12,8 @@ Isolation (see tests/harness.py for the why):
   the run and names the files.
 
 The `vault` fixture builds a clean temp vault per test with the standard
-subdirs (notes/, logs/, threads/, people/, .adulting/) pre-created. It
+top-level folders (threads/, people/, .adulting/) pre-created; a thread's
+own folder, threads/<Kind>/<Name>/, is made by whatever writes into it. It
 exposes small helpers for adding content and for invoking this repo's CLIs
 against the temp vault.
 
@@ -74,15 +75,19 @@ class Vault:
         return p
 
     def write_note(self, stem: str, body: str, threads: list[str] | None = None,
-                   topic: str = "Test note", type_: str = "Log") -> Path:
-        """Write notes/<stem>.md with the minimum frontmatter for the
-        note_simple file-scope schema. `stem` must match the timestamp
-        filename shape (YYYY-MM-DD-HH-MM-SS) or lint will skip it.
+                   topic: str = "Test note", type_: str = "Log",
+                   home: str | None = None) -> Path:
+        """Write a note with the minimum frontmatter for the note_simple
+        file-scope schema. `stem` must match the timestamp filename shape
+        (YYYY-MM-DD-HH-MM-SS) or lint will not recognise it.
 
-        threads: list of wikilink targets like 'Projects/SGB'. Body is
-        appended as-is after the frontmatter.
+        threads: list of wikilink targets like 'Projects/SGB'. The note is
+        filed in the folder of `home`, which defaults to the first thread
+        (or Projects/SGB when there is none). Body is appended as-is after
+        the frontmatter.
         """
-        p = self.home / "notes" / f"{stem}.md"
+        home = home or (threads[0] if threads else "Projects/SGB")
+        p = self.note_path(stem, home)
         p.parent.mkdir(parents=True, exist_ok=True)
         fm = ["---", f"topic: {topic}", f"type: {type_}",
               f"timestamp: {stem}"]
@@ -95,11 +100,19 @@ class Vault:
                      encoding="utf-8")
         return p
 
+    def note_path(self, stem: str, thread: str) -> Path:
+        """Where a note lives: in its home thread's folder."""
+        return self.home / "threads" / thread / "notes" / f"{stem}.md"
+
+    def log_path(self, thread: str, date: str) -> Path:
+        """Where a thread's daily log lives."""
+        return self.home / "threads" / thread / "logs" / f"{date}.md"
+
     def write_hours_file(self, kind: str, name: str, entries: list | None = None,
                         currency: str = "ZAR") -> Path:
         """kind in {Projects, Processes, Topics}. entries is a list of entry
         dicts; None writes an empty tracker block."""
-        p = self.home / "hours" / kind / f"{name}.md"
+        p = self.home / "threads" / kind / name / "hours.md"
         p.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"entries": entries or []}, indent=2)
         p.write_text(
@@ -110,7 +123,7 @@ class Vault:
 
     def entries(self, kind: str, name: str) -> list:
         """Parse the tracker block out of a time file."""
-        text = self.read(f"hours/{kind}/{name}.md")
+        text = self.read(f"threads/{kind}/{name}/hours.md")
         lines = text.split("\n")
         i = lines.index("```simple-time-tracker")
         j = lines.index("```", i + 1)
@@ -119,7 +132,7 @@ class Vault:
     def write_payments_file(self, kind: str, name: str,
                             payments: list | None = None,
                             currency: str = "ZAR"):
-        p = self.home / "payments" / kind / f"{name}.md"
+        p = self.home / "threads" / kind / name / "payments.md"
         p.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"payments": payments or []}, indent=2)
         p.write_text(
@@ -129,7 +142,7 @@ class Vault:
         return p
 
     def payments(self, kind: str, name: str) -> list:
-        text = self.read(f"payments/{kind}/{name}.md")
+        text = self.read(f"threads/{kind}/{name}/payments.md")
         lines = text.split("\n")
         i = lines.index("```adulting-payments")
         j = lines.index("```", i + 1)
@@ -220,7 +233,7 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 @pytest.fixture
 def vault(tmp_path: Path, isolated: dict) -> Vault:
     home = tmp_path / "vault"
-    for sub in ("notes", "logs", "threads", "people", "hours", "payments", ".adulting"):
+    for sub in ("threads", "people", ".adulting"):
         (home / sub).mkdir(parents=True, exist_ok=True)
     return Vault(home=home, env=dict(isolated))
 

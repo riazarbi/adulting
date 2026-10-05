@@ -49,22 +49,26 @@ KICKOFF_HEAD = ('---\ntopic: Kickoff\nthreads:\n  - "[[Projects/SGB]]"\n'
 @pytest.fixture
 def inbox(base):
     """Notes with two good ACTIONs and five that fail for different reasons."""
-    base.write("notes/2026-09-10-14-30-00.md", KICKOFF_HEAD +
+    base.write("threads/Projects/SGB/notes/2026-09-10-14-30-00.md", KICKOFF_HEAD +
           "ACTION: (Riaz Arbi) Draft the scope note <!--due:2026-09-20 priority:H depends:aaaa0001-->\n"
           "ACTION: " + "Long description " * 5 + "\n"
           "ACTION: bad attrs <!--due:soon priority:X depends:XYZ colour:red junk 2026-09-10T08:00:00-->\n"
           "ACTION: (Ghost) nobody\n"
           "ACTION:   \n"
           "TASK: [#L] (Charlie) Existing <!--aaaa0001 entry:2026-09-01 due:2026-09-05-->  \n")
-    base.write("notes/2026-09-11-09-00-00.md", "---\ntopic: no threads\n---\n\nACTION: orphan\n")
-    base.write("notes/2026-09-12-09-00-00.md",
+    base.write("threads/Projects/SGB/notes/2026-09-11-09-00-00.md", "---\ntopic: no threads\n---\n\nACTION: orphan\n")
+    base.write("threads/Projects/Gone/notes/2026-09-12-09-00-00.md",
           '---\ntopic: gone\nthreads:\n  - "[[Projects/Gone]]"\n---\n\nACTION: gone thread\n')
     return base
 
 
 def failures(vault):
-    kick = vault.home / "notes" / "2026-09-10-14-30-00.md"
+    kick = vault.note_path("2026-09-10-14-30-00", "Projects/SGB")
+    # Files are walked thread folder by thread folder, so the note filed
+    # under Projects/Gone comes before the two under Projects/SGB.
     return ("\n5 action(s) NOT ingested (left as ACTION: in source):\n"
+            f"  {vault.note_path('2026-09-12-09-00-00', 'Projects/Gone')}:7: "
+            "thread 'Projects/Gone' does not resolve\n"
             f"  {kick}:10: due must be YYYY-MM-DD; got 'soon'\n"
             f"  {kick}:10: priority must be H, M, or L; got 'X'\n"
             f"  {kick}:10: depends must be 8 hex chars; got 'XYZ'\n"
@@ -72,9 +76,7 @@ def failures(vault):
             f"  {kick}:10: unknown attr token 'junk'\n"
             f"  {kick}:11: assignee 'Ghost' does not resolve to people/Ghost.md\n"
             f"  {kick}:12: missing description\n"
-            f"  {vault.home / 'notes' / '2026-09-11-09-00-00.md'}:5: note has no threads:\n"
-            f"  {vault.home / 'notes' / '2026-09-12-09-00-00.md'}:7: "
-            "thread 'Projects/Gone' does not resolve\n"
+            f"  {vault.note_path('2026-09-11-09-00-00', 'Projects/SGB')}:5: note has no threads:\n"
             "\n")
 
 
@@ -87,7 +89,7 @@ def test_ingest_basic_action(vault):
         threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 0, r.stderr
-    note = vault.read("notes/2026-05-27-09-15-22.md")
+    note = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     assert "ACTION:" not in note
     assert re.search(
         r"^TASK: Pick up dry cleaning <!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2}-->  $",
@@ -104,7 +106,7 @@ def test_ingest_appends_markdown_hard_break(vault):
         threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 0, r.stderr
-    lines = anchor_lines(vault, "notes/2026-05-27-09-15-22.md")
+    lines = anchor_lines(vault, "threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     assert len(lines) == 2, lines
     for ln in lines:
         assert ln.endswith("-->  "), repr(ln)
@@ -122,7 +124,7 @@ def test_ingest_with_assignee_and_attrs(vault):
         threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 0, r.stderr
-    note = vault.read("notes/2026-05-27-09-15-22.md")
+    note = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     assert re.search(
         r"^TASK: \[#H\] \(Riaz Arbi\) Send report "
         r"<!--[a-f0-9]{8} entry:\d{4}-\d{2}-\d{2} due:2026-05-29 "
@@ -135,34 +137,33 @@ def test_ingest_unresolved_assignee_fails(vault):
     vault.write_note("2026-05-27-09-15-22",
         "ACTION: (Ghost) Phantom",
         threads=["Projects/SGB"])
-    before = vault.read("notes/2026-05-27-09-15-22.md")
+    before = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     r = vault.run(cli="tasks")
-    path = vault.home / "notes" / "2026-05-27-09-15-22.md"
+    path = vault.note_path("2026-05-27-09-15-22", "Projects/SGB")
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
                         f"  {path}:9: assignee 'Ghost' does not resolve to people/Ghost.md\n\n")
-    assert vault.read("notes/2026-05-27-09-15-22.md") == before
+    assert vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md") == before
 
 
 def test_ingest_unresolved_thread_fails(vault):
     setup_vault(vault, threads=(("Projects", "SGB"),))
-    vault.write_note("2026-05-27-09-15-22",
+    path = vault.write_note("2026-05-27-09-15-22",
         "ACTION: Refers to a missing thread",
         threads=["Projects/Nope"])
-    before = vault.read("notes/2026-05-27-09-15-22.md")
+    before = path.read_text(encoding="utf-8")
     r = vault.run(cli="tasks")
-    path = vault.home / "notes" / "2026-05-27-09-15-22.md"
     assert (r.returncode, r.stdout) == (1, "Ingested: 0.  Failed: 1.\n")
     assert r.stderr == ("\n1 action(s) NOT ingested (left as ACTION: in source):\n"
                         f"  {path}:9: thread 'Projects/Nope' does not resolve\n\n")
-    assert vault.read("notes/2026-05-27-09-15-22.md") == before
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_ingest_is_also_a_named_subcommand(inbox):
     """`tasks` with no subcommand ingests, and `tasks ingest` is the same
     command said out loud, so --dry-run and --quiet belong to both. Either
     order of the flag and the subcommand means the same thing."""
-    before = inbox.read("notes/2026-09-10-14-30-00.md")
+    before = inbox.read("threads/Projects/SGB/notes/2026-09-10-14-30-00.md")
     bare = inbox.run("--dry-run", cli="tasks")
     named = inbox.run("ingest", "--dry-run", cli="tasks")
     before_flag = inbox.run("--dry-run", "ingest", cli="tasks")
@@ -170,7 +171,7 @@ def test_ingest_is_also_a_named_subcommand(inbox):
         assert r.returncode == bare.returncode
         assert r.stderr == bare.stderr
         assert r.stdout.splitlines()[-1] == "Ingested: 0.  Failed: 5."
-    assert inbox.read("notes/2026-09-10-14-30-00.md") == before
+    assert inbox.read("threads/Projects/SGB/notes/2026-09-10-14-30-00.md") == before
     quiet = inbox.run("ingest", "--dry-run", "--quiet", cli="tasks")
     assert quiet.stdout == ""
 
@@ -180,12 +181,12 @@ def test_the_ingest_flags_are_refused_on_another_subcommand(board, flag):
     """`tasks --dry-run done <uuid>` used to flip the anchor to DONE: on disk
     and say nothing. A flag that quietly does nothing is worse than one that
     errors, so it is refused."""
-    before = board.read("logs/Topics/zeta/2026-09-13.md")
+    before = board.read("threads/Topics/zeta/logs/2026-09-13.md")
     r = board.run(flag, "done", "bbbb0001", cli="tasks")
     assert (r.returncode, r.stdout) == (2, "")
     assert r.stderr.endswith(
         f"tasks: error: {flag} applies to ingest only, not to 'done'\n")
-    assert board.read("logs/Topics/zeta/2026-09-13.md") == before
+    assert board.read("threads/Topics/zeta/logs/2026-09-13.md") == before
 
 
 def test_ingest_idempotent(vault):
@@ -195,9 +196,9 @@ def test_ingest_idempotent(vault):
         "ACTION: Once",
         threads=["Projects/SGB"])
     vault.run(cli="tasks")
-    before = vault.read("notes/2026-05-27-09-15-22.md")
+    before = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     vault.run(cli="tasks")
-    after = vault.read("notes/2026-05-27-09-15-22.md")
+    after = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     assert before == after
 
 
@@ -207,14 +208,14 @@ def test_ingest_generates_unique_uuids(vault):
         "ACTION: First\nACTION: Second\nACTION: Third",
         threads=["Projects/SGB"])
     vault.run(cli="tasks")
-    note = vault.read("notes/2026-05-27-09-15-22.md")
+    note = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     uuids = re.findall(r"<!--([a-f0-9]{8}) ", note)
     assert len(uuids) == 3
     assert len(set(uuids)) == 3
 
 
 def test_dry_run_shows_the_anchors_and_writes_nothing(inbox):
-    before = inbox.read("notes/2026-09-10-14-30-00.md")
+    before = inbox.read("threads/Projects/SGB/notes/2026-09-10-14-30-00.md")
     r = inbox.run("--dry-run", cli="tasks")
     assert r.returncode == 1
     day = r"\d{4}-\d{2}-\d{2}"
@@ -226,7 +227,7 @@ def test_dry_run_shows_the_anchors_and_writes_nothing(inbox):
                         rf"<!--{UUID} entry:{day}-->  ", lines[1])
     assert lines[2] == "Ingested: 0.  Failed: 5."
     assert r.stderr == failures(inbox)
-    assert inbox.read("notes/2026-09-10-14-30-00.md") == before
+    assert inbox.read("threads/Projects/SGB/notes/2026-09-10-14-30-00.md") == before
 
 
 def test_dry_run_quiet_prints_only_failures(inbox):
@@ -236,7 +237,7 @@ def test_dry_run_quiet_prints_only_failures(inbox):
 
 def test_ingest_rewrites_good_actions_in_place_and_leaves_the_rest(inbox):
     r = inbox.run(cli="tasks")
-    kick = str(inbox.home / "notes" / "2026-09-10-14-30-00.md")
+    kick = str(inbox.note_path("2026-09-10-14-30-00", "Projects/SGB"))
     assert r.returncode == 1
     out = r.stdout.splitlines()
     assert re.fullmatch(rf"ingested: {UUID}  {re.escape(kick)}:8  Draft the scope note", out[0])
@@ -253,7 +254,7 @@ def test_ingest_rewrites_good_actions_in_place_and_leaves_the_rest(inbox):
                     "ACTION: (Ghost) nobody\n"
                     "ACTION:   \n"
                     "TASK: [#L] (Charlie) Existing <!--aaaa0001 entry:2026-09-01 due:2026-09-05-->  \n"),
-        inbox.read("notes/2026-09-10-14-30-00.md"))
+        inbox.read("threads/Projects/SGB/notes/2026-09-10-14-30-00.md"))
 
 
 def test_ingest_with_nothing_to_do(base):
@@ -266,15 +267,15 @@ def test_ingest_with_nothing_to_do(base):
 
 @pytest.fixture
 def board(base):
-    base.write("notes/2026-09-10-14-30-00.md", KICKOFF_HEAD +
+    base.write("threads/Projects/SGB/notes/2026-09-10-14-30-00.md", KICKOFF_HEAD +
           "TASK: [#H] (Riaz Arbi) Draft the scope note <!--dddd0001 entry:2026-09-10 due:2026-09-20 depends:aaaa0001-->  \n"
           "TASK: [#L] (Charlie) Existing <!--aaaa0001 entry:2026-09-01 due:2026-09-05-->  \n"
           "DONE: Finished <!--aaaa0002 entry:2026-08-01 end:2026-08-03-->\n")
-    base.write("logs/Topics/zeta/2026-09-13.md",
+    base.write("threads/Topics/zeta/logs/2026-09-13.md",
           '---\nthread: "[[Topics/zeta]]"\ndate: 2026-09-13\n---\n\n'
           "TASK: log task <!--bbbb0001 entry:2026-09-13 scheduled:2026-09-30-->\n"
           "TASK: [#M] second log task <!--aaaa0003 entry:2026-09-13-->\n")
-    base.write("notes/2026-09-14-09-00-00.md", "---\ntopic: x\n---\n\nTASK: unthreaded <!--cccc0001 entry:2026-09-14-->\n")
+    base.write("threads/Projects/SGB/notes/2026-09-14-09-00-00.md", "---\ntopic: x\n---\n\nTASK: unthreaded <!--cccc0001 entry:2026-09-14-->\n")
     return base
 
 
@@ -350,7 +351,7 @@ def test_show(board):
         "priority:    L\n"
         "assignee:    Charlie\n"
         "threads:     Projects/SGB, Projects/Alpha\n"
-        f"source:      {board.home / 'notes' / '2026-09-10-14-30-00.md'}:9\n"
+        f"source:      {board.note_path('2026-09-10-14-30-00', 'Projects/SGB')}:9\n"
         "body:        Existing\n"
         "entry:       2026-09-01\n"
         "end:         -\n"
@@ -369,7 +370,7 @@ def test_list_json_carries_the_fields_show_prints(board):
         {"uuid": "dddd0001", "priority": "H", "assignee": "Riaz Arbi",
          "threads": ["Projects/SGB", "Projects/Alpha"],
          "body": "Draft the scope note",
-         "source": f"{board.home / 'notes' / '2026-09-10-14-30-00.md'}:8",
+         "source": f"{board.note_path('2026-09-10-14-30-00', 'Projects/SGB')}:8",
          "entry": "2026-09-10",
          "due": "2026-09-20", "scheduled": None, "depends": ["aaaa0001"],
          "end": None},
@@ -379,8 +380,8 @@ def test_list_json_carries_the_fields_show_prints(board):
 def test_uuid_prefix_errors(board):
     """The ambiguous-prefix error names each file by its vault path, as every
     other line `tasks` prints does (this was deferred bug 7)."""
-    note = board.home / "notes" / "2026-09-10-14-30-00.md"
-    log = board.home / "logs" / "Topics" / "zeta" / "2026-09-13.md"
+    note = board.note_path("2026-09-10-14-30-00", "Projects/SGB")
+    log = board.log_path("Topics/zeta", "2026-09-13")
     r = board.run("show", "aaaa", cli="tasks")
     assert (r.returncode, r.stderr) == (1, "tasks: error: uuid prefix 'aaaa' is ambiguous: "
                                            f"aaaa0001 ({note}:9), "
@@ -413,12 +414,12 @@ def test_mutations_print_and_rewrite_the_line(board):
     for argv, rc, out in steps:
         r = board.run(*argv, cli="tasks")
         assert (r.returncode, r.stdout, r.stderr) == (rc, out, ""), argv
-    assert board.read("logs/Topics/zeta/2026-09-13.md") == (
+    assert board.read("threads/Topics/zeta/logs/2026-09-13.md") == (
         '---\nthread: "[[Topics/zeta]]"\ndate: 2026-09-13\n---\n\n'
         f"DONE: [#L] (Charlie) renamed log task <!--bbbb0001 entry:2026-09-13 end:{date.today().isoformat()} "
         "due:2026-10-01 scheduled:2026-09-25-->  \n"
         "TASK: [#H] second log task <!--aaaa0003 entry:2026-09-13 depends:dddd0001-->  \n")
-    assert board.lines("notes/2026-09-10-14-30-00.md")[8] == (
+    assert board.lines("threads/Projects/SGB/notes/2026-09-10-14-30-00.md")[8] == (
         "TASK: [#L] (Charlie) Existing <!--aaaa0001 entry:2026-09-01 due:2026-10-10-->  ")
 
 
@@ -432,10 +433,10 @@ def test_mutations_print_and_rewrite_the_line(board):
     (["add-depends", "aaaa0003", "aaaa0003"], "tasks: error: a task cannot depend on itself"),
 ])
 def test_mutation_errors_leave_the_file_alone(board, argv, message):
-    before = board.read("logs/Topics/zeta/2026-09-13.md")
+    before = board.read("threads/Topics/zeta/logs/2026-09-13.md")
     r = board.run(*argv, cli="tasks")
     assert (r.returncode, r.stdout, r.stderr) == (1, "", message + "\n")
-    assert board.read("logs/Topics/zeta/2026-09-13.md") == before
+    assert board.read("threads/Topics/zeta/logs/2026-09-13.md") == before
 
 
 def test_done_flips_kind_and_stamps_end(vault):
@@ -445,7 +446,7 @@ def test_done_flips_kind_and_stamps_end(vault):
     r = vault.run("done", "abcd1234", cli="tasks")
     assert r.returncode == 0, r.stderr
     assert r.stdout == "done: abcd1234  Send report\n"
-    assert first_anchor(vault, "notes/2026-05-27-09-15-22.md") == (
+    assert first_anchor(vault, "threads/Projects/SGB/notes/2026-05-27-09-15-22.md") == (
         f"DONE: Send report <!--abcd1234 entry:2026-05-20 end:{date.today().isoformat()}-->  ")
 
 
@@ -455,11 +456,11 @@ def test_rm_depends_unknown_target_fails(vault):
     setup_vault(vault)
     seed_note(vault, "2026-05-27-09-15-22",
         "TASK: t <!--abcd1234 entry:2026-05-20-->")
-    before = vault.read("notes/2026-05-27-09-15-22.md")
+    before = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     r = vault.run("rm-depends", "abcd1234", "deadbeef", cli="tasks")
     assert (r.returncode, r.stdout) == (1, "")
     assert r.stderr == "tasks: error: no task found with uuid prefix 'deadbeef'\n"
-    assert vault.read("notes/2026-05-27-09-15-22.md") == before
+    assert vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md") == before
 
 
 @pytest.mark.parametrize("argv", [
@@ -507,7 +508,7 @@ def test_full_lifecycle(vault):
         threads=["Projects/SGB"])
     r = vault.run(cli="tasks")
     assert r.returncode == 0
-    note = vault.read("notes/2026-05-27-09-15-22.md")
+    note = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     m = re.search(r"<!--([a-f0-9]{8}) entry:", note)
     assert m, note
     u = m.group(1)
@@ -519,7 +520,7 @@ def test_full_lifecycle(vault):
     r = vault.run("done", u, cli="tasks")
     assert r.returncode == 0
 
-    note = vault.read("notes/2026-05-27-09-15-22.md")
+    note = vault.read("threads/Projects/SGB/notes/2026-05-27-09-15-22.md")
     assert "DONE: [#H] (Riaz Arbi) lifecycle test" in note
     assert "due:2026-06-15" in note
     assert "end:" in note

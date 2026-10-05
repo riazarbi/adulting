@@ -1,12 +1,16 @@
-"""What every command shares: the vault's location, errors, config,
-frontmatter, thread and person lookup, ACTION attributes, record files,
-time and money.
+"""What every command shares: the vault's location and layout, errors,
+config, frontmatter, thread and person lookup, ACTION attributes, record
+files, time and money.
 
-Record files: `hours` and `payments` store records the same way, one
-markdown file per thread under a top-level directory that mirrors
-`threads/{Projects,Processes,Topics}/`, with the records as pretty-printed
-JSON inside a fenced code block. Only the fence name and the record shape
-differ.
+Layout: everything that belongs to a thread lives in a folder beside its
+thread file, `threads/<Kind>/<Name>/`. `LAYOUT` below is the one statement
+of where each kind of file lives; the code builds paths from it and the
+manual is told it.
+
+Record files: `hours` and `payments` store records the same way, one file
+per thread (`hours.md`, `payments.md` in the thread's folder), with the
+records as pretty-printed JSON inside a fenced code block. Only the fence
+name and the record shape differ.
 """
 
 import argparse
@@ -151,6 +155,116 @@ def make_dir(path):
 
 KIND_DIRS = {'project': 'Projects', 'process': 'Processes', 'topic': 'Topics'}
 
+
+# ---------- layout ----------
+
+# Where every kind of vault file lives, relative to the vault. The one place
+# the layout is written down: the path helpers below follow it, the schemas'
+# `path:` patterns must be among these values (tests/unit/test_layout.py), and
+# dev/manual-harvest hands it to the manual and the agent tool definitions.
+#
+# A thread is a file and a folder side by side. The file stays at
+# threads/<Kind>/<Name>.md so the wikilink [[<Kind>/<Name>]] resolves in
+# Obsidian as it always has; the folder holds what belongs to the thread.
+LAYOUT = {
+    'thread': 'threads/<Kind>/<Name>.md',
+    'note': 'threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md',
+    'log': 'threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md',
+    'hours': 'threads/<Kind>/<Name>/hours.md',
+    'payments': 'threads/<Kind>/<Name>/payments.md',
+    'person': 'people/<Name>.md',
+    'buffer': 'buffer.md',
+    'config': '.adulting/config.yaml',
+}
+
+# What each placeholder in a LAYOUT pattern stands for. A name has no `/`,
+# which would reach outside its folder, and no `.`: the schemas have always
+# refused one, and a leading dot would hide the file.
+LAYOUT_PARTS = {
+    '<Kind>': '(?:Projects|Processes|Topics)',
+    '<Name>': '[^/.]+',
+    '<YYYY-MM-DD-HH-MM-SS>': r'\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}',
+    '<YYYY-MM-DD>': r'\d{4}-\d{2}-\d{2}',
+}
+
+
+def layout_regex(pattern):
+    """A LAYOUT pattern as a regex over a vault-relative path."""
+    out = re.escape(pattern)
+    for part, rx in LAYOUT_PARTS.items():
+        out = out.replace(re.escape(part), rx)
+    return re.compile(f'^{out}$')
+
+
+def threads_root():
+    return vault_home() / 'threads'
+
+
+def thread_folder(ref):
+    """The folder that holds a thread's notes, logs, hours and payments,
+    given its `Kind/Name` ref. It sits beside the thread file."""
+    return threads_root() / ref
+
+
+def thread_of(path):
+    """The `Kind/Name` ref of the thread folder `path` is inside, or None.
+    The folder a file lives in is its home thread."""
+    parts = Path(rel(path)).parts
+    if len(parts) >= 4 and parts[0] == 'threads' and parts[1] in KIND_DIRS.values():
+        return f"{parts[1]}/{parts[2]}"
+    return None
+
+
+def thread_folders():
+    """(ref, folder) for every thread folder on disk, sorted. A folder is
+    listed whether or not its thread file exists. Nothing reports a folder
+    without one as such: `lint` reports the files in it, whose thread does
+    not resolve, and an empty one goes unremarked."""
+    for kind_dir in KIND_DIRS.values():
+        d = threads_root() / kind_dir
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            if f.is_dir() and not f.name.startswith('.'):
+                yield f"{kind_dir}/{f.name}", f
+
+
+def thread_files(part):
+    """Every `.md` file in the `part` sub-folder (`notes` or `logs`) of
+    every thread folder, sorted by thread, then name. Dotfiles are skipped."""
+    for _, folder in thread_folders():
+        d = folder / part
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            if f.suffix == '.md' and not f.name.startswith('.') and f.is_file():
+                yield f
+
+
+def note_files():
+    return thread_files('notes')
+
+
+def log_files():
+    return thread_files('logs')
+
+
+def notes_named(stem):
+    """Every note file with this stem. There should be at most one: stems
+    are timestamps and unique across the vault, and `lint` reports two."""
+    return [f for f in note_files() if f.stem == stem]
+
+
+def find_note(stem):
+    """The note file with this stem, wherever its thread is, or None. For a
+    note somebody named: if two files share the stem, that is an error, not
+    a guess."""
+    found = notes_named(stem)
+    if len(found) > 1:
+        die(f"note {stem!r} exists more than once: "
+            + ', '.join(full(f) for f in found))
+    return found[0] if found else None
+
 CLOSE = '```'
 ISO = '%Y-%m-%dT%H:%M:%S.000Z'
 
@@ -211,11 +325,56 @@ def unquote(value):
     return value.strip().strip('"').strip("'")
 
 
+def flow_list(raw):
+    """The items of a one-line YAML list (`[a, "b, c"]`), or None if `raw`
+    is not one. Commas inside quotes stay in their item.
+
+    A value that starts with `[[` is a wikilink, not a list: the vault
+    writes `thread: "[[Projects/SGB]]"`, and an unquoted one must read the
+    same way.
+    """
+    raw = raw.strip()
+    if not (raw.startswith('[') and raw.endswith(']')) or raw.startswith('[['):
+        return None
+    items, item, quote, escaped = [], '', None, False
+    for ch in raw[1:-1]:
+        if quote:
+            item += ch
+            if escaped:
+                escaped = False
+            elif ch == '\\' and quote == '"':
+                escaped = True      # `notes new` writes a `"` in a topic as `\"`
+            elif ch == quote:
+                quote = None
+        elif ch in '"\'':
+            quote = ch
+            item += ch
+        elif ch == ',':
+            items.append(item)
+            item = ''
+        else:
+            item += ch
+    items.append(item)
+    return [_list_item(x) for x in items if x.strip()]
+
+
+def _list_item(text):
+    """One flow-list item, its quotes removed and a `\\"` inside double
+    quotes read back as `"`."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        return re.sub(r'\\(.)', r'\1', text[1:-1])
+    if len(text) >= 2 and text[0] == text[-1] == "'":
+        return text[1:-1].replace("''", "'")
+    return text
+
+
 def parse_block(lines):
     """The small YAML subset the vault uses, from frontmatter or config.yaml.
 
-    Values are strings with their quotes removed. A bare `key:` is an empty
-    string, unless indented lines follow it: `  - item` lines make it a list,
+    Values are strings with their quotes removed, or a list for a one-line
+    `[a, b]` (see flow_list). A bare `key:` is an empty string, unless
+    indented lines follow it: `  - item` lines make it a list,
     and a list item that is itself `k: v` starts a mapping that deeper
     `k: v` lines continue (a `cadences:` entry); plain `  k: v` lines make it
     a mapping (a config section). Blank lines and `#` comments are skipped.
@@ -231,7 +390,8 @@ def parse_block(lines):
             m = KEY_RE.match(text)
             key, item = (m.group(1), None) if m else (None, None)
             if m:
-                out[key] = unquote(m.group(2))
+                items = flow_list(m.group(2))
+                out[key] = unquote(m.group(2)) if items is None else items
             continue
         if key is None:
             continue
@@ -433,12 +593,14 @@ def rank_by_query(rows, query, *keys):
 # ---------- thread resolution ----------
 
 def discover_threads():
+    """(kind, name, path) for every thread file. The thread folders beside
+    them are not threads."""
     for kind, subdir in KIND_DIRS.items():
-        d = vault_home() / 'threads' / subdir
+        d = threads_root() / subdir
         if not d.is_dir():
             continue
         for f in sorted(d.iterdir()):
-            if f.suffix == '.md' and not f.name.startswith('.'):
+            if f.suffix == '.md' and not f.name.startswith('.') and f.is_file():
                 yield kind, f.stem, f
 
 
@@ -477,7 +639,7 @@ def is_plain_name(name):
 
 def is_thread(ref):
     """True if `ref` is exactly the `Kind/Name` of a thread file. Checked
-    against the files in threads/, not by asking the filesystem, so case
+    against the thread files on disk, not by asking the filesystem, so case
     matters on macOS as it does on Linux."""
     return any(thread_ref(kind, name) == ref for kind, name, _ in discover_threads())
 
@@ -589,8 +751,8 @@ class Store:
     same shape: "no entry with id 'x'", "received of payment 'x'".
     """
 
-    def __init__(self, subdir, fence, key, heading, noun, stamp):
-        self.subdir = subdir      # hours/ or payments/, under the vault
+    def __init__(self, filename, fence, key, heading, noun, stamp):
+        self.filename = filename  # hours.md or payments.md, in a thread folder
         self.fence = fence        # the opening fence of the JSON block
         self.key = key            # the key the records sit under in that JSON
         self.heading = heading    # appended to the title of a new file
@@ -598,7 +760,7 @@ class Store:
         self.stamp = stamp        # the field that dates a record
 
     def path(self, kind, name):
-        return vault_home() / self.subdir / KIND_DIRS[kind] / f"{name}.md"
+        return thread_folder(thread_ref(kind, name)) / self.filename
 
     def stamp_name(self, record):
         """How a record's timestamp is named in an error."""
@@ -657,8 +819,8 @@ class Store:
         return 0
 
 
-HOURS = Store('hours', HOURS_FENCE, 'entries', ' — hours', 'entry', 'startTime')
-PAYMENTS = Store('payments', PAYMENTS_FENCE, 'payments', ' — payments',
+HOURS = Store('hours.md', HOURS_FENCE, 'entries', ' — hours', 'entry', 'startTime')
+PAYMENTS = Store('payments.md', PAYMENTS_FENCE, 'payments', ' — payments',
                  'payment', 'received')
 STORES = (HOURS, PAYMENTS)
 
@@ -718,7 +880,9 @@ def write_records(path, records, store, ref, currency):
         out = lines[:blk[0] + 1] + payload + lines[blk[1]:]
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        title = f"# {path.stem}{store.heading}"
+        # Every thread's file has the same name, so the title carries the
+        # thread's: `# SGB — hours`.
+        title = f"# {ref.split('/', 1)[-1]}{store.heading}"
         # currency is omitted for a file that only ever holds unbilled time:
         # money is an overlay on hours, not a precondition for recording them.
         head = ['---', f'thread: "[[{ref}]]"']
@@ -728,38 +892,35 @@ def write_records(path, records, store, ref, currency):
     path.write_text('\n'.join(out), encoding='utf-8')
 
 
-def record_files(subdir):
-    d = vault_home() / subdir
-    if not d.is_dir():
-        return
-    for root, dirs, files in os.walk(d):
-        dirs[:] = [x for x in dirs if not x.startswith('.')]
-        for f in sorted(files):
-            if f.endswith('.md') and not f.startswith('.'):
-                yield Path(root) / f
+def record_files(store):
+    """The store's file in every thread folder that has one."""
+    for _, folder in thread_folders():
+        path = folder / store.filename
+        if path.is_file():
+            yield path
 
 
 def find_record(store, record_id):
     """(path, thread_ref, records, record) for the record with this id, or
     None. `records` is every record in its file and `record` is the one in
     that list, so an edit to it can be saved with the rest."""
-    for path in record_files(store.subdir):
+    for path in record_files(store):
         records = read_records(path, store)
         for r in records:
             if r.get('id') == record_id:
                 fm, _ = parse_frontmatter_doc(read_or_die(path))
-                return path, unwiki(fm.get('thread', '')) or path.stem, records, r
+                return path, unwiki(fm.get('thread', '')) or thread_of(path), records, r
     return None
 
 
 def load_all(store):
     """Yield (path, thread_ref, record) for every record in a store."""
-    for path in record_files(store.subdir):
+    for path in record_files(store):
         text = read_utf8(path)
         if text is None:
             continue
         fm, _ = parse_frontmatter_doc(text)
-        ref = unwiki(fm.get('thread', '')) or path.stem
+        ref = unwiki(fm.get('thread', '')) or thread_of(path)
         for r in read_records(path, store):
             yield path, ref, r
 

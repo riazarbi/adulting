@@ -1,6 +1,6 @@
 # Thread-scoped vault layout
 
-Status: agreed in principle; no open questions. No code yet.
+Status: built on branch `thread-scoped-vault`; verified on a copy of the vault. The production vault is not migrated yet.
 
 ## Decisions (2026-10-05)
 
@@ -378,3 +378,345 @@ tool definition can drop its safety note about deletion.
 - Agent skill updates. Per the CLI-vs-agent split, they get their own story
   once the CLI behaviour is agreed.
 - `buffer.md` stays at the root, unchanged.
+
+# Built (2026-10-05)
+
+## Where things ended up
+
+- **`vault.LAYOUT`** is the single statement of the layout. The path helpers
+  (`thread_folder`, `thread_of`, `note_files`, `log_files`, `find_note`,
+  `Store.path`) follow it. Each schema's `path:` must be one of its values
+  (`tests/unit/test_layout.py`), and `dev/manual-harvest` puts it in the
+  corpus as an authoritative "Vault layout" table. The regex-based
+  `vault_paths()` is gone.
+- **Schemas** use `path: threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md` and so
+  on, in place of `directory:` + `filename:`. lint matches a file against
+  `path:` with the placeholders expanded (`<Name>` still refuses a `.`, as
+  `filename:` did).
+- **New lint rules:**
+  - A file in a thread folder whose `thread:` (or first `threads:` entry)
+    is another thread is reported.
+  - A note stem used twice is reported at both places.
+  - Files left in the old root folders are reported as `no matching file
+    schema; is it where the vault layout puts it?`.
+- **REF targets:** `notes new` writes the bare stem.
+  - `hours log` and `payments log` write `<Kind>/<Name>/hours` and
+    `<Kind>/<Name>/payments`.
+  - `buffer add-ref` accepts those forms, plus `<Kind>/<Name>/logs/<date>`,
+    a bare stem, and `people/<Name>`. The old `notes/…` and `hours/…` forms
+    no longer resolve.
+- **New hours and payments files** are titled `# <Name> — hours`, with the
+  name taken from the thread, since every such file is now `hours.md` or
+  `payments.md`. No `aliases:` was added: Obsidian tabs show the filename
+  either way.
+- **`threads delete` is removed**, along with its tests, its README row and
+  its `forbidden_args` policy entry.
+- **The path gate** is `surface.stale_paths`. `manual-check` (whole
+  manual), `tools-check` and `agent-check` all run it. It flags a path that
+  starts at a retired root (`notes/`, `logs/`, `hours/`, `payments/`):
+  - after a vault prefix (`~/vault/`, `$ADULTING_HOME/`, `/vault/`), or
+  - when followed by `<`, `{`, a thread kind, or a digit.
+
+  It leaves prose such as "notes/logs" and a thread's own `notes/` alone.
+- **`dev/migrate-layout VAULT`** does the move.
+  - It refuses the production vault without `--production`, and refuses a
+    git vault that has uncommitted changes.
+  - It never overwrites a file, and a second run does nothing.
+  - It moves a note's attachments (`<stem>-x.png`, linked by relative path)
+    along with the note.
+  - It writes a `--map` of every move.
+- **`dev/testbed`**:
+  - `ADULTING_BASELINE` and `ADULTING_TESTBED` choose the baseline commit
+    and the testbed location.
+  - A package-era baseline gets its own venv.
+  - `layout-compare` runs old on the old layout and new on the migrated
+    vault, with old's paths mapped to their new places.
+
+## Verification on a copy of the production vault
+
+The testbed is at `~/projects/adulting-testbed-threads`, with the baseline at
+`main` (5ea5e84). The previous testbed and its goldens were left untouched.
+
+- **Migration:** moved 135 files from notes/ (133 notes and 2 images that
+  one note links by relative path), 211 from logs/, 17 from hours/ and 2
+  from payments/. It rewrote 141 links in 91 files. No problems were left.
+- **lint:** 456 files and 18 violations, both before and after. They are
+  the same 18, already present in the vault: timestamp shapes, two
+  unresolved people, three closed threads without `ended`, and two
+  sync-conflict copies. Only their order and the wording of the
+  no-schema message differ.
+- **`layout-compare`, same output:** `threads list --all --json`,
+  `people list --all --json`, `notes list --json`, `tasks list`,
+  `tasks next`, `hours report`, `payments list --json`,
+  `payments statement`, `buffer list`, `search activity`,
+  `search notes --thread "AXA DORA" --json`, `search logs --json`.
+- **`layout-compare` scope:** read-only commands only. The commands that
+  write (`notes new`, `buffer flush`, `hours log`, `payments log` and the
+  rest) were checked against the new layout by the test suite alone.
+- **`layout-compare`, explained differences:**
+  - `hours list --json` has the same records. Ties on date and time used
+    to come out in filesystem walk order and now come out in thread order.
+  - `search overview SGB` has the same rows. Only the padding differs,
+    because column width follows path length.
+
+## Tests
+
+- **Full suite:** 965 passing, before the tests added after the mutation
+  run below.
+- **Mutation check.** Each piece of the change was undone in turn:
+  - filing a note under its first thread;
+  - the bare-stem REF;
+  - copying a note beside its source;
+  - the home-thread lint rule;
+  - the duplicate-stem lint rule;
+  - walking the legacy folders;
+  - the self-REF pattern;
+  - thread files only in the stream;
+  - folders not being threads;
+  - titling a record file by its thread;
+  - old REF forms being rejected;
+  - the stale-path gate;
+  - link rewriting in the migration;
+  - attachments moving with their note.
+
+  Each made at least one test fail. Two were missed on the first pass
+  (folders and titling), and tests were added for both.
+- **Weak checks fixed.** Several "writes nothing" tests globbed the old
+  top-level `hours/` and `payments/` folders, and some unreadable-file
+  cases wrote to old paths, so they could not fail. They now look at the
+  new places.
+
+## Still to do (operator)
+
+1. Review the regenerated `MANUAL.md` and `dev/tools/*.json` diff.
+2. Merge with the skill story (`2026-10-05-commit-workflow-thread-folders.md`).
+3. Migrate `~/vault`:
+   - Commit the vault (obsidian-git), so the working tree is clean.
+   - Run `dev/migrate-layout ~/vault --dry-run`. It reports any file it
+     could not move and any it could not write; fix those first.
+   - Run it with `--production`.
+   - Run `lint` and expect the same violations as before.
+   - Commit.
+
+   **To undo** before that last commit:
+   `git -C ~/vault reset --hard && git -C ~/vault clean -fd`. A bare
+   `reset --hard` restores the old paths but leaves the moved copies behind
+   as untracked files, and `clean -fd` removes them. `~/.adulting.bak` is
+   the second restore point.
+
+# Round 1
+
+Response to the first review. Each fix was checked by undoing it on the
+finished tree and running the tests named, which must then fail. The full
+suite was used except where a narrower set is given. All undos were made by
+a script that restored the file afterwards. Final state: **981 passing**;
+syntax, ruff, `--help-json` and the three gates all pass.
+
+## 1. A note stem two notes share
+
+**Decision: reject only the REF lines that name the shared stem.** A
+duplicate stem is a vault problem, and `lint` is where it is reported (at
+both files). It should not take the whole buffer down with it.
+
+- `buffer add-ref <thread> <stem>` refuses with
+  `ref target '<stem>' is the stem of more than one note (<path>, <path>);
+  `lint` reports it, and one must be renamed`, and writes nothing.
+- `buffer tend` reports that line as a violation:
+  `REF target '<stem>' is the stem of more than one note; `lint` names them`.
+  It validates every other line as usual and reports their own problems.
+- `buffer flush` still refuses while `tend` reports anything. That is the
+  existing rule for any invalid line, not something new.
+- A command that names one note (`notes cat`, `delete`, `pdf`, `minutes`,
+  `agenda`, `copy`) still stops with `note '<stem>' exists more than once:
+  <path>, <path>`. Acting on whichever file the walk met first would be a
+  guess.
+
+**What changed:**
+- `vault.notes_named(stem)` lists every match, and `find_note` uses it.
+- `buffer.ref_target_resolves` uses `notes_named` and treats more than one
+  match as not resolving. It no longer calls `find_note`, which stopped the
+  command.
+- The new `buffer.ref_target_problem` words the refusal for `add-ref`.
+
+The reviewer's description was accurate. One correction to its scope: the
+old code stopped the command only when the buffer held a REF to the shared
+stem, not whenever a duplicate existed. But it then stopped the whole
+command with a `find_note` error rather than a violation on the line.
+
+**Tests:**
+- `test_a_stem_two_notes_share_is_an_error_naming_both[cat|delete|pdf]` in
+  `tests/cli/test_notes_cli.py`.
+- `test_add_ref_to_a_shared_stem_is_refused_and_says_why` and
+  `test_tend_rejects_only_the_ref_to_a_shared_stem` in
+  `tests/cli/test_buffer_cli.py`.
+
+**Undone:**
+- Removing `len(found) > 1` in `find_note` fails the three notes tests.
+- Letting the buffer resolve a shared stem to its first match fails both
+  buffer tests.
+- Putting back `return V.find_note(target)` (stop the command) also fails
+  both buffer tests.
+
+## 2. An old path in a docstring, and a gate on the manual's sources
+
+**Fix:** `cmd_flush`'s docstring now names
+`threads/<Kind>/<Name>/logs/<date>.md`.
+
+**Gate:** `manual-check` now also runs `stale_paths` over what the manual
+is generated from: `src/adulting/*.py` (docstrings, help strings and
+messages alike), `src/adulting/schemas/*.md` and `README.md`. On a hit it
+names the file and line, and says to fix the source rather than
+regenerate.
+
+**Checked:**
+- With the gate in place and the docstring not yet fixed, `dev/manual-check`
+  exited 1 with exactly one hit,
+  `src/adulting/buffer.py:539: … 'logs/<thread>/<date>.md (append if exists)
+  and clear the buffer.'`. The line had moved from 519 because of item 1.
+- After the fix it exits 0.
+
+**Tests** in `tests/dev/test_manual_check.py`:
+- the sources list includes the code, the schemas and the README;
+- the old `cmd_flush` docstring is reported at its line;
+- the committed sources have no hit.
+
+**Undone:**
+- Putting the old docstring back fails
+  `test_the_committed_sources_name_no_old_layout_path`, along with the two
+  existing `main` tests, since `main` now fails.
+- Making the gate skip the sources fails
+  `test_a_stale_path_in_a_docstring_is_reported_with_its_place`.
+
+## 3. Two docstrings that were wrong
+
+- The comment above `LAYOUT` now points to `tests/unit/test_layout.py`.
+- `thread_folders()` no longer claims lint reports a folder with no thread
+  file. It now says what happens: lint reports the files in such a folder,
+  because their `thread:` does not resolve, and an empty one goes
+  unremarked. I checked this against a scratch vault, where a log in
+  `threads/Projects/Ghost/` with no `Ghost.md` gives `thread: wikilink
+  '[[Projects/Ghost]]' does not resolve`. No lint rule was added, as the
+  reviewer suggested.
+
+## 4. The migration reads threads as the commands do
+
+**What I found:** the CLI did not accept a one-line list either.
+`parse_block` read `threads: ["[[Projects/A]]", "[[Projects/B]]"]` as one
+string. `note_threads` then gave a single "thread" named by the whole
+string, and lint's own parser kept it as a string too. Switching the script
+to `note_threads` alone would therefore have made it refuse that note,
+consistently with the CLI. 106 notes in the vault already write `aliases:`
+this way, so one-line lists are real.
+
+**What changed:**
+- `vault.flow_list` reads a one-line YAML list:
+  - it splits on commas outside quotes;
+  - it reads `\"` inside double quotes as `"` (`notes new` writes a topic's
+    quotes that way) and `''` inside single quotes as `'`;
+  - a value starting with `[[` stays a wikilink scalar, so an unquoted
+    `thread: [[Projects/A]]` reads as before.
+- `parse_block` and lint's `parse_frontmatter` both use it.
+- `dev/migrate-layout` drops its own parser and calls
+  `V.note_threads(V.parse_frontmatter_doc(text)[0])`.
+- `aliases:` now reads as a list. Nothing in the code reads `aliases`, and
+  no schema declares it.
+
+**Tests:**
+- `test_a_one_line_threads_list_is_read_as_the_commands_read_it` in
+  `tests/dev/test_migrate_layout.py`: a one-line `threads:` note moves to its
+  first thread's folder.
+- `test_a_one_line_threads_list_is_read_as_a_list` in
+  `tests/cli/test_lint_cli.py`: lint is clean when the note is under its
+  first thread, and reports the home-thread rule when it is not.
+- Four parser tests in `tests/unit/test_vault.py`, including lint and
+  `parse_frontmatter_doc` agreeing.
+
+**Undone:**
+- Taking flow lists out of `parse_block` fails the migration test and two
+  vault tests.
+- Taking them out of lint's parser fails the lint test and the agreement
+  test.
+- Removing the escape handling fails the quoting test.
+
+## 5. What the migration does not do
+
+It does not rewrite ordinary markdown links (`[text](path)`,
+`![alt](path)`). A note moves two folders deeper, so a relative link in one
+would break. The vault has no such links apart from a note's own
+attachments, which move with it. This is now stated in the script's
+docstring, with the `grep` to run before migrating a vault that might have
+others, and here.
+
+## 6. What `layout-compare` covers
+
+`layout-compare` covered **read-only commands only**. The commands that
+write — `notes new`, `notes copy`, `buffer add-*`, `buffer flush`,
+`tasks` ingest and mutations, `hours log`, `edit`, `rm`, `payments log` —
+were checked against the new layout by the test suite alone, not on the
+copy of the vault.
+
+## MANUAL.md
+
+Not regenerated. Nothing the harvester reads changed in this round:
+- the tool modules' docstrings, `--help` and `--help-json`;
+- the `die()` lines it collects as exit codes;
+- the schemas, README.md and `vault.LAYOUT`.
+
+The source changes were all in function docstrings, error messages raised
+as `ValueError`, and parsing. `manual-check` and `tools-check` pass against
+the committed MANUAL.md and tool definitions.
+
+# Round 2
+
+**The problem:** the migration could fail halfway. On a read-only copy it
+moved every file, then stopped with a `PermissionError` traceback while
+rewriting links. The vault was left with every file moved and some links
+rewritten, which is neither layout.
+
+## 1. Nothing changes unless everything can
+
+`dev/migrate-layout` now plans the whole migration and then checks it
+against the filesystem before touching anything (`unwritable()`):
+- each move needs its source folder to be writable, and the first existing
+  folder on the way to its target;
+- each file whose links are rewritten must be writable itself.
+
+If anything fails the check, every such file is reported as `problem:
+<path>: … not writable`, followed by `nothing changed: every file must be
+writable before any is moved`, and the run exits 1. `--dry-run` reports the
+same, so it shows these files before a real run does.
+
+One step still runs after the moves: removing the old root folders once
+they are empty. If that fails, it is reported as a problem and leaves an
+empty folder behind; it no longer raises.
+
+**Test:** `test_nothing_changes_unless_everything_can` in
+`tests/dev/test_migrate_layout.py`, with three cases:
+- a read-only log whose links need rewriting;
+- a read-only file that does not move but is rewritten (`people/`);
+- a read-only `notes/` folder that files must leave.
+
+Each case asserts exit 1, the two messages, no traceback, and the vault
+unchanged byte for byte. "Unchanged" means every file's bytes and every
+path, folders included, are the same before and after.
+
+**Undone:** with the check disabled (`blocked = []`), all three cases
+fail.
+
+**On a real copy:**
+- A `cp -Rp` copy of the testbed's read-only `pristine/` exits 1 and
+  reports 91 files as not writable, with no traceback. A checksum of every
+  path, mode, size and file's contents is identical before and after.
+- A writable copy, after `dev/testbed reset`, migrates as before: 135 + 211
+  + 17 + 2 files and 141 links, then lint reports the same 18 violations.
+
+## 2. Recovery instructions
+
+`git reset --hard` alone restores the old paths but leaves the moved
+copies behind as untracked files. The undo is
+`git reset --hard && git clean -fd`. This is now stated in the script's
+docstring and in the operator steps above ("Still to do", step 3).
+
+Final state: `tests/dev` passes, and syntax, ruff, `--help-json` and the
+three gates pass. Only `dev/migrate-layout` and its tests changed in this
+round, so nothing the manual is built from changed.

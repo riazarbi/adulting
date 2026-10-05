@@ -2,6 +2,26 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-05 - Everything that belongs to a thread lives in the thread's folder
+
+Stories: `stories/2026-10-05-thread-scoped-vault.md` (CLI) and
+`stories/2026-10-05-commit-workflow-thread-folders.md` (agent skill). The
+vault's data partitions by thread, so the layout now does too.
+
+- **Layout:** notes, logs, hours and payments move from four root trees into `threads/<Kind>/<Name>/` beside the thread file: `notes/<stem>.md`, `logs/<date>.md`, `hours.md` and `payments.md`. Thread files, `people/`, `assets/` and `buffer.md` stay where they were, so `[[<Kind>/<Name>]]` links are unchanged.
+- **One statement of the layout:** `vault.LAYOUT` drives the path helpers, the schemas' new `path:` field (which replaces `directory:` + `filename:`), and a "Vault layout" table in the manual corpus.
+- **Notes in several threads** are filed under the first thread they name; `threads:` stays the authority on membership. A note is still found by its stem alone.
+- **REF targets:** `notes new` writes `[[<stem>]]`, `hours log` writes `[[<Kind>/<Name>/hours]]` and `payments log` writes `[[<Kind>/<Name>/payments]]`. The old `notes/…`, `logs/…`, `hours/…` and `payments/…` targets no longer resolve.
+- **lint:** reports a file whose thread is not its folder's, a note stem used twice, and anything left in the old root folders.
+- **Removed:** `threads delete`. Closing a thread is `status: closed`; removing one is done by hand.
+- **Path gate:** `manual-check`, `tools-check` and `agent-check` reject any vault path in the old layout. Before this, no gate looked at paths.
+- **`dev/migrate-layout VAULT`** moves a vault and rewrites its links. It refuses the production vault without `--production` and refuses a dirty git vault, never overwrites, and a second run does nothing. `dev/testbed` gained `ADULTING_BASELINE`, `ADULTING_TESTBED` and `layout-compare`.
+- **Verified on a copy of the production vault:** 365 files moved and 141 links rewritten. lint reports the same 18 pre-existing violations before and after. Fourteen read commands give the same records old-on-old as new-on-migrated.
+- **Tests:** the suite was moved to the new layout, with new tests for the layout, lint rules, REF forms, the gate and the migration. Every piece of the change was undone in turn, and each undo failed a test.
+- **Review round 1:** a REF to a note stem two notes share is now one invalid buffer line, not the end of the command. One-line YAML lists (`threads: ["[[A]]"]`) are read as lists by the CLI, lint and the migration alike. `manual-check` now also scans the manual's sources (`src/`, schemas, README) for old-layout paths.
+- **Review round 2:** `dev/migrate-layout` checks that every move and rewrite can be made before changing anything; one unwritable file means exit 1 and an untouched vault. The undo is `git reset --hard && git clean -fd`.
+- **984 passing, `dev/ci` green.**
+
 ## 2026-10-02 - `buffer flush` skips an ACTION that is already an open task
 
 Story: `stories/2026-09-23-idempotent-task-flush.md`. Whoever adds a task

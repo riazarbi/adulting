@@ -75,7 +75,7 @@ def test_every_packaged_schema_loads():
         "note_simple", "payments_file", "person", "task_anchor", "thread",
         "thread_entry"]
     thread = schemas["thread"]
-    assert thread["scope"] == "file" and thread["directory"] == "threads"
+    assert thread["scope"] == "file" and thread["where"] == "threads/<Kind>/<Name>.md"
     assert thread["fields"]["status"] == {
         "required": True, "type": "enum",
         "constraint": {"enum": ["open", "paused", "closed"]}}
@@ -134,25 +134,33 @@ def test_wikilink_exists_looks_in_the_current_vault(tmp_path, monkeypatch):
     assert not L.wikilink_exists("Elsewhere/X")
 
 
-def test_find_file_schema_matches_directory_and_filename(tmp_path, monkeypatch):
+def test_find_file_schema_matches_the_layout_path(tmp_path, monkeypatch):
     monkeypatch.setenv("ADULTING_HOME", str(tmp_path))
     schemas = L.load_schemas(L.SCHEMAS_DIR)
-    note = tmp_path / "notes" / "2026-09-10-14-30-00.md"
+    note = tmp_path / "threads" / "Projects" / "SGB" / "notes" / "2026-09-10-14-30-00.md"
     assert L.find_file_schema(note, {"type": "Meeting"}, schemas)["name"] == "note_meeting"
     assert L.find_file_schema(note, {"type": "Report"}, schemas)["name"] == "note_simple"
-    log = tmp_path / "logs" / "Projects" / "SGB" / "2026-09-10.md"
+    log = tmp_path / "threads" / "Projects" / "SGB" / "logs" / "2026-09-10.md"
     assert L.find_file_schema(log, {}, schemas)["name"] == "log"
     assert L.find_file_schema(tmp_path / "threads" / "x.y.md", {}, schemas) is None
+    # The old top-level homes match nothing now.
+    assert L.find_file_schema(tmp_path / "notes" / "2026-09-10-14-30-00.md",
+                              {"type": "Report"}, schemas) is None
+    assert L.find_file_schema(tmp_path / "logs" / "Projects" / "SGB" / "2026-09-10.md",
+                              {}, schemas) is None
 
 
 def test_discover_files_walks_known_dirs_only(tmp_path, monkeypatch):
+    """Thread folders and people are walked, and so are the legacy root
+    folders, so a file left there is reported."""
     monkeypatch.setenv("ADULTING_HOME", str(tmp_path))
     for rel in ["notes/a.md", "threads/Projects/b.md", "assets/c.md",
+                "threads/Projects/b/notes/f.md",
                 "notes/.hidden.md", "notes/d.md.bak", "notes/.obsidian/e.md"]:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x")
     found = [p.relative_to(tmp_path).as_posix() for p in L.discover_files()]
-    assert found == ["notes/a.md", "threads/Projects/b.md"]
+    assert found == ["threads/Projects/b.md", "threads/Projects/b/notes/f.md", "notes/a.md"]
 
 
 # ---------- task graph ----------

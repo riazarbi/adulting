@@ -1,4 +1,4 @@
-"""Operate on the buffer queue at ~/vault/buffer.md.
+"""Operate on the buffer queue at buffer.md, in the vault's root.
 
 The buffer is the staging area for captured items. Four line types:
     ACTION:  action item that becomes a TASK anchor after flush
@@ -14,7 +14,10 @@ Single line format (no multi-line entries; one capture per line):
     - UNKNOWN: <body>                                                 <!--<TS>-->
 
 where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
-wikilink to threads/<Kind>/<Name>.md. Attrs (ACTION only) carry what
+wikilink to threads/<Kind>/<Name>.md. A REF target is a thread
+(`<Kind>/<Name>`), a file in a thread's folder (`<Kind>/<Name>/hours`,
+`<Kind>/<Name>/payments`, `<Kind>/<Name>/logs/<date>`), a note's bare
+stem, or `people/<Name>`. Attrs (ACTION only) carry what
 ingest puts on the TASK anchor it creates:
 
     due:YYYY-MM-DD     scheduled:YYYY-MM-DD
@@ -35,7 +38,8 @@ Subcommands:
     list       [<grep>] [--json]
     rm         <line-number>
     tend                                 (regroup + validate; idempotent)
-    flush                                (tend, then write logs/, clear buffer)
+    flush                                (tend, then write each thread's
+                                          logs/, clear buffer)
 
 Operators (human or agent) interact only via these commands. Direct
 edits to buffer.md are discouraged — `tend` is the way to fix things,
@@ -121,14 +125,35 @@ def format_action_attrs(attrs):
 
 def ref_target_resolves(target):
     """The file a REF target names, spelt exactly, or None. A target is a
-    thread (`<Kind>/Name`) or any file under notes/, logs/, people/, hours/
-    or payments/, without its `.md`."""
+    thread (`<Kind>/<Name>`), any file in a thread's folder
+    (`<Kind>/<Name>/hours`, `<Kind>/<Name>/logs/<date>`, ...), a person
+    (`people/<Name>`) or a note's bare stem, always without its `.md`."""
     target = target.strip()
     if target.startswith(('Projects/', 'Processes/', 'Topics/')):
         return V.vault_file(f"threads/{target}.md")
-    if target.startswith(('people/', 'notes/', 'logs/', 'hours/', 'payments/')):
+    if target.startswith('people/'):
         return V.vault_file(f"{target}.md")
+    if V.is_plain_name(target):
+        # Not find_note, which stops the command: a stem two notes share is
+        # one bad REF line, reported as such, not the end of the buffer.
+        found = V.notes_named(target)
+        return found[0] if len(found) == 1 else None
     return None
+
+
+def ref_target_problem(target):
+    """Why a REF target does not resolve, in words, or None if it does."""
+    target = target.strip()
+    if ref_target_resolves(target):
+        return None
+    if V.is_plain_name(target) and len(V.notes_named(target)) > 1:
+        where = ', '.join(V.full(f) for f in V.notes_named(target))
+        return (f"ref target {target!r} is the stem of more than one note "
+                f"({where}); `lint` reports it, and one must be renamed")
+    return (f"ref target {target!r} does not resolve to a vault file "
+            f"(expected <Kind>/<Name>, <Kind>/<Name>/hours, "
+            f"<Kind>/<Name>/payments, <Kind>/<Name>/logs/<date>, "
+            f"a note stem, or people/<Name>)")
 
 
 def read_buffer():
@@ -210,9 +235,9 @@ def buffer_ref(thread, target, summary, date=None):
     thread = canonical_thread(thread)
     target = target.strip()
     summary = (summary or '').strip()
-    if not ref_target_resolves(target):
-        raise ValueError(f"ref target {target!r} does not resolve to a vault file "
-                         f"(expected notes/X, logs/X, people/X, hours/X, payments/X, or <Kind>/X)")
+    problem = ref_target_problem(target)
+    if problem:
+        raise ValueError(problem)
     body = f"[[{target}]]" + (f" {summary}" if summary else "")
     line = f"- [[{thread}]] REF: {body} <!--{stamp(date)}-->"
     append_line(line)
@@ -382,7 +407,11 @@ def validate_entry(e):
             return
         target = wm.group(1).strip()
         if not ref_target_resolves(target):
-            yield f"REF target {target!r} does not resolve to a vault file"
+            if V.is_plain_name(target) and len(V.notes_named(target)) > 1:
+                yield (f"REF target {target!r} is the stem of more than one note; "
+                       f"`lint` names them")
+            else:
+                yield f"REF target {target!r} does not resolve to a vault file"
 
     elif e['type'] == 'TEXT':
         if not e['body']:
@@ -506,8 +535,9 @@ def skip_duplicates(entries, tasks):
 
 
 def cmd_flush(args):
-    """Tend, then if clean, write each (thread, date) group to
-    logs/<thread>/<date>.md (append if exists) and clear the buffer.
+    """Tend, then if clean, write each (thread, date) group to the thread's
+    daily log, threads/<Kind>/<Name>/logs/<date>.md (append if it exists),
+    and clear the buffer.
 
     An ACTION that is already an open task, or that repeats one earlier in
     the buffer, is not written: it is reported on stdout as a result, beside
@@ -538,8 +568,7 @@ def cmd_flush(args):
 
     written_files = []
     for (thread, date), group in sorted(by_group.items()):
-        kind, name = thread.split('/', 1)
-        log_dir = V.vault_home() / 'logs' / kind / name
+        log_dir = V.thread_folder(thread) / 'logs'
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{date}.md"
 
@@ -579,7 +608,7 @@ def cmd_flush(args):
     # below writes to stderr: stdout is block-buffered when piped.
     sys.stdout.flush()
 
-    # Ingest so any ACTION lines just written to logs/ become task anchors
+    # Ingest so any ACTION lines just written to the logs become task anchors
     # immediately. Its output is passed through, not silenced, so the
     # operator or agent can read the new uuid prefixes off the summary lines.
     # The buffer is already cleared, so a failure here must not fail the
@@ -615,9 +644,9 @@ def main():
     p = sub.add_parser('add-ref', help="Append a REF entry.")
     add_date_flag(p)
     p.add_argument('thread', help="Thread name, 'Kind/Name', or wikilink.")
-    p.add_argument('target', help="Wikilink target: notes/<stem>, logs/<path>, people/<name>, "
-                         "hours/<Kind>/<Thread>, payments/<Kind>/<Thread>, "
-                         "or <Kind>/<Thread>.")
+    p.add_argument('target', help="Wikilink target: <Kind>/<Thread>, <Kind>/<Thread>/hours, "
+                         "<Kind>/<Thread>/payments, <Kind>/<Thread>/logs/<date>, "
+                         "a note's <stem>, or people/<name>.")
     p.add_argument('summary', nargs='?', default='', help="Optional words shown after the link.")
     p.set_defaults(func=cmd_add_ref)
 
@@ -644,7 +673,7 @@ def main():
     p = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")
     p.set_defaults(func=cmd_tend)
 
-    p = sub.add_parser('flush', help="Tend, then write to logs/, clear buffer, and ingest the flushed "
+    p = sub.add_parser('flush', help="Tend, then write to each thread's logs/, clear buffer, and ingest the flushed "
                                      "ACTIONs into tasks; there is no need to run `tasks` after. An ACTION that "
                                      "is already an open task is skipped and reported as "
                                      "`already a task: <uuid>  <path:line>  <description>`; "

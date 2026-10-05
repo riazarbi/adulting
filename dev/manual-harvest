@@ -13,8 +13,9 @@ Sources, in order of authority for the command surface:
   2. `<tool> --help` (+ per-subcommand --help)  rendered usage text
   3. the tool's module docstring  intent, worked examples
   4. src/adulting/schemas/*.md    on-disk data formats
-  5. constants in the sources     vault paths, environment variables
-  6. README.md                    authored background prose
+  5. vault.LAYOUT                 where every kind of vault file lives
+  6. constants in the sources     environment variables
+  7. README.md                    authored background prose
 
 Harvesting is the expensive step: it executes every operator binary and each
 of their subcommands. --from-json re-renders a previously harvested corpus
@@ -37,6 +38,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'dev'))
+# This checkout's package, for vault.LAYOUT, whatever python runs the script.
+sys.path.insert(0, str(REPO / 'src'))
 # The operator surface. Everything under dev/ is a developer tool and is
 # deliberately absent: none of it may appear in the manual.
 from commands import COMMANDS as TOOLS  # noqa: E402
@@ -137,15 +140,6 @@ def exit_codes(tool):
             for c in sorted(found)]
 
 
-def vault_paths(tool):
-    """Vault subdirectories the tool reads or writes, from its constants."""
-    src = tool_source(tool).read_text(encoding='utf-8')
-    hits = set(re.findall(r"(?:HOME|vault_home\(\))\s*/\s*'([^']+)'", src))
-    # Paths written out in docstrings, e.g. `$ADULTING_HOME/hours/...`.
-    hits |= set(re.findall(r'\$ADULTING_HOME/([A-Za-z0-9_./-]+)', src))
-    return sorted(hits)
-
-
 def env_vars(tool):
     src = tool_source(tool).read_text(encoding='utf-8')
     hits = set(re.findall(r"environ(?:\.get)?[\(\[]\s*'([A-Z][A-Z0-9_]*)'", src))
@@ -167,7 +161,6 @@ def harvest_tool(tool):
         'subcommand_help': {s: t for s in subs
                             if (t := help_text(tool, s)) is not None},
         'exit_codes': exit_codes(tool),
-        'vault_paths': vault_paths(tool),
         'env_vars': env_vars(tool),
     }
 
@@ -177,6 +170,14 @@ def harvest_schemas():
     for path in sorted((REPO / 'src' / 'adulting' / 'schemas').glob('*.md')):
         out.append({'name': path.stem, 'text': path.read_text(encoding='utf-8').strip()})
     return out
+
+
+def harvest_layout():
+    """Where every kind of vault file lives, from vault.LAYOUT: the same
+    declaration the code builds its paths from, so the manual cannot be told
+    a layout the commands do not use."""
+    from adulting.vault import LAYOUT
+    return [{'kind': kind, 'path': path} for kind, path in LAYOUT.items()]
 
 
 def harvest_readme():
@@ -200,6 +201,7 @@ def harvest():
         'repo': 'adulting',
         'operator_tools': TOOLS,
         'tools': [harvest_tool(t) for t in TOOLS],
+        'layout': harvest_layout(),
         'schemas': harvest_schemas(),
         'readme_sections': harvest_readme(),
     }
@@ -222,10 +224,20 @@ def render_md(data):
     w("")
     w(f"Operator tools: {', '.join(data['operator_tools'])}")
     w("")
+    w("## Vault layout (authoritative)")
+    w("")
+    w("Where every kind of file lives, relative to the vault root")
+    w("(`$ADULTING_HOME`, default `~/vault`). The commands build every path")
+    w("from this table. `<Kind>` is Projects, Processes or Topics.")
+    w("")
+    w("| kind | path |")
+    w("|---|---|")
+    for row in data.get('layout', []):
+        w(f"| {row['kind']} | `{row['path']}` |")
+    w("")
     for t in data['tools']:
         w(f"## Tool: `{t['name']}`")
         w("")
-        w(f"- vault paths: {', '.join(t['vault_paths']) or '(none detected)'}")
         w(f"- environment: {', '.join(t['env_vars']) or '(none detected)'}")
         w("")
         if t['docstring']:

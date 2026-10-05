@@ -404,7 +404,7 @@ def test_vault_file_needs_the_exact_spelling_and_stays_in_the_vault():
 
 
 def test_find_record_returns_the_record_inside_its_files_list():
-    path = V.vault_home() / "hours" / "Projects" / "SGB.md"
+    path = V.vault_home() / "threads" / "Projects" / "SGB" / "hours.md"
     V.write_records(path, [{"id": "aaaa0001"}, {"id": "aaaa0002"}], STORE, "Projects/SGB", None)
     found_path, ref, records, record = V.find_record(STORE, "aaaa0002")
     assert (found_path, ref, record) == (path, "Projects/SGB", {"id": "aaaa0002"})
@@ -444,3 +444,31 @@ def test_split_assignee():
     assert V.split_assignee("(Riaz Arbi) Draft it") == ("Riaz Arbi", "Draft it")
     assert V.split_assignee("Draft it") == ("", "Draft it")
     assert V.split_assignee("(Riaz Arbi)  ") == ("Riaz Arbi", "")
+
+
+# ---------- one-line lists ----------
+
+def test_a_one_line_list_is_a_list():
+    fm, _ = V.parse_frontmatter_doc(
+        '---\nthreads: ["[[Projects/A]]", "[[Projects/B]]"]\nempty: []\n---\n')
+    assert fm['threads'] == ['[[Projects/A]]', '[[Projects/B]]']
+    assert V.note_threads(fm) == ['Projects/A', 'Projects/B']
+    assert fm['empty'] == []
+
+
+def test_a_one_line_list_keeps_commas_and_escaped_quotes_inside_quotes():
+    assert V.flow_list(r'["Say \"hi, there\"", b, ' + "'it''s']") == [
+        'Say "hi, there"', 'b', "it's"]
+
+
+def test_an_unquoted_wikilink_is_not_a_list():
+    fm, _ = V.parse_frontmatter_doc('---\nthread: [[Projects/A]]\n---\n')
+    assert fm['thread'] == '[[Projects/A]]'
+    assert V.flow_list('[[Projects/A]]') is None
+    assert V.flow_list('[Draft] notes') is None
+
+
+def test_lint_reads_a_one_line_list_as_the_cli_does():
+    from adulting import lint as L
+    text = '---\nthreads: ["[[Projects/A]]"]\naliases: ["a, b"]\n---\n'
+    assert L.parse_frontmatter(text)[0] == V.parse_frontmatter_doc(text)[0]

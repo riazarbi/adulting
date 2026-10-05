@@ -1,7 +1,7 @@
 """Statement of account: charges, payments, running balance, aging.
 
 Reads nothing itself — callers hand it entries and payments already collected
-from `hours/` and `payments/`. Money is Decimal throughout, never float, and
+from the thread's `hours.md` and `payments.md`. Money is Decimal throughout, never float, and
 charges land on whole cents at the line so the printed lines always sum to the
 printed total.
 

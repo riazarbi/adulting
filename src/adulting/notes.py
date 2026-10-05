@@ -1,7 +1,12 @@
-"""Work with notes in ~/vault/notes/, named by stem.
+"""Work with notes, named by stem.
 
 A note's stem is its filename without `.md`, e.g. `2026-09-10-14-30-00`.
-`notes list` shows every stem; the other subcommands take one.
+Stems are unique across the vault, so a stem is all a subcommand needs:
+`notes list` shows every stem, and the other subcommands take one.
+
+A note lives in the folder of the first thread it names, at
+threads/<Kind>/<Name>/notes/<stem>.md. Its `threads:` frontmatter says which
+threads it belongs to; a note in two threads is filed under the first.
 
   notes new --type T --topic X --thread K/N [...]   create a note, print its path
   notes list [filter]        stem, date, type, threads and topic of each note
@@ -38,21 +43,17 @@ NOTE_TYPES = ['Meeting', 'Correspondence', 'Workshop', 'Report', 'Log', 'Researc
 PEOPLE_TYPES = ('Meeting', 'Correspondence')
 
 
-def notes_dir():
-    return V.vault_home() / 'notes'
-
-
 def note_path(stem):
-    """The file for a stem. A trailing `.md` is tolerated; anything else
-    that is not a note in notes/ is an error."""
+    """The file for a stem, in whichever thread folder it lives. A trailing
+    `.md` is tolerated; a stem that names no note is an error."""
     name = stem.strip()
     if name.endswith('.md'):
         name = name[:-3]
     if not name or not V.is_plain_name(name):
         V.die(f"give a note stem like 2026-09-10-14-30-00, got {stem!r}")
-    path = notes_dir() / f"{name}.md"
-    if not path.is_file():
-        V.die(f"no note {name!r} in {notes_dir()}")
+    path = V.find_note(name)
+    if path is None:
+        V.die(f"no note {name!r}")
     return path
 
 
@@ -82,9 +83,7 @@ def sort_key(info):
 
 
 def all_notes():
-    if not notes_dir().is_dir():
-        return []
-    infos = [note_info(p) for p in notes_dir().glob('*.md') if not p.name.startswith('.')]
+    infos = [note_info(p) for p in V.note_files()]
     return sorted([i for i in infos if i is not None], key=sort_key)
 
 
@@ -156,17 +155,20 @@ def cmd_new(args):
             threads.append(ref)
 
     stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    path = notes_dir() / f"{stem}.md"
-    if path.exists():
-        V.die(f"{V.full(path)} already exists; try again in a second")
-    notes_dir().mkdir(parents=True, exist_ok=True)
+    # Filed under the first thread named; the frontmatter lists them all.
+    path = V.thread_folder(threads[0]) / 'notes' / f"{stem}.md"
+    taken = V.find_note(stem)
+    if taken:
+        V.die(f"{V.full(taken)} already exists; try again in a second")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(note_text(stem, args.type, topic, threads, people,
                               (args.counterparty or '').strip(), (args.location or '').strip()),
                     encoding='utf-8')
     # A REF per thread puts the note in each thread's daily log on the next
-    # flush. Best-effort, as for hours and payments.
+    # flush. Best-effort, as for hours and payments. The link is the bare
+    # stem: it is unique, so it resolves wherever the note is filed.
     for thread in threads:
-        line = buffer.add_ref(thread, f"notes/{stem}", topic)
+        line = buffer.add_ref(thread, stem, topic)
         if line:
             print(f"buffered: {line}")
     print(path)
@@ -201,7 +203,7 @@ def cmd_cat(args):
 def cmd_last(args):
     rows = all_notes()
     if not rows:
-        V.die(f"no notes in {notes_dir()}")
+        V.die("no notes in the vault")
     print(rows[-1]['path'])
     return 0
 
@@ -209,9 +211,11 @@ def cmd_last(args):
 def cmd_copy(args):
     source = note_path(args.stem)
     stem = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    target = notes_dir() / f"{stem}.md"
-    if target.exists():
-        V.die(f"{target} already exists; try again in a second")
+    # The copy keeps the original's threads, so it is filed beside it.
+    target = source.parent / f"{stem}.md"
+    taken = V.find_note(stem)
+    if taken:
+        V.die(f"{taken} already exists; try again in a second")
     # Every line that starts with `topic:` gets the suffix, body lines
     # included, and the copy keeps the original timestamp (deferred bug 4).
     lines = V.read_or_die(source).split('\n')

@@ -1,13 +1,14 @@
 ---
 schema: thread
 scope: file
-directory: threads
-filename: ^[^.]+\.md$
+path: threads/<Kind>/<Name>.md
 ---
 
 # Thread file
 
-Markdown file holding a chronological log of an ongoing project, process, or relationship. One file per thread. Lives in `~/vault/threads/` (top-level for projects/processes; commonly under `~/vault/threads/People/` for relationships, but flat layouts are also valid).
+Markdown file holding a chronological log of an ongoing project, process, or topic. One file per thread, at `~/vault/threads/<Kind>/<Name>.md`, where `<Kind>` is `Projects`, `Processes` or `Topics`.
+
+Beside the file is the thread's folder, `~/vault/threads/<Kind>/<Name>/`, holding everything that belongs to the thread: `notes/`, `logs/`, `hours.md` and `payments.md`. The file stays outside the folder so that the wikilink `[[<Kind>/<Name>]]` names it.
 
 ## Fields
 

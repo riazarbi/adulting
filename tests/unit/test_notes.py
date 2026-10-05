@@ -9,7 +9,8 @@ from adulting import notes as N
 
 @pytest.fixture
 def notes_dir():
-    d = N.notes_dir()
+    """A thread's notes folder; notes live in their first thread's folder."""
+    d = N.V.thread_folder("Projects/SGB") / "notes"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -53,7 +54,7 @@ def test_all_notes_skips_dot_files_and_handles_a_missing_dir(notes_dir, tmp_path
 
 def test_ingest_actions_turns_an_action_into_a_task_anchor_quietly(notes_dir, capsys):
     threads = N.V.vault_home() / "threads" / "Projects"
-    threads.mkdir(parents=True)
+    threads.mkdir(parents=True, exist_ok=True)
     (threads / "SGB.md").write_text("---\nstatus: open\n---\n")
     note = notes_dir / "2026-09-10-14-30-00.md"
     note.write_text('---\nthreads:\n  - "[[Projects/SGB]]"\n---\n\nACTION: do it\n')

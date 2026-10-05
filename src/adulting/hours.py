@@ -1,8 +1,9 @@
 """Time tracking for the adulting vault, billable and not.
 
-Entries live in $ADULTING_HOME/hours/<Kind>/<Thread>.md as JSON inside a
-```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker plugin
-(and anything that reads its format) can render them natively.
+Entries live in $ADULTING_HOME/threads/<Kind>/<Thread>/hours.md, one file
+per thread, as JSON inside a ```simple-time-tracker fence, so Obsidian's
+Super Simple Time Tracker plugin (and anything that reads its format) can
+render them natively.
 
   hours log <thread> <description...>   append an entry
   hours list / report / show / edit / rm
@@ -113,9 +114,9 @@ def append_entry(kind, name, entry):
     STORE.save(path, STORE.read(path) + [entry], ref, entry.get('currency'))
     # A REF in the buffer puts this entry in the thread's daily log on the
     # next flush, filed under the day the work happened. Best-effort and
-    # silent: see buffer.add_ref. `ref` is already the directory form
-    # (Processes/SGB); `kind` is the frontmatter form and is not a path.
-    B.add_ref(ref, f"hours/{ref}",
+    # silent: see buffer.add_ref. `ref` is the folder form (Processes/SGB);
+    # `kind` is the frontmatter form and is not a path.
+    B.add_ref(ref, f"{ref}/hours",
                f"{V.fmt_duration(V.minutes_of(entry))} {entry['name']} "
                f"({entry['id']})",
                date=V.local(entry['startTime'], STORE.stamp_name(entry)).strftime('%Y-%m-%d'))

@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-02 - `buffer flush` skips an ACTION that is already an open task
+
+Story: `stories/2026-09-23-idempotent-task-flush.md`. Whoever adds a task
+should not have to read the vault first; adding one that is already open now
+leaves the vault as it was.
+
+- **Behaviour change:** flush drops a buffered ACTION whose thread, assignee, description, priority, due, scheduled and depends (as a set) all equal an open `TASK:`'s, in a file with exactly that one thread. It writes no log line, so the ingest makes no anchor, and prints `already a task: <uuid>  <abs path:line>  <description>` on stdout. Exit 0, nothing on stderr, printed under `--quiet` as the ingest's lines are.
+- **Identical ACTIONs in one flush collapse:** the first after `tend` regroups becomes the task, the rest print `already buffered: <thread>  <description>`. The entry date is not compared, so this holds across `--date`.
+- **Not blocking:** a DONE twin, a twin in a note with several threads, a twin in a file that is not valid UTF-8, and an un-ingested `ACTION:` in a log. Bare `tasks`, `tasks ingest` and the `notes` pre-pass are unchanged.
+- **Identity is the log line's:** `buffer.log_line` is now the one place an entry becomes a log line, and the check parses that line with `V.parse_action`, so it compares what the ingest would have made of it. `tasks.identity`, `action_identity`, `open_tasks` and `short` hold the rest.
+- **The `flush` help names both skip lines, and says flush ingests.** It never said the latter, so the generated tool definition told the agent to run `tasks ingest` after a flush, and the manual listed it as a step.
+- **`task-workflow`** relays `Already a task: abcd1234.` when flush prints that line instead of `ingested:`. `footguns`' "Don't dedupe the buffer" stands: the buffer takes duplicates, flush drops them.
+- **15 tests** in `tests/cli/test_buffer_cli.py`. Checked by undoing eight parts of the change one at a time (no skipping, no collapse, skips on stderr, `--quiet` hiding them, DONE counting, several threads counting, depends ordered, an unreadable file read anyway); each failed at least one.
+
 ## 2026-10-02 - `dev/ci manual` checks what it generated
 
 `dev/ci tools` ran `tools-check` on its output; `dev/ci manual` did not, so a

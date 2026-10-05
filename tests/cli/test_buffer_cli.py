@@ -284,6 +284,114 @@ def test_flush_empty_and_quiet(buffer_vault):
     assert "TEXT: quiet" in buffer_vault.read("logs/Projects/SGB/2026-09-10.md")
 
 
+# ---------- flush skips an ACTION that is already a task ----------
+
+TASK_LOG = "logs/Projects/SGB/2026-09-01.md"
+TASK_LINE = ("TASK: [#H] (Riaz Arbi) Draft scope <!--aaaaaaaa entry:2026-09-01 "
+             "due:2026-09-20 scheduled:2026-09-15 depends:bbbbbbbb,cccccccc-->  ")
+TWIN = ("- [[Projects/SGB]] ACTION: (Riaz Arbi) Draft scope <!--2026-09-10T15:00:00 "
+        "depends:cccccccc depends:bbbbbbbb due:2026-09-20 priority:H scheduled:2026-09-15-->\n")
+
+
+@pytest.fixture
+def tasked(buffer_vault):
+    buffer_vault.write(TASK_LOG, f'---\nthread: "[[Projects/SGB]]"\n---\n{TASK_LINE}\n')
+    return buffer_vault
+
+
+def flush_of(vault, *buffer_lines, quiet=False):
+    vault.write("buffer.md", "".join(buffer_lines))
+    return vault.run(*(["--quiet"] if quiet else []), "flush", cli="buffer")
+
+
+def test_an_action_that_is_already_an_open_task_is_skipped(tasked):
+    """The entry date differs, and depends is given in the other order;
+    neither counts."""
+    before = tasked.read(TASK_LOG)
+    r = flush_of(tasked, TWIN)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert r.stdout == (
+        "flushed 0 entries into 0 log file(s); buffer cleared.\n"
+        f"already a task: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope\n"
+        "Ingested: 0.  Failed: 0.\n")
+    assert not (tasked.home / "logs/Projects/SGB/2026-09-10.md").exists()
+    assert tasked.read(TASK_LOG) == before
+    assert buffer_text(tasked) == ""
+
+
+def test_a_skip_is_printed_under_quiet(tasked):
+    r = flush_of(tasked, TWIN, quiet=True)
+    assert r.stdout == (f"already a task: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope\n"
+                        "Ingested: 0.  Failed: 0.\n")
+
+
+def test_the_rest_of_the_buffer_is_flushed_around_a_skip(tasked):
+    r = flush_of(tasked, TWIN, "- [[Projects/SGB]] TEXT: kept <!--2026-09-10T09:00:00-->\n")
+    assert r.stdout.splitlines()[:3] == [
+        f"flushed 1 entry -> {tasked.home}/logs/Projects/SGB/2026-09-10.md",
+        "flushed 1 entries into 1 log file(s); buffer cleared.",
+        f"already a task: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope"]
+    assert tasked.lines("logs/Projects/SGB/2026-09-10.md")[-2:] == ["TEXT: kept", ""]
+
+
+@pytest.mark.parametrize("twin", [
+    TWIN.replace("Draft scope", "draft scope"),
+    TWIN.replace("Draft scope", "Draft  scope"),
+    TWIN.replace("(Riaz Arbi) ", ""),
+    TWIN.replace(" priority:H", ""),
+    TWIN.replace("priority:H", "priority:M"),
+    TWIN.replace(" due:2026-09-20", ""),
+    TWIN.replace("scheduled:2026-09-15", "scheduled:2026-09-16"),
+    TWIN.replace(" depends:cccccccc", ""),
+    TWIN.replace("[[Projects/SGB]]", "[[Topics/Wellness]]"),
+], ids=["case", "spacing", "assignee", "no priority", "priority", "due", "scheduled",
+        "depends", "thread"])
+def test_an_action_that_differs_in_anything_compared_becomes_a_task(tasked, twin):
+    r = flush_of(tasked, twin)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert "already" not in r.stdout
+    assert "Ingested: 1.  Failed: 0." in r.stdout
+
+
+@pytest.mark.parametrize("change", [
+    lambda v: v.write(TASK_LOG, v.read(TASK_LOG).replace("TASK:", "DONE:").replace(
+        "entry:2026-09-01", "entry:2026-09-01 end:2026-09-02")),
+    lambda v: v.write(TASK_LOG, v.read(TASK_LOG).replace(
+        'thread: "[[Projects/SGB]]"', 'threads:\n  - "[[Projects/SGB]]"\n  - "[[Topics/Wellness]]"')),
+    lambda v: (v.home / TASK_LOG).write_bytes(v.read(TASK_LOG).encode() + b"\xff\n"),
+], ids=["done twin", "several threads", "unreadable file"])
+def test_a_twin_that_does_not_count_does_not_block(tasked, change):
+    change(tasked)
+    r = flush_of(tasked, TWIN)
+    assert r.returncode == 0
+    assert "already" not in r.stdout
+    assert "Ingested: 1.  Failed: 0." in r.stdout
+
+
+def test_identical_actions_in_one_flush_collapse_across_days(buffer_vault):
+    first = "- [[Projects/SGB]] ACTION: Draft scope <!--2026-09-10T15:00:00 due:2026-09-20-->\n"
+    second = first.replace("2026-09-10T15", "2026-09-12T08")
+    r = flush_of(buffer_vault, second, first)
+    assert (r.returncode, r.stderr) == (0, "")
+    out = r.stdout.splitlines()
+    log = buffer_vault.home / "logs/Projects/SGB/2026-09-10.md"
+    assert out[:3] == [
+        f"flushed 1 entry -> {log}",
+        "flushed 1 entries into 1 log file(s); buffer cleared.",
+        "already buffered: Projects/SGB  Draft scope"]
+    assert re.fullmatch(rf"ingested: [0-9a-f]{{8}}  {re.escape(str(log))}:9  Draft scope", out[3])
+    assert out[4:] == ["Ingested: 1.  Failed: 0."]
+    assert not (buffer_vault.home / "logs/Projects/SGB/2026-09-12.md").exists()
+
+
+def test_an_unflushed_action_in_a_log_is_not_a_task(buffer_vault):
+    buffer_vault.write("logs/Projects/SGB/2026-09-01.md",
+                       '---\nthread: "[[Projects/SGB]]"\n---\nACTION: Draft scope\n')
+    r = flush_of(buffer_vault, "- [[Projects/SGB]] ACTION: Draft scope <!--2026-09-10T15:00:00-->\n")
+    assert "already" not in r.stdout
+    assert "Ingested: 2.  Failed: 0." in r.stdout
+
+
 # ---------- nothing prompts ----------
 
 def test_a_failed_ingest_after_flush_warns_and_keeps_the_flush(vault):

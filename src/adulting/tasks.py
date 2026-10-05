@@ -300,6 +300,49 @@ def ingest(dry_run=False):
     return ingested, failed
 
 
+def short(body):
+    """A description cut to fit on one line of a report."""
+    return body[:60] + ('...' if len(body) > 60 else '')
+
+
+# ---------- identity ----------
+
+def identity(thread, assignee, body, priority, due, scheduled, depends):
+    """What makes two tasks the same task: everything but the uuid and the
+    dates it was entered and ended, compared exactly. Depends is a set, so
+    its order does not count."""
+    return (thread, assignee or None, body, priority or None, due or None,
+            scheduled or None, frozenset(depends))
+
+
+def action_identity(thread, action):
+    """The identity of the task an ACTION would become in a log of this
+    thread."""
+    return identity(thread, action.assignee, action.body,
+                    action.attrs.get('priority'), action.attrs.get('due'),
+                    action.attrs.get('scheduled'), action.attrs.get('depends', []))
+
+
+def open_tasks():
+    """{identity: anchor} for every open TASK in a file with exactly one
+    thread. A task in a note with several threads is not the task of any
+    one of them, so it is left out; so is a file that cannot be read."""
+    found = {}
+    for path in discover_source_files():
+        text = V.read_utf8(path)
+        if text is None:
+            continue
+        threads = V.note_threads(V.parse_frontmatter_doc(text)[0])
+        if len(threads) != 1:
+            continue
+        for i, line in enumerate(text.split('\n')):
+            a = parse_anchor(line, path, i)
+            if a and a.kind == 'TASK':
+                found.setdefault(identity(threads[0], a.assignee, a.body, a.priority,
+                                          a.due, a.scheduled, a.depends), a)
+    return found
+
+
 def report_ingest(ingested, failed, dry_run, quiet):
     """Print what ingest did, as `tasks` does. Returns 1 if any line failed."""
     if not ingested and not failed:
@@ -311,8 +354,7 @@ def report_ingest(ingested, failed, dry_run, quiet):
             if dry_run:
                 print(f"would: {new_line}")
             else:
-                short = body[:60] + ('...' if len(body) > 60 else '')
-                print(f"ingested: {u}  {prefix}  {short}")
+                print(f"ingested: {u}  {prefix}  {short(body)}")
     if failed:
         print(file=sys.stderr)
         print(f"{len(failed)} action(s) NOT ingested (left as ACTION: in "

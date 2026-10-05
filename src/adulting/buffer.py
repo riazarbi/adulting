@@ -467,9 +467,51 @@ def report_violations(violations):
 
 # ---------- subcommand: flush ----------
 
+def log_line(e):
+    """The line an entry becomes in its daily log."""
+    line = f"{e['type']}: {e['body']}"
+    # ACTION attrs ride along into the log line so ingest can put
+    # them on the TASK anchor it creates. TS is dropped — the file's `date:`
+    # frontmatter carries day-level resolution; sub-day order is lost.
+    if e['type'] == 'ACTION' and e.get('attr_tokens'):
+        line += f" <!--{' '.join(e['attr_tokens'])}-->"
+    return line
+
+
+def skip_duplicates(entries, tasks):
+    """(kept, skipped): the entries to flush, and a line for each ACTION
+    left out because it is already an open task, or repeats an ACTION
+    earlier in this flush. Identity is that of the log line the ACTION
+    would become, so it is what the ingest would have made of it."""
+    if not any(e['type'] == 'ACTION' for e in entries):
+        return entries, []
+    open_tasks = tasks.open_tasks()
+    kept, skipped, seen = [], [], set()
+    for e in entries:
+        if e['type'] != 'ACTION':
+            kept.append(e)
+            continue
+        action = V.parse_action(log_line(e))
+        key = tasks.action_identity(e['thread'], action)
+        if key in open_tasks:
+            a = open_tasks[key]
+            skipped.append(f"already a task: {a.uuid}  {V.where(a.path, a.line_no)}  "
+                           f"{tasks.short(action.body)}")
+        elif key in seen:
+            skipped.append(f"already buffered: {e['thread']}  {tasks.short(action.body)}")
+        else:
+            seen.add(key)
+            kept.append(e)
+    return kept, skipped
+
+
 def cmd_flush(args):
     """Tend, then if clean, write each (thread, date) group to
     logs/<thread>/<date>.md (append if exists) and clear the buffer.
+
+    An ACTION that is already an open task, or that repeats one earlier in
+    the buffer, is not written: it is reported on stdout as a result, beside
+    the ingest's own lines, and the flush still succeeds.
 
     If tend finds a problem, nothing is written and the buffer is left as
     tend left it. Past that point it is not atomic: the log files are
@@ -487,6 +529,9 @@ def cmd_flush(args):
             print("buffer is empty; nothing to flush.")
         return 0
 
+    from adulting import tasks  # here, not at the top: tasks imports buffer
+    entries, skipped = skip_duplicates(entries, tasks)
+
     by_group = {}
     for e in entries:
         by_group.setdefault((e['thread'], e['date']), []).append(e)
@@ -498,15 +543,7 @@ def cmd_flush(args):
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{date}.md"
 
-        body_lines = []
-        for e in sorted(group, key=lambda e: e['ts']):
-            line = f"{e['type']}: {e['body']}"
-            # ACTION attrs ride along into the log line so ingest can put
-            # them on the TASK anchor it creates. TS is dropped — the file's `date:`
-            # frontmatter carries day-level resolution; sub-day order is lost.
-            if e['type'] == 'ACTION' and e.get('attr_tokens'):
-                line += f" <!--{' '.join(e['attr_tokens'])}-->"
-            body_lines.append(line)
+        body_lines = [log_line(e) for e in sorted(group, key=lambda e: e['ts'])]
 
         if log_path.exists():
             existing = V.read_or_die(log_path)
@@ -534,16 +571,19 @@ def cmd_flush(args):
         for path, n in written_files:
             print(f"flushed {n} entr{'y' if n == 1 else 'ies'} -> {V.full(path)}")
         print(f"flushed {len(entries)} entries into {len(written_files)} log file(s); buffer cleared.")
-        # Flush now so these lines come out ahead of anything the ingest
-        # below writes to stderr: stdout is block-buffered when piped.
-        sys.stdout.flush()
+    # The skips are printed whatever --quiet says, as the ingest's lines are:
+    # they say which task an ACTION already is.
+    for line in skipped:
+        print(line)
+    # Flush now so these lines come out ahead of anything the ingest
+    # below writes to stderr: stdout is block-buffered when piped.
+    sys.stdout.flush()
 
     # Ingest so any ACTION lines just written to logs/ become task anchors
     # immediately. Its output is passed through, not silenced, so the
     # operator or agent can read the new uuid prefixes off the summary lines.
     # The buffer is already cleared, so a failure here must not fail the
     # flush: the entries are safe in the logs and `tasks` can be re-run.
-    from adulting import tasks  # here, not at the top: tasks imports buffer
     try:
         ingested, failed = tasks.ingest()
     except OSError as e:
@@ -604,7 +644,11 @@ def main():
     p = sub.add_parser('tend', help="Regroup by (thread, date) and validate.")
     p.set_defaults(func=cmd_tend)
 
-    p = sub.add_parser('flush', help="Tend, then write to logs/ and clear buffer.")
+    p = sub.add_parser('flush', help="Tend, then write to logs/, clear buffer, and ingest the flushed "
+                                     "ACTIONs into tasks; there is no need to run `tasks` after. An ACTION that "
+                                     "is already an open task is skipped and reported as "
+                                     "`already a task: <uuid>  <path:line>  <description>`; "
+                                     "a repeat within the buffer as `already buffered`.")
     p.set_defaults(func=cmd_flush)
 
     args = V.parse_command(parser)

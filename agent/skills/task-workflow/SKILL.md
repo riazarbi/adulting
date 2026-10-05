@@ -42,6 +42,10 @@ Then propose both steps together, execute both on one confirm, and
 read the new uuid off the `ingested:` line of the flush output.
 Relay it as `Added abcd1234.`
 
+If flush prints `already a task: abcd1234` instead, the task was
+already open and nothing was added. Relay it as
+`Already a task: abcd1234.`
+
 ### Worked examples
 
 Today is Friday 2026-05-08.

@@ -70,6 +70,10 @@ POLICY = {
     # enough to be worth doing by hand.
     'hours': {'forbidden_args': ['rm']},
     'payments': {'forbidden_args': ['rm']},
+    # No destructive subcommand: `new` adds a declaration to a thread file,
+    # `log` appends to the buffer. A wrong value is fixed with `buffer rm`
+    # before a flush, or by hand after it.
+    'stats': {},
     'buffer': {},
     'lint': {'read_only': True},
     'commit': {},

@@ -72,7 +72,7 @@ def test_every_packaged_schema_loads():
     schemas = L.load_schemas(L.SCHEMAS_DIR)
     assert sorted(schemas) == [
         "hours_file", "log", "note_correspondence", "note_meeting",
-        "note_simple", "payments_file", "person", "task_anchor", "thread",
+        "note_simple", "payments_file", "person", "stat_line", "task_anchor", "thread",
         "thread_entry"]
     thread = schemas["thread"]
     assert thread["scope"] == "file" and thread["where"] == "threads/<Kind>/<Name>.md"

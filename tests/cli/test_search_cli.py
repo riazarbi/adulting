@@ -642,3 +642,18 @@ def test_a_skipped_file_is_named_on_a_terminal(one_good_one_unreadable):
     assert r.returncode == 0
     bad = one_good_one_unreadable.note_path("2026-09-12-08-00-00", "Projects/SGB")
     assert said == f"search: warning: {bad} is not valid UTF-8; skipped\n"
+
+
+def test_a_stat_is_counted_and_streamed_the_same_before_and_after_flush(vault):
+    """Buffered, a stat was in the stream as `pending`; flushed, it used to
+    drop out, because only TEXT and REF log lines were events."""
+    vault.write_thread("Processes", "Wellness")
+    vault.run("new", "pushups", "--thread", "Wellness", "--type", "int", "--agg", "sum", cli="stats")
+    vault.run("log", "pushups", "25", "-d", "2026-10-05", "-t", "07:42", cli="stats")
+    before = vault.run("stream", "--since", "2026-10-05", "--until", "2026-10-05", cli="search").stdout
+    assert "  pending  Processes/Wellness  STAT: pushups 25  (07:42)\n" in before
+    vault.run("flush", cli="buffer")
+    after = vault.run("stream", "--since", "2026-10-05", "--until", "2026-10-05", cli="search").stdout
+    assert "  log  Processes/Wellness  STAT: pushups 25  (07:42)\n" in after
+    logs = vault.run("logs", cli="search").stdout
+    assert logs.endswith("2026-10-05  Processes/Wellness  1 entries\n")

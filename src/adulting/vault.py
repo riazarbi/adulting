@@ -421,6 +421,16 @@ def parse_block(lines):
     return out
 
 
+def unread_lines(lines):
+    """(index, line) for each line of a frontmatter block that parse_block
+    reads as nothing: not blank, not a `#` comment, not indented under a
+    key, and not `key: value`. A flush-left `- item` under `stats:` is valid
+    YAML, but the item would be dropped without a word."""
+    return [(i, line) for i, line in enumerate(lines)
+            if line.strip() and not line[0].isspace()
+            and not line.startswith('#') and not KEY_RE.match(line.strip())]
+
+
 def read_utf8(path, errors='strict'):
     """A vault file's text, or None when it cannot be read as UTF-8.
 
@@ -1051,6 +1061,115 @@ def parse_action_attrs(tokens):
         else:
             errors.append(f"unknown attr {key!r}")
     return attrs, errors
+
+
+# ---------- stats ----------
+#
+# A stat is a number logged over time: push-ups, steps, kilometres run. It
+# is declared once, in its thread's frontmatter under `stats:`, and each value
+# is a `STAT:` line in that thread's daily log. Names are unique across the
+# vault, so a name alone says which thread a value belongs to.
+
+STAT_TYPES = ('int', 'decimal')
+STAT_AGGS = ('sum', 'last', 'max')
+STAT_NAME_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+STAT_VALUE_RES = {'int': re.compile(r'^-?\d+$'),
+                  'decimal': re.compile(r'^-?\d+(?:\.\d+)?$')}
+
+# `STAT: <name> <value> <!--<TS>-->`, in a log and, after the thread
+# wikilink, in the buffer. Unlike every other log line it keeps its
+# timestamp: a series needs the order of entries within a day.
+STAT_BODY_RE = re.compile(r'^(?P<name>\S+)\s+(?P<value>\S+)$')
+STAT_LINE_RE = re.compile(
+    r'^STAT:\s+(?P<name>\S+)\s+(?P<value>\S+)\s+'
+    r'<!--(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})-->\s*$')
+
+Stat = namedtuple('Stat', 'name type agg thread path')
+
+
+def stat_problems(decl):
+    """What is wrong with one `stats:` item, as messages; empty when it is a
+    usable declaration."""
+    if not isinstance(decl, dict):
+        return ["must be a mapping with name, type and agg"]
+    out = []
+    for key in ('name', 'type', 'agg'):
+        if not decl.get(key):
+            out.append(f"missing {key}")
+    name, type_, agg = decl.get('name'), decl.get('type'), decl.get('agg')
+    if name and not STAT_NAME_RE.match(name):
+        out.append(f"name {name!r} must be lowercase letters, digits and '-'")
+    if type_ and type_ not in STAT_TYPES:
+        out.append(f"type {type_!r} not in {list(STAT_TYPES)}")
+    if agg and agg not in STAT_AGGS:
+        out.append(f"agg {agg!r} not in {list(STAT_AGGS)}")
+    return out
+
+
+def thread_stats(fm):
+    """A thread's `stats:` items as parsed, or [] when it declares none."""
+    items = fm.get('stats')
+    return items if isinstance(items, list) else []
+
+
+def declared_stats():
+    """{name: [Stat, ...]} for every usable declaration in every thread file.
+    A name with two entries is declared twice; `lint` reports it, and
+    find_stat refuses it."""
+    out = {}
+    for kind, name, path in discover_threads():
+        text = read_utf8(path)
+        if text is None:
+            continue
+        fm = parse_frontmatter_doc(text)[0]
+        for decl in thread_stats(fm):
+            if stat_problems(decl):
+                continue
+            out.setdefault(decl['name'], []).append(
+                Stat(decl['name'], decl['type'], decl['agg'], thread_ref(kind, name), path))
+    return out
+
+
+def find_stat(name, stats=None):
+    """The one declared stat called `name`. Raises ValueError naming the
+    close matches when there is none, or the threads when there are two."""
+    stats = declared_stats() if stats is None else stats
+    found = stats.get(name, [])
+    if len(found) > 1:
+        threads = sorted({s.thread for s in found})
+        if len(threads) == 1:
+            raise ValueError(f"stat {name!r} is declared twice on {threads[0]}; "
+                             f"`lint` reports it, and one must be removed")
+        raise ValueError(f"stat {name!r} is declared on more than one thread ({', '.join(threads)}); "
+                         f"`lint` reports it, and one must be renamed")
+    if not found:
+        close = difflib.get_close_matches(name, list(stats), n=3, cutoff=0.6)
+        hint = f"; did you mean {', '.join(close)}?" if close else ''
+        raise ValueError(f"stat {name!r} is not declared (see `stats list`){hint}")
+    return found[0]
+
+
+def stat_value_problem(stat, value):
+    """Why `value` is not a value of `stat`, or None."""
+    if not STAT_VALUE_RES[stat.type].match(value):
+        kind = 'a whole number' if stat.type == 'int' else 'a number'
+        return f"value {value!r} for {stat.name!r} must be {kind}"
+    return None
+
+
+def stat_body_problem(thread, body, stats):
+    """Why `<name> <value>`, logged on `thread`, is not a stat entry, or
+    None. The buffer and the log are checked by this one rule."""
+    m = STAT_BODY_RE.match(body)
+    if not m:
+        return "STAT body must be '<name> <value>'"
+    try:
+        stat = find_stat(m['name'], stats)
+    except ValueError as e:
+        return str(e)
+    if stat.thread != thread:
+        return f"stat {stat.name!r} is declared on {stat.thread}, not {thread}"
+    return stat_value_problem(stat, m['value'])
 
 
 # ---------- time ----------

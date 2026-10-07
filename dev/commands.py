@@ -6,4 +6,4 @@ left out of the manual or the CI checks.
 """
 
 COMMANDS = ['tasks', 'notes', 'search', 'threads', 'people', 'hours',
-            'payments', 'buffer', 'lint', 'commit']
+            'payments', 'stats', 'buffer', 'lint', 'commit']

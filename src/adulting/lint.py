@@ -301,6 +301,49 @@ def validate_cadences(cadences):
                 yield f"{prefix}: frequency {freq!r} must be an integer"
 
 
+def validate_stats(stats):
+    """A thread's `stats:` items: each a usable declaration, no name twice."""
+    if not isinstance(stats, list):
+        yield "stats: must be a list of mappings with name, type and agg"
+        return
+    seen = set()
+    for idx, decl in enumerate(stats):
+        for err in V.stat_problems(decl):
+            yield f"stats[{idx}]: {err}"
+        name = decl.get('name') if isinstance(decl, dict) else None
+        if name:
+            if name in seen:
+                yield f"stats[{idx}]: duplicate name {name!r}"
+            seen.add(name)
+
+
+def _declared_stats(registry):
+    """vault.declared_stats(), read once per lint run when there is a
+    registry to keep it in."""
+    if registry is None:
+        return V.declared_stats()
+    if 'stats' not in registry:
+        registry['stats'] = V.declared_stats()
+    return registry['stats']
+
+
+def _stat_line_per_line(captures, schema, fm, path, registry):
+    """A STAT line's rules that need more than the line: where it is, what
+    its thread declares, and the log's date."""
+    if schema['name'] != 'log':
+        yield "stat_line: STAT lines belong in a thread's logs"
+        return
+    home = V.thread_of(path)
+    name, value, ts = captures.get('name'), captures.get('value'), captures.get('ts')
+    if not (home and name and value):
+        return
+    problem = V.stat_body_problem(home, f"{name} {value}", _declared_stats(registry))
+    if problem:
+        yield f"stat_line: {problem}"
+    if ts and fm.get('date') and ts[:10] != fm['date']:
+        yield f"stat_line: timestamp {ts!r} is not on the log's date {fm['date']}"
+
+
 # ---------- cross-file (wikilink resolution) ----------
 
 def wikilink_exists(target):
@@ -349,6 +392,12 @@ def validate_file(path, schemas, registry=None):
         return
     fm, body_start = parse_frontmatter(text)
 
+    # A frontmatter line neither reader takes is data silently lost: a
+    # flush-left list item drops out of `stats:` or `cadences:` unseen.
+    if body_start:
+        for i, line in V.unread_lines(text.split('\n')[1:body_start - 1]):
+            yield (i + 2, f"frontmatter line is not read: {line!r}; indent list items under their key")
+
     schema = find_file_schema(path, fm, schemas)
     if not schema:
         yield (0, "no matching file schema; is it where the vault layout puts it?")
@@ -386,6 +435,16 @@ def validate_file(path, schemas, registry=None):
     if 'cadences' in fm:
         for err in validate_cadences(fm['cadences']):
             yield (0, err)
+
+    # Stats, and their names for the vault-wide uniqueness check.
+    if schema['name'] == 'thread' and 'stats' in fm:
+        for err in validate_stats(fm['stats']):
+            yield (0, err)
+        if registry is not None and isinstance(fm['stats'], list):
+            for decl in fm['stats']:
+                if isinstance(decl, dict) and decl.get('name'):
+                    registry.setdefault('stat_names', {}).setdefault(
+                        decl['name'], []).append((path, 0))
 
     # Wikilink resolution: thread field on logs (singular, scalar)
     if 'thread' in fm and isinstance(fm['thread'], str):
@@ -458,6 +517,10 @@ def validate_file(path, schemas, registry=None):
                     yield (line_no, err)
                 if registry is not None:
                     _task_anchor_register(registry, captures, path, line_no)
+
+            if ls['name'] == 'stat_line':
+                for err in _stat_line_per_line(captures, schema, fm, path, registry):
+                    yield (line_no, err)
 
         # ACTION: lines (notes only)
         if is_note:
@@ -582,6 +645,14 @@ def report_duplicates(groups, wording):
 def cross_check_record_ids(registry):
     """Hours and payment ids must be unique across the whole vault."""
     yield from report_duplicates(registry.get('record_ids', {}), 'record id')
+
+
+def cross_check_stat_names(registry):
+    """A stat is named by its name alone, wherever it is declared, so no
+    two threads may declare one."""
+    groups = {name: hits for name, hits in registry.get('stat_names', {}).items()
+              if len({p for p, _ in hits}) > 1}
+    yield from report_duplicates(groups, 'stat name')
 
 
 def cross_check_note_stems(registry):
@@ -754,6 +825,11 @@ def main():
             print(f"{V.full(path)}:{line_no}: {msg}")
 
     for path, line_no, msg in cross_check_record_ids(registry):
+        total += 1
+        if not args.quiet:
+            print(f"{V.full(path)}:{line_no}: {msg}")
+
+    for path, line_no, msg in cross_check_stat_names(registry):
         total += 1
         if not args.quiet:
             print(f"{V.full(path)}:{line_no}: {msg}")

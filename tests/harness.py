@@ -31,7 +31,7 @@ VENV_BIN = REPO_ROOT / ".venv" / "bin"
 # adulting (~/bin/adulting, a pipx install, ...) and is dropped.
 COMMANDS = [
     "tasks", "buffer", "notes", "search", "threads", "people", "hours",
-    "payments", "lint", "commit",
+    "payments", "stats", "lint", "commit",
     "notes_new", "notes_pdf", "notes_minutes", "notes_agenda", "notes_strip",
 ]
 

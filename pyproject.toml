@@ -28,6 +28,7 @@ notes = "adulting.notes:main"
 payments = "adulting.payments:main"
 people = "adulting.people:main"
 search = "adulting.search:main"
+stats = "adulting.stats:main"
 tasks = "adulting.tasks:main"
 threads = "adulting.threads:main"
 

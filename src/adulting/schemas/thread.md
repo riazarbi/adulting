@@ -20,6 +20,7 @@ Beside the file is the thread's folder, `~/vault/threads/<Kind>/<Name>/`, holdin
 | started   | yes      | string | regex=\d{4}-\d{2}-\d{2}                               |
 | ended     | no       | string | regex=\d{4}-\d{2}-\d{2}                               |
 | cadences  | no       | list   | list of objects with `key`, `frequency`, `description` |
+| stats     | no       | list   | list of objects with `name`, `type`, `agg`             |
 | currency  | no       | string | regex=^[A-Z]{3}$                                      |
 | rate      | no       | int    |                                                       |
 | client_name    | no  | string |                                                  |
@@ -70,6 +71,32 @@ Per-cadence fields:
 | description | yes      | string | what this cadence is for                |
 
 A cadence is "satisfied" when a log entry tagged `#<key>` is added to the thread. `threads --overdue` reports cadences whose most-recent matching entry is older than `frequency` days (or that have never been satisfied).
+
+### Stats
+
+A stat is a number logged over time against this thread: push-ups, steps,
+kilometres run. Declare it with `stats new`, which writes it here:
+
+```yaml
+stats:
+  - name: pushups
+    type: int
+    agg: sum
+  - name: steps
+    type: int
+    agg: last
+```
+
+Per-stat fields:
+
+| name | required | type   | constraint                                             |
+|------|----------|--------|--------------------------------------------------------|
+| name | yes      | string | lowercase letters, digits and `-`; unique across the vault |
+| type | yes      | enum   | int, decimal                                           |
+| agg  | yes      | enum   | sum, last, max: how a series combines a period's values |
+
+Each value is a `STAT:` line in this thread's logs (see `stat_line`).
+Changing a declaration by hand does not rewrite the values already logged.
 
 ## Body
 

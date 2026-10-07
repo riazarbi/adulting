@@ -54,7 +54,7 @@ DEFAULT_LIMIT = 20
 DEFAULT_WINDOW_DAYS = 7
 
 # Body lines that count as a log entry.
-ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE):', re.M)
+ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE|STAT):', re.M)
 LEADING_DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
 
 
@@ -156,6 +156,13 @@ def stream_documents():
             if line.startswith(('TEXT:', 'REF:')):
                 out.append(_event('log', r['date'], thread,
                                   line.split(':', 1)[1].strip(), r['path']))
+            # A stat value is shown as it was while it was buffered, and
+            # keeps its clock time: unlike other log lines it has one.
+            stat = V.STAT_LINE_RE.match(line)
+            if stat:
+                out.append(_event('log', r['date'], thread,
+                                  f"STAT: {stat['name']} {stat['value']}", r['path'],
+                                  stat['ts'][11:16]))
     # A task anchor is two events: `entry:` when it was taken on and `end:`
     # when it was finished, usually on different days.
     for r in note_records() + log_records():

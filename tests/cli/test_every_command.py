@@ -18,6 +18,7 @@ SURFACE = {
     "people": (["--help-json"], ["list", "show", "new", "delete"]),
     "hours": (["--help-json"], ["log", "list", "report", "show", "edit", "rm"]),
     "payments": (["--help-json"], ["log", "list", "statement", "show", "edit", "rm"]),
+    "stats": (["--help-json"], ["new", "list", "log", "series"]),
     "buffer": (["--help-json", "--quiet"], ["add", "add-text", "add-ref", "add-action",
                              "list", "rm", "tend", "flush"]),
     "lint": (["--help-json", "--schemas", "--quiet"], []),
@@ -42,7 +43,7 @@ def test_help_json_describes_the_command(vault, cli):
 USES = [
     ("tasks", ["list"]), ("notes", ["list"]), ("search", ["notes"]), ("threads", ["list"]),
     ("people", ["list"]), ("hours", ["list"]), ("payments", ["list"]), ("lint", []),
-    ("commit", ["review"]), ("buffer", ["add", "x"]),
+    ("commit", ["review"]), ("buffer", ["add", "x"]), ("stats", ["list"]),
     ("people", ["new", "--name", "A", "--category", "personal"]),
     ("threads", ["new", "--kind", "topic", "--category", "personal", "--name", "T"]),
 ]
@@ -93,7 +94,7 @@ def test_errors_name_the_command_even_under_python_m(vault, tmp_path, cli):
 
 @pytest.mark.parametrize("cli, argv", [
     ("hours", ["list"]), ("hours", ["report"]), ("payments", ["list"]), ("payments", ["statement"]),
-    ("search", ["notes"]), ("search", ["stream"]),
+    ("search", ["notes"]), ("search", ["stream"]), ("stats", ["series", "pushups"]),
 ])
 @pytest.mark.parametrize("flag, value", [("--since", "x"), ("--until", "2026-13-01")])
 def test_a_window_date_must_be_a_real_date(vault, cli, argv, flag, value):

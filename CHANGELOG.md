@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-07 - `stats`: log numbers against declared stats and see them over time
+
+Story: `stories/2026-10-07-stats.md`. A command per measure (`pushups`,
+`pullups`) does not scale, so one command works over stats declared on
+threads.
+
+- **`stats new <name> --thread T --type int|decimal --agg sum|last|max`** declares a stat in the thread file's frontmatter, under `stats:`, in block style like `cadences`. Names are lowercase letters, digits and `-`, unique across the vault, so `stats log pushups 25` needs no thread. There is no unit: put it in the name when it is unclear (`run-km`, `spend-zar`).
+- **`stats log <name> <value> [-d] [-t]`** buffers `- [[<thread>]] STAT: <name> <value> <!--<TS>-->`. `buffer flush` files it as `STAT: <name> <value> <!--<TS>-->`, the only log line that keeps its timestamp. An unknown name exits 1 and lists close matches; it never guesses.
+- **`stats series <name> [--by day|week|month] [--since] [--until] [--json]`** reads the thread's logs and the unflushed buffer. `agg` combines a period's values: `sum` for sets, `last` for running totals like steps, `max` for a best. A period with nothing logged is `-` (`null`), not `0`. A week starts on Monday.
+- **Events:** an `int` stat logged as `1` each time. The convention is in `stats --help`, `stats new --help`, `stats log --help`, the manual and the tool definition.
+- **lint:** a new `stat_line` schema. A STAT line must be in a log, name a stat declared on the log's own thread, carry a value of its type, and be timestamped on the log's date. Bad declarations and a name declared on two threads are reported. On the production vault, lint takes 0.31s against 0.28s before.
+- **search:** STAT lines count as log entries, and `search stream` shows them before and after flush alike. Before, a stat dropped out of the stream once it was flushed.
+- **`dev/tools-build`:** `stats` has an empty safety policy: nothing it does is destructive.
+- **MANUAL.md and `dev/tools/` regenerated.** The agent skill is not changed here; that is its own story.
+- **Tests:** 53 new. Sixteen pieces of the change were undone in turn, and each undo failed a test.
+- **Review round 1:** a flush-left list item in frontmatter, which neither reader takes, is now reported by `lint` for any key (`cadences` too), and `stats new` refuses to write beside one. Before, `stats new` could hide an existing stat without a word. A name repeated on one thread is reported as `declared twice on <thread>`. The `stats` docstring lists every exit-1 case so the tool definition carries them. Nine more tests; each of the six fixes was undone and failed a test.
+- **Spec changes approved:** the decisions made while building, listed in the story's Round 1 (the `stat_line` schema, block-style declarations, `stats: []` refused, a bad value stopping `series`, the series window defaults, week and month labels, the `search` change). Decimal values in `--json` stay JSON numbers, exact to 15 significant digits.
+- **1046 passing, `dev/ci` green.**
+
 ## 2026-10-05 - Everything that belongs to a thread lives in the thread's folder
 
 Stories: `stories/2026-10-05-thread-scoped-vault.md` (CLI) and

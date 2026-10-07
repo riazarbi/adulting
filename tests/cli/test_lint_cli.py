@@ -858,3 +858,89 @@ def test_a_thread_folders_files_are_not_matched_as_threads(vault):
     p.write_text(p.read_text().replace('"a1b2c3d4"', '"NOPE"'), encoding="utf-8")
     assert violations(vault.run(cli="lint")) == [
         f"{p}:8: hours_file: entries[0].id: 'NOPE' is not 8 hex chars"]
+
+
+# ---------- stats: declarations and STAT lines ----------
+
+def write_stat_thread(vault, name, stats):
+    """A thread declaring `stats`, given as (name, type, agg) triples."""
+    p = vault.write_thread("Processes", name)
+    items = "".join(f"  - name: {n}\n    type: {t}\n    agg: {a}\n" for n, t, a in stats)
+    p.write_text(p.read_text().replace("---\n\n#", f"stats:\n{items}---\n\n#"))
+    return p
+
+
+def write_stat_log(vault, day, *lines, thread="Processes/Wellness"):
+    return vault.write(f"threads/{thread}/logs/{day}.md",
+                       f'---\nthread: "[[{thread}]]"\ndate: {day}\ntype: Log\n---\n\n' + "\n".join(lines) + "\n")
+
+
+def test_stat_lines_on_a_declared_stat_are_clean(vault):
+    write_stat_thread(vault, "Wellness", [("pushups", "int", "sum"), ("run-km", "decimal", "sum")])
+    write_stat_log(vault, "2026-10-05", "STAT: pushups 25 <!--2026-10-05T07:00:00-->",
+                   "STAT: run-km 5.2 <!--2026-10-05T18:00:00-->", "STAT: pushups -3 <!--2026-10-05T19:00:00-->")
+    assert_clean(vault.run(cli="lint"))
+
+
+def test_a_bad_stat_declaration_is_reported(vault):
+    p = write_stat_thread(vault, "Wellness", [("pushups", "bool", "avg"), ("Push Ups", "int", "sum"),
+                                              ("steps", "int", "sum"), ("steps", "int", "last")])
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: stats[0]: type 'bool' not in ['int', 'decimal']",
+        f"{p}:0: stats[0]: agg 'avg' not in ['sum', 'last', 'max']",
+        f"{p}:0: stats[1]: name 'Push Ups' must be lowercase letters, digits and '-'",
+        f"{p}:0: stats[3]: duplicate name 'steps'",
+    ]
+
+
+def test_a_stat_declaration_missing_a_field_is_reported(vault):
+    p = vault.write_thread("Processes", "Wellness")
+    p.write_text(p.read_text().replace("---\n\n#", "stats:\n  - name: pushups\n    type: int\n---\n\n#"))
+    assert violations(vault.run(cli="lint")) == [f"{p}:0: stats[0]: missing agg"]
+
+
+def test_a_stat_name_declared_on_two_threads_is_reported_at_both(vault):
+    a = write_stat_thread(vault, "Wellness", [("steps", "int", "last")])
+    b = write_stat_thread(vault, "Money", [("steps", "int", "sum")])
+    assert sorted(violations(vault.run(cli="lint"))) == sorted([
+        f"{a}:0: stat name 'steps' duplicated at {b}:0",
+        f"{b}:0: stat name 'steps' duplicated at {a}:0",
+    ])
+
+
+def test_bad_stat_lines_are_reported(vault):
+    write_stat_thread(vault, "Wellness", [("pushups", "int", "sum")])
+    write_stat_thread(vault, "Money", [("spend-zar", "decimal", "sum")])
+    log = write_stat_log(vault, "2026-10-05",
+                         "STAT: situps 3 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 2.5 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 5 <!--2026-10-04T07:00:00-->",
+                         "STAT: spend-zar 5 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 5")
+    found = violations(vault.run(cli="lint"))
+    assert found[:4] == [
+        f"{log}:7: stat_line: stat 'situps' is not declared (see `stats list`); did you mean pushups?",
+        f"{log}:8: stat_line: value '2.5' for 'pushups' must be a whole number",
+        f"{log}:9: stat_line: timestamp '2026-10-04T07:00:00' is not on the log's date 2026-10-05",
+        f"{log}:10: stat_line: stat 'spend-zar' is declared on Processes/Money, not Processes/Wellness",
+    ]
+    assert found[4].startswith(f"{log}:11: line does not conform to stat_line shape")
+    assert len(found) == 5
+
+
+def test_a_stat_line_outside_a_log_is_reported(vault):
+    write_stat_thread(vault, "Wellness", [("pushups", "int", "sum")])
+    note = vault.write_note("2026-10-05-07-00-00", "STAT: pushups 25 <!--2026-10-05T07:00:00-->",
+                            threads=["Processes/Wellness"])
+    assert violations(vault.run(cli="lint")) == [
+        f"{note}:9: stat_line: STAT lines belong in a thread's logs"]
+
+
+@pytest.mark.parametrize("key, item", [("stats", "- name: steps"), ("cadences", "- key: tax")])
+def test_a_flush_left_list_item_in_frontmatter_is_reported(vault, key, item):
+    """Valid YAML, but neither reader takes it: the item was dropped and
+    lint said nothing."""
+    p = vault.write_thread("Processes", "Wellness")
+    p.write_text(p.read_text().replace("---\n\n#", f"{key}:\n{item}\n  type: int\n---\n\n#"))
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:7: frontmatter line is not read: {item!r}; indent list items under their key"]

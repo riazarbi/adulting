@@ -1,9 +1,10 @@
 """Operate on the buffer queue at buffer.md, in the vault's root.
 
-The buffer is the staging area for captured items. Four line types:
+The buffer is the staging area for captured items. Five line types:
     ACTION:  action item that becomes a TASK anchor after flush
     TEXT:    free-text observation
     REF:     reference to another file in the vault
+    STAT:    a value of a declared stat, written by `stats log`
     UNKNOWN: raw quick-capture; must be converted before tend will pass
 
 Single line format (no multi-line entries; one capture per line):
@@ -11,6 +12,7 @@ Single line format (no multi-line entries; one capture per line):
     - [[<Kind>/<Name>]] ACTION: [(<Person>)] <body> <!--<TS> [<attr> ...]-->
     - [[<Kind>/<Name>]] TEXT:   <body>                                <!--<TS>-->
     - [[<Kind>/<Name>]] REF:    [[<target>]] <summary>                <!--<TS>-->
+    - [[<Kind>/<Name>]] STAT:   <name> <value>                        <!--<TS>-->
     - UNKNOWN: <body>                                                 <!--<TS>-->
 
 where TS is `YYYY-MM-DDTHH:MM:SS` and the thread is a resolvable
@@ -62,7 +64,7 @@ WIKILINK_BODY_RE = re.compile(r'^\[\[([^\]]+)\]\]\s*(.*)$')
 # Buffer line shape: thread wikilink, type tag, body, timestamp comment.
 # The comment carries the timestamp and (for ACTION lines) optional attrs.
 BUFFER_LINE_RE = re.compile(
-    r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF):\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})((?:\s+\S+)*)-->\s*$'
+    r'^-\s+\[\[([^\]]+)\]\]\s+(ACTION|TEXT|REF|STAT):\s+(.+?)\s+<!--(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})((?:\s+\S+)*)-->\s*$'
 )
 
 # UNKNOWN entries have no thread; just a body and a timestamp.
@@ -274,6 +276,19 @@ def buffer_action(thread, text, due=None, scheduled=None, priority=None,
     return line
 
 
+def buffer_stat(name, value, ts):
+    """Buffer a value of the declared stat `name`, timestamped `ts`
+    (YYYY-MM-DDTHH:MM:SS). The thread is the one the stat is declared on."""
+    stat = V.find_stat(name.strip())
+    value = value.strip()
+    problem = V.stat_value_problem(stat, value)
+    if problem:
+        raise ValueError(problem)
+    line = f"- [[{stat.thread}]] STAT: {stat.name} {value} <!--{ts}-->"
+    append_line(line)
+    return line
+
+
 def add_ref(thread, target, summary, date=None):
     """Append a REF entry on behalf of another command, and return it.
 
@@ -374,8 +389,10 @@ def parse_buffer_entries(lines):
     return entries, unknowns, unparsed
 
 
-def validate_entry(e):
-    """Yield violation messages for one parseable entry."""
+def validate_entry(e, stats=None):
+    """Yield violation messages for one parseable entry. `stats` is
+    vault.declared_stats(), passed in so a buffer is checked against one
+    reading of the declarations; it is read here when it is not."""
     if not V.is_thread(e['thread']):
         yield f"thread {e['thread']!r} does not resolve"
 
@@ -397,7 +414,7 @@ def validate_entry(e):
         _attrs, attr_errors = V.parse_action_attrs(e.get('attr_tokens', []))
         for err in attr_errors:
             yield f"ACTION {err}"
-    elif e['type'] in ('TEXT', 'REF') and e.get('attr_tokens'):
+    elif e['type'] in ('TEXT', 'REF', 'STAT') and e.get('attr_tokens'):
         yield f"{e['type']} entries do not accept attrs; got {' '.join(e['attr_tokens'])!r}"
 
     if e['type'] == 'REF':
@@ -416,6 +433,12 @@ def validate_entry(e):
     elif e['type'] == 'TEXT':
         if not e['body']:
             yield "TEXT body is empty"
+
+    elif e['type'] == 'STAT':
+        problem = V.stat_body_problem(e['thread'], e['body'],
+                                      V.declared_stats() if stats is None else stats)
+        if problem:
+            yield problem
 
 
 def regroup_lines(entries, unknowns, unparsed):
@@ -473,9 +496,10 @@ def tend(lines):
 
     # Re-parse so line numbers refer to the regrouped lines.
     entries, unknowns, unparsed = parse_buffer_entries(new_lines)
+    stats = V.declared_stats() if any(e['type'] == 'STAT' for e in entries) else None
     violations = []
     for e in entries:
-        for v in validate_entry(e):
+        for v in validate_entry(e, stats):
             violations.append((e['line_no'], v, e['raw']))
     for u in unknowns:
         violations.append((u['line_no'],
@@ -499,6 +523,10 @@ def report_violations(violations):
 def log_line(e):
     """The line an entry becomes in its daily log."""
     line = f"{e['type']}: {e['body']}"
+    # A STAT keeps its timestamp: a series orders a day's values by it, and
+    # `last` needs the latest one.
+    if e['type'] == 'STAT':
+        return f"{line} <!--{e['ts']}-->"
     # ACTION attrs ride along into the log line so ingest can put
     # them on the TASK anchor it creates. TS is dropped — the file's `date:`
     # frontmatter carries day-level resolution; sub-day order is lost.

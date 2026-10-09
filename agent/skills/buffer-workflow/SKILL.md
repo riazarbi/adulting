@@ -1,6 +1,6 @@
 ---
 name: buffer-workflow
-description: Logs a non-action inbox capture — an observation, status update, half-formed thought, or reference to another vault entry — to the buffer staging queue. Activate when an inbox message is NOT an action item, e.g. "met Bern for a hike, talked SGB succession". For action items use task-workflow instead.
+description: Logs a non-action inbox capture — an observation, status update, half-formed thought, or reference to another vault entry — to the buffer staging queue. Activate when an inbox message is NOT an action item, e.g. "met Bern for a hike, talked SGB succession". For action items use task-workflow instead; for a number he tracks ("weighed 82.4", "had a drink") use stats-workflow.
 ---
 
 # Skill: buffer workflow
@@ -16,11 +16,22 @@ Use `add-text` for an observation, `add-ref` when he links one vault
 entry to another. **Never call `add-action` here** — action items
 belong to `task-workflow`, which drives it via `tasks add`.
 
+**A tracked number is not an observation.** Check the capture against
+`stats list`. "Weighed 82.4" or "had a drink last night" that matches a
+declared stat is a `stats log`, following `stats-workflow` — not an
+`add-text`. A message with both a number and a remark ("weighed 82.4,
+feeling heavy after the weekend") is two entries, proposed together.
+
+A number with no declared stat stays an `add-text`, in his words. Say
+there is no stat for it and offer to declare one; never declare it as
+part of the capture.
+
 ## Steps
 
 1. **Resolve the thread** against `threads list`. If the message
    doesn't clearly belong to one, ask. Don't guess.
-2. **Shape the body** per the rules below.
+2. **Shape the body** per the rules below. If he is describing an
+   earlier day, pass `--date` so it files under that day's log.
 3. **Propose**, ending in `OK?`.
 4. **On confirm**, append it. Reply `Logged.`
 

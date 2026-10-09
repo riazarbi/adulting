@@ -1,6 +1,6 @@
 ---
 name: activity-capture
-description: Turns a free-text account of what Riaz has been doing into log lines and time entries — usually his reply to a midday or end-of-day check-in, but also any unprompted "here's what I've been up to". Activate when a message is a list of things he has done over a period, rather than a single completed task or a single observation.
+description: Turns a free-text account of what Riaz has been doing into time entries, log lines and stat values — usually his reply to a midday or end-of-day check-in, but also any unprompted "here's what I've been up to". Activate when a message is a list of things he has done over a period, rather than a single completed task or a single observation.
 ---
 
 # Skill: activity capture
@@ -12,7 +12,7 @@ He tells you what he did in one sentence. You turn it into records.
 Three items, three threads. Your job is to file them with as little of his
 attention as possible.
 
-## Two records, different jobs
+## Three records, different jobs
 
 **Every item gets a time entry.** That is the coverage record: which thread,
 how long. The `name` is a **short label of about six words** naming the
@@ -35,9 +35,24 @@ detail belongs, because `search --text` reads logs and never reads hours.
   left over → "Added tools and refined skills to make the agent more
                reliable and effective."             (the log line)
 
-A short item leaves nothing over. "5k run" is a label and a duration and
-that is all — no log line. Never pad one to fill the slot, and never cram
-the leftovers into the label instead.
+A short item leaves nothing over. "Fixed the gate" is a label and a
+duration and that is all — no log line. Never pad one to fill the slot,
+and never cram the leftovers into the label instead.
+
+**A number he tracks becomes a stat value.** "5k run" is 30 minutes on
+`Processes/Wellness` *and* 5 on `run-km`. The hours entry says how long;
+the stat says how much. Neither replaces the other, and the number does
+not also go in the label or a log line.
+
+Run `stats list` once, beside `tasks list`, and match numbers against it:
+distance, reps, weight, money, or an event logged as `1` ("had a drink").
+Several sets are several values — follow `stats-workflow` for that and
+for anything else about the values themselves.
+
+If a number has no declared stat, it stays in the label or the log line
+as it would have, and the proposal says so: "no stat for run distance —
+want one?" Never declare a stat inside a capture; that is its own intent,
+proposed on its own via `stats-workflow`.
 
 **A named person always forces a log line.** People cannot live in an hours
 entry: a wikilink inside one renders but creates no backlink and no graph
@@ -98,6 +113,13 @@ rather than forcing it into the nearest one.
 one matches a pending task, closing it is part of the plan — an activity can
 both consume time and complete a commitment.
 
+**A tracked number?** Check against the `stats list` you ran once (above).
+
+**Which day?** If he is describing an earlier day, every record for that
+item carries it: `-d` on `hours log` and `stats log`, `--date` on
+`buffer add-text`. Without it the log line files under today, and the
+detail lands in a different log from the time it explains.
+
 ## Propose once
 
 One message, everything in it, ending in `OK?`. He corrects durations in one
@@ -106,6 +128,7 @@ word; never ask about them individually.
 ```
 Logging:
 - Processes/Wellness   30m  5k run
+       + stat: run-km 5
 - Processes/Toil       60m  Fixed the broken alarm
        + log: backup battery, not the panel; a callout would have been R3k
 - Projects/AXA DORA   4h 0m  Code cleanup and dbt integration
@@ -118,8 +141,8 @@ Also closing: "Circulate SGB minutes" (a1b2c3d4)
 OK?
 ```
 
-Every `+ log` line is a `buffer add-text` you will actually make. If you
-show one, write it.
+Every `+ log` line is a `buffer add-text` and every `+ stat` line a
+`stats log` you will actually make. If you show one, write it.
 
 ## Corrections
 
@@ -131,8 +154,10 @@ is captured when most of it is missing.
 
 ## Execute, then report what actually happened
 
-On confirm: the `hours log` calls, then any `buffer add-text`, then
-`buffer flush`, then any `tasks done`.
+On confirm: the `hours log` calls, then any `buffer add-text`, then any
+`stats log`, then `buffer flush`, then any `tasks done`. `stats log`
+writes to the buffer, so it must come before the flush or it waits for
+the next one.
 
 **Build the closing message from the tool results, never from the plan.**
 Count the `logged` lines you actually got back. If a call failed or you
@@ -141,7 +166,8 @@ Reporting an entry you did not write is worse than reporting nothing: it
 tells him the time is recorded when it is not, and he will not find out
 until the month is wrong.
 
-One line: how many entries, total time, anything you could not place.
+One line: how many entries, total time, how many stat values, anything
+you could not place.
 
 **Do not commit.** The nightly job at 21:00 commits the day's work. A commit
 here would fragment the history and duplicate that job.
@@ -163,4 +189,5 @@ is billable — the thread already knows.
 
 **Use `-d` and `-t` when he describes an earlier part of the day.** An
 end-of-day reply covering the morning should carry a morning start time, not
-the moment you filed it.
+the moment you filed it. For an earlier *day*, the log line needs
+`--date` too (see "Which day?" above).

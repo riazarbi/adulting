@@ -105,11 +105,17 @@ Every one of these files lives in a thread's folder,
 
 | Source | Date from | Summarise from |
 |--------|-----------|----------------|
-| `threads/<Kind>/<Name>/logs/<date>.md` | the filename | `TEXT:` / `TASK:` / `REF:` lines |
+| `threads/<Kind>/<Name>/logs/<date>.md` | the filename | `TEXT:` / `TASK:` / `REF:` / `STAT:` lines |
 | `threads/<Kind>/<Name>/notes/<timestamp>.md` | `timestamp` frontmatter | `topic` frontmatter + body |
 | `threads/<Kind>/<Name>/hours.md` | each entry's `startTime` | each **added** entry's `name` and duration |
+| `threads/<Kind>/<Name>/payments.md` | each payment's `received` | each **added** payment's amount, currency and `note` |
+| `threads/<Kind>/<Name>.md` gaining a `stats:` item | the day of the commit | "Declared stat `<name>`" |
 
-Hours files matter as much as the other two. Much of Riaz's day leaves no
+`STAT: <name> <value>` lines are numbers he tracks. Gather a day's
+values per stat into one phrase — "60 push-ups in three sets, run-km
+5" — rather than one bullet per line.
+
+Hours files matter as much as notes and logs. Much of Riaz's day leaves no
 note and no log — it is captured only as time, and a timeline that skipped
 it would report a quiet day when the opposite was true. The diff shows JSON,
 so read the entries that were *added* and render them as activity, not as a
@@ -121,8 +127,11 @@ file edit:
   August minutes.
 ```
 
-Never list an hours file under **Vault changes** — that section is for
-configuration and assets. A changed hours file is always activity.
+Never list an hours or payments file under **Vault changes** — that
+section is for configuration and assets. A changed hours or payments
+file is always activity. Payments are JSON too: render each added one
+as "Received ZAR 15,000.00 — September invoice", never add two
+currencies together.
 
 Group by thread, then order by date ascending within each thread.
 Threads themselves in alphabetical order.

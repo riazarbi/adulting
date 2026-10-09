@@ -225,9 +225,12 @@ def test_flush_files_stat_lines_in_the_daily_log_with_their_timestamp(stats_vaul
     assert r.returncode == 0, r.stderr
     body = stats_vault.read("threads/Processes/Wellness/logs/2026-10-05.md").split("\n\n", 2)[2]
     lines = body.splitlines()
-    assert lines[:2] == ["STAT: pushups 25 <!--2026-10-05T07:00:00-->",
-                         "STAT: pushups 20 <!--2026-10-05T12:00:00-->"]
-    assert lines[2] == "TEXT: Felt strong"
+    # The TEXT line carries the wall-clock time (add-text has no -t), so its
+    # place among the STAT lines depends on when the test runs.
+    assert [ln for ln in lines if ln.startswith("STAT:")] == [
+        "STAT: pushups 25 <!--2026-10-05T07:00:00-->",
+        "STAT: pushups 20 <!--2026-10-05T12:00:00-->"]
+    assert "TEXT: Felt strong" in lines
     assert stats_vault.read("buffer.md") == ""
     assert stats_vault.run(cli="lint").returncode == 0
 

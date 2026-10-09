@@ -1,6 +1,6 @@
 ---
 name: recall
-description: Answers questions about what is in the vault — what happened on a thread, what was decided at a meeting, where something was mentioned, where attention has been going. Activate when Riaz asks a question whose answer lives in his notes and logs rather than in his task list. For "what should I do next" use task-workflow; for hours and money use time-workflow and billing-workflow.
+description: Answers questions about what is in the vault — what happened on a thread, what was decided at a meeting, where something was mentioned, where attention has been going. Activate when Riaz asks a question whose answer lives in his notes and logs rather than in his task list. For "what should I do next" use task-workflow; for hours and money use time-workflow and billing-workflow; for tracked numbers ("how many push-ups this month") use stats-workflow.
 ---
 
 # Skill: recall
@@ -21,6 +21,8 @@ Read-only throughout. No confirm step — answer the question.
 | "where are we with SGB", "everything on SGB" | `search overview SGB` |
 | "what happened today", "did that get logged" | `search stream --today` |
 | "what's happened on SGB lately" | `search stream --thread SGB` |
+| "what did we say about the lease on SGB" | the thread's folder — see below |
+| "how many push-ups this week" | not here — `stats-workflow` |
 
 `--thread` takes a bare name. `SGB` resolves on its own — don't call
 `threads list` first.
@@ -48,9 +50,29 @@ Never answer a content question from the search line alone. A topic is a
 title, not a summary — "Camps Bay Primary School Parents Meeting" tells you
 nothing about what was decided.
 
+## One thread: read its folder
+
+Everything that belongs to a thread lives in one folder:
+`threads/<Kind>/<Name>/`, holding `notes/`, `logs/`, `hours.md` and
+`payments.md`. When the question is about the content of one thread,
+the folder is a smaller and more direct place to look than a search:
+
+1. `list_files` on `threads/<Kind>/<Name>/` to see what is there
+2. `rg <term>` inside that folder to find the lines that matter
+3. `read_file` the one or two files that answer it
+
+The `Kind/Name` comes from the open threads in your context — copy it,
+don't guess it. `rg` also reaches `hours.md` entry descriptions, which
+`search` never reads.
+
+Stay with `search` for anything across threads, for "the last
+meeting" (it orders by event date, not filename), and for `activity`
+and `stream`.
+
 ## Read one, not ten
 
 Open the smallest number of files that answers the question, usually one.
+Listing a thread's folder is not a licence to open everything in it.
 If several look relevant, say which you read and offer the rest rather than
 opening them all — a meeting note is long and his context is finite.
 

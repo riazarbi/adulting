@@ -46,6 +46,10 @@ The buffer accepts duplicates. If Riaz says the same thing twice,
 log it twice — he is the editor, not you. `buffer tend` regroups by
 thread and date; it does not merge lines, and neither should you.
 
+Stats are the sharpest case. Two `stats log pushups 25` calls are two
+sets, and a stat summed over the day needs both. Drop one and the day
+is halved.
+
 ## One round-trip per intent
 
 State your inferences in the proposal and let the confirm step

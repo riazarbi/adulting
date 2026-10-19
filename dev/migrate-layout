@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""Move a vault into the thread-folder layout.
+
+Developer tool. Not on the operator's PATH, not documented in the manual.
+
+Before, each kind of record had its own tree at the vault root; after,
+everything that belongs to a thread lives in the thread's folder beside its
+thread file (see vault.LAYOUT):
+
+    notes/<stem>.md                  -> threads/<first thread>/notes/<stem>.md
+    logs/<Kind>/<Name>/<date>.md     -> threads/<Kind>/<Name>/logs/<date>.md
+    hours/<Kind>/<Name>.md           -> threads/<Kind>/<Name>/hours.md
+    payments/<Kind>/<Name>.md        -> threads/<Kind>/<Name>/payments.md
+
+Wikilinks that spelled out the old paths are rewritten in every markdown
+file, buffer.md included:
+
+    [[notes/<stem>]]                 -> [[<stem>]]
+    [[logs/<Kind>/<Name>/<date>]]    -> [[<Kind>/<Name>/logs/<date>]]
+    [[hours/<Kind>/<Name>]]          -> [[<Kind>/<Name>/hours]]
+    [[payments/<Kind>/<Name>]]       -> [[<Kind>/<Name>/payments]]
+
+A note is filed under the first thread in its `threads:` list. A non-note
+file in notes/ named after a note (`<stem>-diagram.png`, which the note
+links by relative path) moves with that note. Nothing is
+overwritten and nothing is deleted except old folders left empty. Anything
+that cannot be moved — a note with no thread, a thread that has no file, a
+target that already exists — is reported and left where it is, and the run
+exits 1. Running it again moves only what is left.
+
+What it does NOT rewrite: ordinary markdown links, `[text](path)` and
+`![alt](path)`. A note moves two folders deeper, so a relative link in one
+(`](../assets/x.png)`, `](notes/x.md)`) would break. The only such links in
+the vault when this was written were a note's own attachments, named after
+it and moved beside it (above), so nothing else is handled. Check with
+`grep -rn '](' notes/` before running it on a vault that may have others.
+
+The vault must be given explicitly. The production vault is refused unless
+--production is passed, and a vault that is a git repository must have a
+clean working tree, so the whole migration is one reviewable diff that
+`git reset --hard && git clean -fd` undoes. (`git reset --hard` alone puts
+the old files back but leaves the moved copies behind, untracked.)
+
+Nothing changes unless every move and rewrite can be made: the source and
+target folders of each move, and each file whose links are rewritten, are
+checked for write permission first. One that is not writable is reported
+and the run exits 1 with the vault as it was.
+
+Usage:
+    dev/migrate-layout VAULT [--dry-run] [--map FILE] [--production]
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / 'src'))
+sys.path.insert(0, str(REPO / 'tests'))
+from harness import PRODUCTION_VAULT, is_inside  # noqa: E402
+from adulting import vault as V  # noqa: E402
+
+KINDS = ('Projects', 'Processes', 'Topics')
+OLD_ROOTS = ('notes', 'logs', 'hours', 'payments')
+
+# `[[` then an old root, up to the end of the target (`]]`, `|alias`, `#heading`).
+LINK_RE = re.compile(r'\[\[(notes|logs|hours|payments)/([^\]|#]+)')
+
+
+def note_threads(text):
+    """A note's thread refs, in order, read exactly as the commands read
+    them, so the script files a note where the commands will look for it."""
+    return V.note_threads(V.parse_frontmatter_doc(text)[0])
+
+
+def plan_moves(vault):
+    """[(old, new)] for every file to move, and [problem] for every file
+    that cannot be."""
+    moves, problems = [], []
+
+    def thread_exists(ref):
+        kind, _, name = ref.partition('/')
+        return kind in KINDS and name and (vault / 'threads' / kind / f"{name}.md").is_file()
+
+    notes = vault / 'notes'
+    homes = {}          # note stem -> its new folder
+    attachments = []
+    if notes.is_dir():
+        for f in sorted(notes.iterdir()):
+            if f.name.startswith('.') or not f.is_file():
+                continue
+            if f.suffix != '.md':
+                attachments.append(f)
+                continue
+            refs = note_threads(f.read_text(encoding='utf-8', errors='replace'))
+            if not refs:
+                problems.append(f"{f}: no threads in its frontmatter; left in place")
+            elif not thread_exists(refs[0]):
+                problems.append(f"{f}: first thread {refs[0]!r} has no thread file; left in place")
+            else:
+                moves.append((f, vault / 'threads' / refs[0] / 'notes' / f.name))
+                homes[f.stem] = vault / 'threads' / refs[0] / 'notes'
+        # A note links its images by relative path (`![x](<stem>-x.png)`), so
+        # an attachment named after a note goes wherever the note goes.
+        for f in attachments:
+            owner = max((stem for stem in homes if f.name.startswith(stem)),
+                        key=len, default=None)
+            if owner:
+                moves.append((f, homes[owner] / f.name))
+            else:
+                problems.append(f"{f}: not a note, and named after none; left in place")
+
+    logs = vault / 'logs'
+    if logs.is_dir():
+        for f in sorted(logs.rglob('*')):
+            if not f.is_file() or any(p.startswith('.') for p in f.relative_to(logs).parts):
+                continue
+            parts = f.relative_to(logs).parts
+            if len(parts) != 3 or parts[0] not in KINDS:
+                problems.append(f"{f}: not at logs/<Kind>/<Name>/<file>; left in place")
+                continue
+            moves.append((f, vault / 'threads' / parts[0] / parts[1] / 'logs' / parts[2]))
+
+    for root in ('hours', 'payments'):
+        d = vault / root
+        if not d.is_dir():
+            continue
+        for f in sorted(d.rglob('*')):
+            if not f.is_file() or any(p.startswith('.') for p in f.relative_to(d).parts):
+                continue
+            parts = f.relative_to(d).parts
+            if len(parts) != 2 or parts[0] not in KINDS or f.suffix != '.md':
+                problems.append(f"{f}: not at {root}/<Kind>/<Name>.md; left in place")
+                continue
+            moves.append((f, vault / 'threads' / parts[0] / f.stem / f"{root}.md"))
+
+    clear = []
+    for old, new in moves:
+        if new.exists():
+            problems.append(f"{old}: {new} already exists; left in place")
+        else:
+            clear.append((old, new))
+    return clear, problems
+
+
+def new_target(root, rest):
+    """The wikilink target that replaces `<root>/<rest>`, or None."""
+    rest = rest.strip()
+    if root == 'notes':
+        return rest if '/' not in rest else None
+    parts = rest.split('/')
+    if root == 'logs' and len(parts) == 3 and parts[0] in KINDS:
+        return f"{parts[0]}/{parts[1]}/logs/{parts[2]}"
+    if root in ('hours', 'payments') and len(parts) == 2 and parts[0] in KINDS:
+        return f"{parts[0]}/{parts[1]}/{root}"
+    return None
+
+
+def rewrite_links(text):
+    """(new text, number of links rewritten)."""
+    count = 0
+
+    def sub(m):
+        nonlocal count
+        target = new_target(m.group(1), m.group(2))
+        if target is None:
+            return m.group(0)
+        count += 1
+        return f"[[{target}"
+
+    return LINK_RE.sub(sub, text), count
+
+
+def markdown_files(vault):
+    for root, dirs, files in os.walk(vault):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for name in files:
+            if name.endswith('.md') and not name.startswith('.'):
+                yield Path(root) / name
+
+
+def nearest_existing(path):
+    while not path.exists():
+        path = path.parent
+    return path
+
+
+def unwritable(moves, rewrites):
+    """[problem] for every change that the filesystem would refuse.
+
+    Checked before anything changes: a move or a rewrite that fails halfway
+    would leave some files moved and some links rewritten, which is worse
+    than either layout. A move needs its source folder and the first
+    existing folder on the way to its target; a rewrite needs the file.
+    """
+    out = []
+    for old, new in moves:
+        for folder in (old.parent, nearest_existing(new.parent)):
+            if not os.access(folder, os.W_OK):
+                out.append(f"{old}: cannot move it, {folder} is not writable")
+                break
+    for f, _, _ in rewrites:
+        if not os.access(f, os.W_OK):
+            out.append(f"{f}: cannot rewrite its links, it is not writable")
+    return out
+
+
+def git_dirty(vault):
+    if not (vault / '.git').exists():
+        return False
+    p = subprocess.run(['git', '-C', str(vault), 'status', '--porcelain'],
+                       capture_output=True, text=True)
+    return p.returncode != 0 or bool(p.stdout.strip())
+
+
+def remove_empty(d):
+    """Remove `d` and its sub-folders if they hold nothing but .DS_Store."""
+    if not d.is_dir():
+        return
+    for sub in sorted((p for p in d.rglob('*') if p.is_dir()), key=lambda p: -len(p.parts)):
+        leftovers = [x for x in sub.iterdir() if x.name != '.DS_Store']
+        if not leftovers:
+            for x in sub.iterdir():
+                x.unlink()
+            sub.rmdir()
+    if not [x for x in d.iterdir() if x.name != '.DS_Store']:
+        for x in d.iterdir():
+            x.unlink()
+        d.rmdir()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('vault', help='The vault to migrate.')
+    ap.add_argument('--dry-run', action='store_true', help='Report, change nothing.')
+    ap.add_argument('--map', metavar='FILE',
+                    help='Write the moves as JSON {old: new}, vault-relative.')
+    ap.add_argument('--production', action='store_true',
+                    help='Required to migrate the production vault.')
+    args = ap.parse_args()
+
+    vault = Path(args.vault).expanduser().resolve()
+    if not (vault / 'threads').is_dir():
+        sys.exit(f"migrate-layout: error: {vault} has no threads/; is it a vault?")
+    if (is_inside(vault, PRODUCTION_VAULT) or is_inside(PRODUCTION_VAULT, vault)) \
+            and not args.production:
+        sys.exit(f"migrate-layout: error: {vault} is the production vault; "
+                 f"pass --production to migrate it")
+    if not args.dry_run and git_dirty(vault):
+        sys.exit(f"migrate-layout: error: {vault} has uncommitted changes; "
+                 f"commit them first so the migration is its own diff")
+
+    moves, problems = plan_moves(vault)
+    rewrites = []
+    for f in markdown_files(vault):
+        text = f.read_text(encoding='utf-8', errors='surrogateescape')
+        new, n = rewrite_links(text)
+        if n:
+            rewrites.append((f, new, n))
+
+    blocked = unwritable(moves, rewrites)
+    if blocked:
+        for p in blocked + problems:
+            print(f"problem: {p}", file=sys.stderr)
+        print("nothing changed: every file must be writable before any is moved",
+              file=sys.stderr)
+        return 1
+
+    if not args.dry_run:
+        for old, new in moves:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            old.rename(new)
+        # Rewritten after the moves, so a file that moved is written in its
+        # new place.
+        moved = dict(moves)
+        for f, text, _ in rewrites:
+            moved.get(f, f).write_text(text, encoding='utf-8', errors='surrogateescape')
+        for root in OLD_ROOTS:
+            # Every file has moved by now; a folder that cannot be removed
+            # is only an empty folder left behind.
+            try:
+                remove_empty(vault / root)
+            except OSError as e:
+                problems.append(f"{vault / root}: left in place, empty: {e.strerror}")
+
+    if args.map:
+        Path(args.map).write_text(json.dumps(
+            {str(o.relative_to(vault)): str(n.relative_to(vault)) for o, n in moves},
+            indent=2) + '\n', encoding='utf-8')
+
+    verb = 'would move' if args.dry_run else 'moved'
+    by_root = {}
+    for old, _ in moves:
+        by_root[old.relative_to(vault).parts[0]] = by_root.get(old.relative_to(vault).parts[0], 0) + 1
+    for root in OLD_ROOTS:
+        if by_root.get(root):
+            print(f"{verb} {by_root[root]} file(s) from {root}/")
+    links = sum(n for _, _, n in rewrites)
+    print(f"{'would rewrite' if args.dry_run else 'rewrote'} {links} link(s) "
+          f"in {len(rewrites)} file(s)")
+    for p in problems:
+        print(f"problem: {p}", file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

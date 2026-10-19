@@ -1,0 +1,946 @@
+"""The `lint` command: its surface, and every schema it checks: threads,
+people, notes, logs, task anchors, hours files and payments files."""
+
+import re
+
+import pytest
+
+
+def violations(r):
+    """The `<path>:<line>: <message>` lines, without the summary."""
+    return [line for line in r.stdout.split("\n") if line and "file(s) checked" not in line]
+
+
+def assert_clean(r):
+    """Lint ran, printed nothing but its summary, and found nothing."""
+    assert (r.returncode, r.stderr, violations(r)) == (0, "", []), r.stdout + r.stderr
+    assert re.fullmatch(r"\n\d+ file\(s\) checked\. 0 violation\(s\)\.\n", r.stdout)
+
+
+# ---------- command surface ----------
+
+def test_empty_vault_is_clean_with_a_summary_line(vault):
+    r = vault.run(cli="lint")
+    assert r.returncode == 0
+    assert r.stdout == "\n0 file(s) checked. 0 violation(s).\n"
+    assert r.stderr == ""
+
+
+def test_violation_format_exit_code_and_count(vault):
+    p = vault.write_thread("Projects", "SQR", status="bogus")
+    r = vault.run(cli="lint")
+    assert r.returncode == 1
+    assert violations(r) == [
+        f"{p}:0: status: value 'bogus' not in ['open', 'paused', 'closed']"]
+    assert r.stdout.endswith("\n1 file(s) checked. 1 violation(s).\n")
+
+
+def test_quiet_prints_nothing_but_keeps_the_exit_code(vault):
+    vault.write_thread("Projects", "SQR", status="bogus")
+    r = vault.run("--quiet", cli="lint")
+    assert r.returncode == 1
+    assert r.stdout == ""
+
+
+def test_explicit_paths_limit_what_is_checked(vault):
+    good = vault.write_thread("Projects", "Good")
+    vault.write_thread("Projects", "Bad", status="bogus")
+    r = vault.run(str(good), cli="lint")
+    assert r.returncode == 0
+    assert r.stdout == "\n1 file(s) checked. 0 violation(s).\n"
+
+
+def test_a_missing_path_is_a_violation(vault):
+    missing = vault.note_path("2026-01-01-00-00-00", "Projects/SQR")
+    r = vault.run(str(missing), cli="lint")
+    assert r.returncode == 1
+    assert violations(r) == [f"{missing}:0: file does not exist"]
+
+
+def test_an_empty_schemas_dir_is_a_tool_failure(vault, tmp_path):
+    empty = tmp_path / "no-schemas"
+    empty.mkdir()
+    r = vault.run("--schemas", str(empty), cli="lint")
+    assert r.returncode == 2
+    assert r.stderr == f"lint: error: no schemas loaded from {empty}\n"
+
+
+def test_schemas_flag_uses_another_directory(vault, tmp_path):
+    only = tmp_path / "only-person"
+    only.mkdir()
+    (only / "person.md").write_text(
+        "---\nschema: person\nscope: file\npath: people/<Name>.md\n"
+        "---\n\n## Fields\n"
+        "| name | required | type | constraint |\n|---|---|---|---|\n"
+        "| status | yes | enum | open |\n", encoding="utf-8")
+    vault.write_thread("Projects", "SQR")
+    vault.write_person("Remy Dorn", status="closed")
+    assert violations(vault.run("--schemas", str(only), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR.md:0: no matching file schema; is it where the vault layout puts it?",
+        f"{vault.home}/people/Remy Dorn.md:0: status: value 'closed' not in ['open']",
+        f"{vault.home}/people/Remy Dorn.md:0: ended is required when status is closed",
+    ]
+
+
+def test_walk_skips_dot_files_and_anything_that_is_not_markdown(vault):
+    vault.write("threads/.trash/Projects/Old.md", "garbage")
+    vault.write("threads/Projects/.hidden.md", "garbage")
+    vault.write("threads/Projects/SQR.md.bak", "garbage")   # suffix .bak, not .md
+    vault.write("threads/Projects/notes.txt", "garbage")
+    r = vault.run(cli="lint")
+    assert (r.returncode, r.stdout) == (0, "\n0 file(s) checked. 0 violation(s).\n")
+
+
+# ---------- threads and people ----------
+
+def test_closed_thread_and_person_need_ended(vault):
+    vault.write_thread("Projects", "SQR", status="closed")
+    vault.write_person("Remy Dorn", status="closed")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR.md:0: ended is required when status is closed",
+        f"{vault.home}/people/Remy Dorn.md:0: ended is required when status is closed",
+    ]
+
+
+def test_missing_required_field(vault):
+    p = vault.write("people/Nobody.md", "---\nstatus: open\ncategory: personal\n---\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: missing required field 'started' (per person)"]
+
+
+def test_regex_constraint(vault):
+    p = vault.write_thread("Projects", "SQR", started="1 May")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: started: value '1 May' does not match /\\d{{4}}-\\d{{2}}-\\d{{2}}/"]
+
+
+def test_cadence_rules(vault):
+    p = vault.write("threads/Projects/SQR.md",
+              "---\nstatus: open\nkind: project\ncategory: professional\n"
+              "started: 2026-01-01\ncadences:\n"
+              "  - key: weekly\n    frequency: 7\n    description: Check in\n"
+              "  - key: weekly\n    frequency: often\n    description: Again\n"
+              "  - key: Bad-Key\n    frequency: 30\n"
+              "---\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: cadences[1]: duplicate key 'weekly'",
+        f"{p}:0: cadences[1]: frequency 'often' must be an integer",
+        f"{p}:0: cadences[2]: missing description",
+        f"{p}:0: cadences[2]: key 'Bad-Key' must be lowercase_with_underscores",
+    ]
+
+
+def test_a_badly_dated_thread_entry_is_not_checked(vault):
+    # DEFERRED BUG 8
+    p = vault.write_thread("Projects", "SQR")
+    with p.open("a", encoding="utf-8") as f:
+        f.write("\n- 2026-01-02 — Kicked off\n  - detail is free-form\n"
+                "- 2026-13 — Not a date\n")
+    # `- 2026-13 — ...` doesn't match thread_entry's applies_when, so it is
+    # not checked at all rather than reported as malformed.
+    r = vault.run(cli="lint")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "\n1 file(s) checked. 0 violation(s).\n", "")
+
+
+def test_thread_entry_with_empty_text(vault):
+    p = vault.write_thread("Projects", "SQR")
+    text = p.read_text(encoding="utf-8") + "\n- 2026-01-02 — \n"
+    p.write_text(text, encoding="utf-8")
+    line_no = text.split("\n").index("- 2026-01-02 — ") + 1
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:{line_no}: line does not conform to thread_entry shape "
+        "/^- (?P<date>\\d{4}-\\d{2}-\\d{2}) — (?P<text>.+)$/"]
+
+
+# ---------- notes ----------
+
+def test_a_valid_note_is_clean(vault):
+    vault.write_thread("Projects", "SQR")
+    vault.write_person("Remy Dorn")
+    p = vault.write_note("2026-09-10-14-30-00", "ACTION: (Remy Dorn) Draft it",
+                         threads=["Projects/SQR"], type_="Meeting")
+    text = p.read_text().replace("---\n\n", 'people:\n  - "[[people/Remy Dorn]]"\n'
+                                             "  - Someone Untracked\n---\n\n", 1)
+    p.write_text(text)
+    r = vault.run(cli="lint")
+    assert_clean(r)
+
+
+def test_note_with_an_unmatched_filename_has_no_schema(vault):
+    p = vault.write("threads/Projects/SQR/notes/meeting notes.md", "---\ntopic: x\ntype: Log\n---\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: no matching file schema; is it where the vault layout puts it?"]
+
+
+def test_note_thread_links(vault):
+    vault.write_thread("Projects", "SQR")
+    p = vault.write_note("2026-09-10-14-30-00", "Body",
+                         threads=["Projects/SQR", "Projects/Missing", "people/Remy Dorn"])
+    text = p.read_text().replace("  - [[people/Remy Dorn]]\n",
+                                 "  - [[people/Remy Dorn]]\n  - plain text\n")
+    p.write_text(text)
+    # The wrong-kind and plain entries fail twice: once on the field's regex,
+    # once on wikilink resolution. A well-formed but missing target fails once.
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: threads[2]: value '[[people/Remy Dorn]]' does not match "
+        "/\\[\\[(Projects|Processes|Topics)/[^\\]]+\\]\\]/",
+        f"{p}:0: threads[3]: value 'plain text' does not match "
+        "/\\[\\[(Projects|Processes|Topics)/[^\\]]+\\]\\]/",
+        f"{p}:0: threads: wikilink '[[Projects/Missing]]' does not resolve",
+        f"{p}:0: threads: wikilink '[[people/Remy Dorn]]' must target "
+        "Projects/X, Processes/X, or Topics/X",
+        f"{p}:0: threads: entry 'plain text' is not a wikilink",
+    ]
+
+
+def test_note_people_links(vault):
+    vault.write_thread("Projects", "SQR")
+    p = vault.write_note("2026-09-10-14-30-00", "Body", threads=["Projects/SQR"])
+    text = p.read_text().replace(
+        "---\n\n", 'people:\n  - "[[people/Ghost]]"\n  - "[[Projects/SQR]]"\n'
+                   "  - Plain Name\n---\n\n", 1)
+    p.write_text(text)
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: people: wikilink '[[people/Ghost]]' does not resolve",
+        f"{p}:0: people: wikilink '[[Projects/SQR]]' should target 'people/...'",
+    ]
+
+
+def test_action_lines_in_a_note(vault):
+    vault.write_thread("Projects", "SQR")
+    p = vault.write_note("2026-09-10-14-30-00",
+                         "ACTION:   \nACTION: (Ghost) Chase it\n",
+                         threads=["Projects/SQR"])
+    lines_of = p.read_text().split("\n")
+    first = lines_of.index("ACTION:   ") + 1
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:{first}: ACTION: missing description",
+        f"{p}:{first + 1}: ACTION: assignee 'Ghost' does not resolve to people/Ghost.md",
+    ]
+
+
+# ---------- logs ----------
+
+def test_log_thread_must_resolve(vault):
+    p = vault.write("threads/Projects/Gone/logs/2026-09-10.md",
+              '---\nthread: "[[Projects/Gone]]"\ndate: 2026-09-10\ntype: Log\n---\n\n'
+              "- TEXT: something\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: thread: wikilink '[[Projects/Gone]]' does not resolve"]
+
+
+def test_log_actions_are_checked_like_notes(vault):
+    vault.write_thread("Projects", "SQR")
+    p = vault.write("threads/Projects/SQR/logs/2026-09-10.md",
+              '---\nthread: "[[Projects/SQR]]"\ndate: 2026-09-10\ntype: Log\n---\n\n'
+              "ACTION: (Ghost) Chase it\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:7: ACTION: assignee 'Ghost' does not resolve to people/Ghost.md"]
+
+
+# ---------- task anchors ----------
+
+def anchor_note(vault, *anchor_lines, stem="2026-05-27-09-15-22"):
+    """A note in Projects/SQR holding these lines; the thread and a person
+    exist. The first line of the body is line 9."""
+    if not (vault.home / "threads" / "Projects" / "SQR.md").exists():
+        vault.write_thread("Projects", "SQR")
+        vault.write_person("Remy Dorn")
+    return vault.write_note(stem, "\n".join(anchor_lines), threads=["Projects/SQR"])
+
+
+def lint_file(vault, path):
+    """(exit code, every violation line) for linting one file. Anything on
+    stderr is kept too, so a crash cannot hide."""
+    r = vault.run(str(path), cli="lint")
+    return r.returncode, violations(r) + ([r.stderr] if r.stderr else [])
+
+
+def _shape_violation(path):
+    return f"{path}:9: line does not conform to task_anchor shape /{SHAPE}/"
+
+
+SHAPE = (r"^(?P<kind>TASK|DONE):\s+(?:\[#(?P<priority>[^\]]+)\]\s+)?(?:\((?P<assignee>[^)]+)\)\s+)?"
+         r"(?P<body>.+?)\s+<!--\s*(?P<uuid>[a-f0-9]{8})\s+entry:(?P<entry>\d{4}-\d{2}-\d{2})"
+         r"(?:\s+end:(?P<end>\d{4}-\d{2}-\d{2}))?(?:\s+due:(?P<due>\d{4}-\d{2}-\d{2}))?"
+         r"(?:\s+scheduled:(?P<scheduled>\d{4}-\d{2}-\d{2}))?(?:\s+depends:(?P<depends>[a-f0-9,]+))?"
+         r"\s*-->\s*$")
+
+
+def test_minimal_task_anchor_validates(vault):
+    p = anchor_note(vault,
+        "TASK: Pick up dry cleaning <!--ef567890 entry:2026-05-27-->")
+    assert lint_file(vault, p) == (0, [])
+
+
+def test_full_task_anchor_validates(vault):
+    anchor_note(vault,
+        "TASK: Prereq <!--ef567890 entry:2026-05-27-->",
+        "TASK: [#H] (Remy Dorn) Send quarterly report "
+        "<!--abcd1234 entry:2026-05-27 due:2026-05-29 "
+        "scheduled:2026-05-28 depends:ef567890-->")
+    # Use full-vault lint so cross-file checks (depends resolution) fire.
+    r = vault.run(cli="lint")
+    assert_clean(r)
+
+
+def test_done_with_end_validates(vault):
+    p = anchor_note(vault,
+        "DONE: [#M] (Remy Dorn) Review the contract "
+        "<!--abc12340 entry:2026-05-24 end:2026-05-27-->")
+    assert lint_file(vault, p) == (0, [])
+
+
+def test_priority_must_be_HML(vault):
+    p = anchor_note(vault,
+        "TASK: [#Q] (Remy Dorn) Bad priority <!--abcd1234 entry:2026-05-27-->")
+    assert lint_file(vault, p) == (1, [f"{p}:9: task_anchor.priority: value 'Q' not in ['H', 'M', 'L']"])
+
+
+def test_uuid_must_be_8_hex(vault):
+    p = anchor_note(vault,
+        "TASK: Bad uuid <!--ZZZZZZZZ entry:2026-05-27-->")
+    assert lint_file(vault, p) == (1, [_shape_violation(p)])
+
+
+def test_entry_must_be_iso_date(vault):
+    p = anchor_note(vault,
+        "TASK: Bad entry <!--abcd1234 entry:May-27-2026-->")
+    assert lint_file(vault, p) == (1, [_shape_violation(p)])
+
+
+def test_a_line_that_is_not_a_task_anchor_is_not_checked_as_one(vault):
+    """`WIP:` does not match the schema's applies_when, so the line is not
+    validated as an anchor at all, and the note is clean."""
+    p = anchor_note(vault,
+        "WIP: Some line <!--abcd1234 entry:2026-05-27-->")
+    assert lint_file(vault, p) == (0, [])
+
+
+def test_done_without_end_flagged(vault):
+    anchor_note(vault,
+        "DONE: Bad anchor <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor: kind=DONE requires 'end'",
+    ]
+
+
+def test_end_before_entry_flagged(vault):
+    anchor_note(vault,
+        "DONE: Bad order <!--abcd1234 entry:2026-05-27 end:2026-05-20-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor: end '2026-05-20' precedes entry '2026-05-27'",
+    ]
+
+
+def test_assignee_unresolved_flagged(vault):
+    anchor_note(vault,
+        "TASK: (Ghost) Phantom <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.assignee: 'Ghost' does not resolve to people/Ghost.md",
+    ]
+
+
+def test_assignee_resolved_passes(vault):
+    anchor_note(vault,
+        "TASK: (Remy Dorn) Real person <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
+    r = vault.run(cli="lint")
+    assert_clean(r)
+
+
+def test_duplicate_uuid_across_files_flagged(vault):
+    anchor_note(vault,
+        "TASK: First <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
+    anchor_note(vault,
+        "TASK: Second <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-10-30-00")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.uuid: 'abcd1234' duplicated at {vault.home}/threads/Projects/SQR/notes/2026-05-27-10-30-00.md:9",
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-10-30-00.md:9: task_anchor.uuid: 'abcd1234' duplicated at {vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9",
+    ]
+
+
+def test_dangling_depends_flagged(vault):
+    anchor_note(vault,
+        "TASK: Depends on nothing <!--abcd1234 entry:2026-05-27 depends:beef0000-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.depends: 'beef0000' does not resolve to any anchor",
+    ]
+
+
+def test_depends_resolved_passes(vault):
+    anchor_note(vault,
+        "TASK: First <!--abcd1234 entry:2026-05-27-->",
+        "TASK: Second <!--ef567890 entry:2026-05-27 depends:abcd1234-->", stem="2026-05-27-09-15-22")
+    r = vault.run(cli="lint")
+    assert_clean(r)
+
+
+def test_depends_self_loop_flagged(vault):
+    anchor_note(vault,
+        "TASK: Self <!--abcd1234 entry:2026-05-27 depends:abcd1234-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.depends: cycle: abcd1234 -> abcd1234",
+    ]
+
+
+def test_depends_2cycle_flagged(vault):
+    anchor_note(vault,
+        "TASK: A <!--abcd1234 entry:2026-05-27 depends:ef567890-->",
+        "TASK: B <!--ef567890 entry:2026-05-27 depends:abcd1234-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.depends: cycle: abcd1234 -> ef567890 -> abcd1234",
+    ]
+
+
+def test_depends_3cycle_flagged(vault):
+    anchor_note(vault,
+        "TASK: A <!--abcd1234 entry:2026-05-27 depends:ef567890-->",
+        "TASK: B <!--ef567890 entry:2026-05-27 depends:beef0000-->",
+        "TASK: C <!--beef0000 entry:2026-05-27 depends:abcd1234-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor.depends: cycle: abcd1234 -> ef567890 -> beef0000 -> abcd1234",
+    ]
+
+
+def test_dag_without_cycle_passes(vault):
+    anchor_note(vault,
+        "TASK: A <!--abcd1234 entry:2026-05-27-->",
+        "TASK: B <!--ef567890 entry:2026-05-27 depends:abcd1234-->",
+        "TASK: C <!--beef0000 entry:2026-05-27 depends:abcd1234,ef567890-->", stem="2026-05-27-09-15-22")
+    r = vault.run(cli="lint")
+    assert_clean(r)
+
+
+def test_multi_depends_one_missing_flagged(vault):
+    anchor_note(vault,
+        "TASK: A <!--abcd1234 entry:2026-05-27-->",
+        "TASK: B <!--ef567890 entry:2026-05-27 depends:abcd1234,dead0000-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:10: task_anchor.depends: 'dead0000' does not resolve to any anchor",
+    ]
+
+
+# ---------- hours files ----------
+
+HOURS_ENTRY = {
+    "name": "Bitemporal table design",
+    "startTime": "2026-07-25T07:29:00.000Z",
+    "endTime": "2026-07-25T09:29:00.000Z",
+    "id": "a1b2c3d4",
+    "rate": 2000,
+    "currency": "ZAR",
+}
+
+
+def entry(**over):
+    e = dict(HOURS_ENTRY)
+    e.update(over)
+    return e
+
+
+def test_valid_hours_file_is_clean(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry()])
+    r = vault.run(str(p), cli="lint")
+    assert_clean(r)
+
+
+def test_empty_block_is_clean(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [])
+    assert_clean(vault.run(str(p), cli="lint"))
+
+
+def test_unresolvable_thread_is_flagged(vault):
+    p = vault.write_hours_file("Projects", "Ghost", [entry()])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/Ghost/hours.md:0: thread: wikilink '[[Projects/Ghost]]' does not resolve",
+    ]
+
+
+def test_missing_currency_frontmatter_is_allowed(vault):
+    """An hours file with no currency holds unbilled time, which is valid:
+    `hours` records time and money is an overlay. Previously required."""
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry()])
+    p.write_text(p.read_text().replace("currency: ZAR\n", ""), encoding="utf-8")
+    r = vault.run(str(p), cli="lint")
+    assert_clean(r)
+
+
+def test_malformed_currency_is_still_flagged(vault):
+    """Optional does not mean unchecked: a currency that is present must
+    still be a 3-letter ISO code."""
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry()])
+    p.write_text(p.read_text().replace("currency: ZAR", "currency: rand"),
+                 encoding="utf-8")
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:0: currency: value 'rand' does not match /^[A-Z]{{3}}$/",
+    ]
+
+
+def test_unparseable_json_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry()])
+    p.write_text(p.read_text().replace('"entries"', '"entries" oops'),
+                 encoding="utf-8")
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: tracker JSON does not parse: Expecting ':' delimiter: line 2 column 13 (char 14)",
+    ]
+
+
+def test_missing_block_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry()])
+    p.write_text('---\nthread: "[[Projects/SARO Partners]]"\ncurrency: ZAR\n'
+                 '---\n\n# nothing here\n', encoding="utf-8")
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:0: hours_file: no ```simple-time-tracker block",
+    ]
+
+
+def test_missing_entry_field_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    e = entry()
+    del e["rate"]
+    p = vault.write_hours_file("Projects", "SARO Partners", [e])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0].rate: missing",
+    ]
+
+
+def test_bad_id_shape_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry(id="NOPE")])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0].id: 'NOPE' is not 8 hex chars",
+    ]
+
+
+def test_bad_timestamp_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners",
+                              [entry(startTime="2026-07-25 07:29")])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0].startTime: '2026-07-25 07:29' is not ISO 8601 UTC",
+    ]
+
+
+def test_end_before_start_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners",
+                              [entry(endTime="2026-07-25T06:00:00.000Z")])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0]: endTime precedes startTime",
+    ]
+
+
+def test_bad_currency_code_is_flagged(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners",
+                              [entry(currency="rand")])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0].currency: 'rand' is not a 3-letter ISO code",
+    ]
+
+
+def test_rate_zero_is_valid(vault):
+    """Unbillable work is ordinary, not an error."""
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SARO Partners", [entry(rate=0)])
+    assert_clean(vault.run(str(p), cli="lint"))
+
+
+def test_duplicate_ids_across_files_are_flagged(vault):
+    vault.write_thread("Projects", "A", currency="ZAR")
+    vault.write_thread("Projects", "B", currency="ZAR")
+    vault.write_hours_file("Projects", "A", [entry()])
+    vault.write_hours_file("Projects", "B", [entry()])
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/A/hours.md:8: record id 'a1b2c3d4' duplicated at {vault.home}/threads/Projects/B/hours.md:8",
+        f"{vault.home}/threads/Projects/B/hours.md:8: record id 'a1b2c3d4' duplicated at {vault.home}/threads/Projects/A/hours.md:8",
+    ]
+
+
+def test_whole_vault_walk_includes_time_dir(vault):
+    vault.write_thread("Projects", "SARO Partners", currency="ZAR")
+    vault.write_hours_file("Projects", "SARO Partners", [entry(id="ZZZZ")])
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners/hours.md:8: hours_file: entries[0].id: 'ZZZZ' is not 8 hex chars",
+    ]
+
+
+def test_thread_may_carry_currency_and_rate(vault):
+    p = vault.write_thread("Projects", "SARO Partners", currency="ZAR", rate=2500)
+    assert_clean(vault.run(str(p), cli="lint"))
+
+
+def test_thread_bad_currency_is_flagged(vault):
+    p = vault.write_thread("Projects", "SARO Partners", currency="zar")
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/SARO Partners.md:0: currency: value 'zar' does not match /^[A-Z]{{3}}$/",
+    ]
+
+
+def test_unbilled_hours_pass_lint(vault):
+    vault.write_thread("Topics", "Reading")
+    vault.run("log", "Topics/Reading", "Reading", "-m", "30", cli="hours")
+    assert_clean(vault.run(cli="lint"))
+
+
+# ---------- payments files ----------
+
+def test_valid_payments_file_lints_clean(vault):
+    vault.write_thread("Projects", "X", currency="ZAR")
+    p = vault.write_payments_file("Projects", "X", [{
+        "id": "a1b2c3d4", "received": "2026-04-05T07:00:00.000Z",
+        "amount": 47300, "currency": "ZAR", "account": "FNB Botswana"}])
+    assert_clean(vault.run(str(p), cli="lint"))
+
+
+def test_lint_flags_missing_payment_field(vault):
+    vault.write_thread("Projects", "X", currency="ZAR")
+    p = vault.write_payments_file("Projects", "X", [{
+        "id": "a1b2c3d4", "received": "2026-04-05T07:00:00.000Z",
+        "currency": "ZAR"}])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/X/payments.md:8: payments_file: payments[0].amount: missing",
+    ]
+
+
+def test_lint_flags_non_positive_amount(vault):
+    vault.write_thread("Projects", "X", currency="ZAR")
+    p = vault.write_payments_file("Projects", "X", [{
+        "id": "a1b2c3d4", "received": "2026-04-05T07:00:00.000Z",
+        "amount": -5, "currency": "ZAR"}])
+    assert violations(vault.run(str(p), cli="lint")) == [
+        f"{vault.home}/threads/Projects/X/payments.md:8: payments_file: payments[0].amount: must be positive",
+    ]
+
+
+def test_lint_flags_id_shared_with_an_hours_entry(vault):
+    """One id namespace across both tools."""
+    vault.write_thread("Projects", "X", currency="ZAR")
+    vault.write_hours_file("Projects", "X", [{
+        "name": "w", "startTime": "2026-04-05T07:00:00.000Z",
+        "endTime": "2026-04-05T08:00:00.000Z", "id": "a1b2c3d4",
+        "rate": 100, "currency": "ZAR"}])
+    vault.write_payments_file("Projects", "X", [{
+        "id": "a1b2c3d4", "received": "2026-04-05T07:00:00.000Z",
+        "amount": 100, "currency": "ZAR"}])
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/X/hours.md:8: record id 'a1b2c3d4' duplicated at {vault.home}/threads/Projects/X/payments.md:8",
+        f"{vault.home}/threads/Projects/X/payments.md:8: record id 'a1b2c3d4' duplicated at {vault.home}/threads/Projects/X/hours.md:8",
+    ]
+
+
+def test_lint_walks_payments_dir(vault):
+    vault.write_thread("Projects", "X", currency="ZAR")
+    vault.write_payments_file("Projects", "X", [{
+        "id": "ZZZZ", "received": "2026-04-05T07:00:00.000Z",
+        "amount": 1, "currency": "ZAR"}])
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/X/payments.md:8: payments_file: payments[0].id: 'ZZZZ' is not 8 hex chars",
+    ]
+
+
+@pytest.mark.parametrize("block, expected", [
+    # The block-shape messages are pinned for every case in
+    # tests/unit/test_lint.py; these check that lint's walk reports them.
+    (None, "0: payments_file: no ```adulting-payments block"),
+    ('{"payments": ["x"]}', "6: payments_file: payments[0] is not an object"),
+])
+def test_payments_block_errors(vault, block, expected):
+    vault.write_thread("Projects", "SQR", currency="ZAR")
+    body = "" if block is None else f"```adulting-payments\n{block}\n```\n"
+    p = vault.write("threads/Projects/SQR/payments.md",
+              f'---\nthread: "[[Projects/SQR]]"\ncurrency: ZAR\n---\n\n{body}')
+    assert violations(vault.run(cli="lint")) == [f"{p}:{expected}"]
+
+
+def test_payment_fields_are_each_checked(vault):
+    vault.write_thread("Projects", "SQR", currency="ZAR")
+    p = vault.write("threads/Projects/SQR/payments.md",
+              '---\nthread: "[[Projects/SQR]]"\ncurrency: ZAR\n---\n\n```adulting-payments\n'
+              '{"payments": [{"id": "abcd1234", "received": "2026-09-10", "amount": "10", "currency": "zar"}]}\n'
+              '```\n')
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:6: payments_file: payments[0].received: '2026-09-10' is not ISO 8601 UTC",
+        f"{p}:6: payments_file: payments[0].currency: 'zar' is not a 3-letter ISO code",
+        f"{p}:6: payments_file: payments[0].amount: '10' is not a number",
+    ]
+
+
+def test_hours_rate_must_be_an_integer_and_one_block_only(vault):
+    vault.write_thread("Projects", "SQR", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SQR", entries=[
+        {"name": "x", "startTime": "2026-09-10T10:00:00.000Z",
+         "endTime": "2026-09-10T11:00:00.000Z", "id": "abcd1234", "rate": 2.5}])
+    p.write_text(p.read_text() + "\n```simple-time-tracker\n{}\n```\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/hours.md:8: hours_file: more than one tracker block",
+        f"{vault.home}/threads/Projects/SQR/hours.md:8: hours_file: entries[0].rate: 2.5 is not an integer",
+    ]
+
+
+def test_links_and_assignees_must_match_the_files_case(vault):
+    """Checked against the files in the vault, not by asking the filesystem,
+    so a wrong case is reported on macOS as it is on Linux."""
+    vault.write_thread("Projects", "SQR")
+    vault.write_person("Remy Dorn")
+    p = vault.write_note("2026-09-10-14-30-00", "ACTION: (remy dorn) Draft it",
+                         threads=["Projects/sqr"], type_="Meeting")
+    p.write_text(p.read_text().replace("---\n\n", 'people:\n  - "[[people/remy dorn]]"\n---\n\n', 1))
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: threads: wikilink '[[Projects/sqr]]' does not resolve",
+        f"{p}:0: people: wikilink '[[people/remy dorn]]' does not resolve",
+        f"{p}:11: ACTION: assignee 'remy dorn' does not resolve to people/remy dorn.md",
+    ]
+
+
+@pytest.mark.parametrize("value", ["1,000", "2 500", "2.5", "lots"])
+def test_a_field_typed_int_must_hold_a_whole_number(vault, value):
+    """The schemas' `type` column was read and never used, so a thread with
+    `rate: 1,000` linted clean and billed at the built-in default."""
+    p = vault.write_thread("Projects", "Acme", currency="ZAR")
+    p.write_text(p.read_text().replace("currency: ZAR\n", f"currency: ZAR\nrate: {value}\n"))
+    assert violations(vault.run(cli="lint")) == [f"{p}:0: rate: value {value!r} is not a whole number"]
+
+
+def test_a_field_typed_int_accepts_a_whole_number(vault):
+    vault.write_thread("Projects", "Acme", currency="ZAR", rate=0)
+    assert_clean(vault.run(cli="lint"))
+
+
+def test_a_vault_reached_through_a_symlink_is_checked_the_same(vault, tmp_path):
+    """/tmp and /var are symlinks on macOS, and a synced vault is often one
+    too. The scope check used to resolve the vault but not the file, so every
+    file under a symlinked ADULTING_HOME matched no schema and none of its
+    rules ran, while the summary still said the file was checked."""
+    p = vault.write_thread("Projects", "SQR", status="bogus")
+    expected = [f"{p}:0: status: value 'bogus' not in ['open', 'paused', 'closed']"]
+    assert violations(vault.run(cli="lint")) == expected
+
+    link = tmp_path / "linked-vault"
+    link.symlink_to(vault.home)
+    through = vault.run(cli="lint", env={**vault.env, "ADULTING_HOME": str(link)})
+    # The whole line, path included: the file is named by where it really is,
+    # not by the link it was reached through, so the two runs agree exactly.
+    assert violations(through) == expected
+    assert through.returncode == 1
+
+
+def test_a_file_that_is_not_utf8_is_a_violation_not_a_traceback(vault):
+    """Removing the blanket `except Exception` left `lint` with nothing
+    catching the read, so one junk file ended the whole run."""
+    vault.write_thread("Projects", "SQR")
+    bad = vault.note_path("2026-09-12-08-00-00", "Projects/SQR")
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"---\ntopic: x\n---\n\n\xff\xfe bad bytes\n")
+    r = vault.run(cli="lint")
+    assert r.stderr == ""
+    assert violations(r) == [f"{bad}:0: file is not valid UTF-8"]
+    assert r.returncode == 1
+
+
+def test_a_relative_path_is_checked_like_an_absolute_one(vault, tmp_path):
+    """The caller's own prefix used to survive into the scope check, so a
+    relative path reported `no matching file schema` and exited 1."""
+    p = vault.write_thread("Projects", "Acme", currency="ZAR")
+    absolute = vault.run(str(p), cli="lint")
+    relative = vault.run(p.relative_to(tmp_path).as_posix(), cli="lint", cwd=tmp_path)
+    assert_clean(absolute)
+    assert (relative.returncode, relative.stdout, relative.stderr) == (
+        0, "\n1 file(s) checked. 0 violation(s).\n", "")
+
+
+# ---------- the vault layout ----------
+
+def test_a_note_filed_under_a_thread_that_is_not_its_first_is_flagged(vault):
+    """A note lives in the folder of the first thread in its `threads:`."""
+    vault.write_thread("Projects", "A")
+    vault.write_thread("Projects", "B")
+    p = vault.write_note("2026-09-10-14-30-00", "Body",
+                         threads=["Projects/A", "Projects/B"], home="Projects/B")
+    assert p == vault.note_path("2026-09-10-14-30-00", "Projects/B")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: filed under Projects/B but its first thread is Projects/A"]
+
+
+def test_a_multi_thread_note_filed_under_its_first_thread_is_clean(vault):
+    vault.write_thread("Projects", "A")
+    vault.write_thread("Projects", "B")
+    p = vault.write_note("2026-09-10-14-30-00", "Body",
+                         threads=["Projects/A", "Projects/B"])
+    assert p == vault.note_path("2026-09-10-14-30-00", "Projects/A")
+    assert_clean(vault.run(cli="lint"))
+
+
+def test_a_one_line_threads_list_is_read_as_a_list(vault):
+    vault.write_thread("Projects", "A")
+    vault.write_thread("Projects", "B")
+    vault.write("threads/Projects/A/notes/2026-09-10-14-30-00.md",
+                '---\ntopic: T\ntype: Report\ntimestamp: 2026-09-10-14-30-00\n'
+                'threads: ["[[Projects/A]]", "[[Projects/B]]"]\n---\n\nBody\n')
+    assert_clean(vault.run(cli="lint"))
+    p = vault.write("threads/Projects/B/notes/2026-09-11-14-30-00.md",
+                    '---\ntopic: T\ntype: Report\ntimestamp: 2026-09-11-14-30-00\n'
+                    'threads: ["[[Projects/A]]", "[[Projects/B]]"]\n---\n\nBody\n')
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: filed under Projects/B but its first thread is Projects/A"]
+
+
+def test_a_log_whose_thread_is_not_its_folder_is_flagged(vault):
+    vault.write_thread("Projects", "SQR")
+    vault.write_thread("Projects", "Other")
+    p = vault.write("threads/Projects/SQR/logs/2026-09-10.md",
+                    '---\nthread: "[[Projects/Other]]"\ndate: 2026-09-10\ntype: Log\n---\n\n'
+                    "- TEXT: something\n")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: filed under Projects/SQR but its first thread is Projects/Other"]
+
+
+def test_an_hours_file_whose_thread_is_not_its_folder_is_flagged(vault):
+    vault.write_thread("Projects", "SQR", currency="ZAR")
+    vault.write_thread("Projects", "Other", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SQR", [entry()])
+    p.write_text(p.read_text().replace("[[Projects/SQR]]", "[[Projects/Other]]"),
+                 encoding="utf-8")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: filed under Projects/SQR but its first thread is Projects/Other"]
+
+
+def test_a_note_stem_in_two_thread_folders_is_flagged_at_both(vault):
+    """Notes are found by stem alone, so a stem must be unique vault-wide."""
+    vault.write_thread("Projects", "A")
+    vault.write_thread("Projects", "B")
+    a = vault.write_note("2026-09-10-14-30-00", "One", threads=["Projects/A"])
+    b = vault.write_note("2026-09-10-14-30-00", "Two", threads=["Projects/B"])
+    assert a != b
+    assert violations(vault.run(cli="lint")) == [
+        f"{a}:0: note stem '2026-09-10-14-30-00' duplicated at {b}:0",
+        f"{b}:0: note stem '2026-09-10-14-30-00' duplicated at {a}:0",
+    ]
+
+
+@pytest.mark.parametrize("relpath, text", [
+    ("notes/2026-09-10-14-30-00.md",
+     '---\ntopic: x\ntype: Log\ntimestamp: 2026-09-10-14-30-00\n'
+     'threads:\n  - "[[Projects/X]]"\n---\n\nBody\n'),
+    ("logs/Projects/X/2026-09-10.md",
+     '---\nthread: "[[Projects/X]]"\ndate: 2026-09-10\ntype: Log\n---\n\n- TEXT: x\n'),
+    ("hours/Projects/X.md",
+     '---\nthread: "[[Projects/X]]"\ncurrency: ZAR\n---\n\n# X — hours\n\n'
+     '```simple-time-tracker\n{"entries": []}\n```\n'),
+    ("payments/Projects/X.md",
+     '---\nthread: "[[Projects/X]]"\ncurrency: ZAR\n---\n\n# X — payments\n\n'
+     '```adulting-payments\n{"payments": []}\n```\n'),
+])
+def test_a_file_left_in_a_legacy_root_folder_is_flagged(vault, relpath, text):
+    """The old top-level folders are still walked, so a file left behind
+    in one is reported rather than silently ignored."""
+    vault.write_thread("Projects", "X", currency="ZAR")
+    p = vault.write(relpath, text)
+    r = vault.run(cli="lint")
+    assert violations(r) == [
+        f"{p}:0: no matching file schema; is it where the vault layout puts it?"]
+    assert r.stdout.endswith("\n2 file(s) checked. 1 violation(s).\n")
+
+
+def test_a_thread_folders_files_are_not_matched_as_threads(vault):
+    """threads/Projects/SQR/hours.md sits under threads/ but is an hours
+    file: it is held to hours_file, not to the thread schema."""
+    vault.write_thread("Projects", "SQR", currency="ZAR")
+    p = vault.write_hours_file("Projects", "SQR", [entry()])
+    assert p == vault.home / "threads" / "Projects" / "SQR" / "hours.md"
+    assert_clean(vault.run(str(p), cli="lint"))
+    p.write_text(p.read_text().replace('"a1b2c3d4"', '"NOPE"'), encoding="utf-8")
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:8: hours_file: entries[0].id: 'NOPE' is not 8 hex chars"]
+
+
+# ---------- stats: declarations and STAT lines ----------
+
+def write_stat_thread(vault, name, stats):
+    """A thread declaring `stats`, given as (name, type, agg) triples."""
+    p = vault.write_thread("Processes", name)
+    items = "".join(f"  - name: {n}\n    type: {t}\n    agg: {a}\n" for n, t, a in stats)
+    p.write_text(p.read_text().replace("---\n\n#", f"stats:\n{items}---\n\n#"))
+    return p
+
+
+def write_stat_log(vault, day, *lines, thread="Processes/Workouts"):
+    return vault.write(f"threads/{thread}/logs/{day}.md",
+                       f'---\nthread: "[[{thread}]]"\ndate: {day}\ntype: Log\n---\n\n' + "\n".join(lines) + "\n")
+
+
+def test_stat_lines_on_a_declared_stat_are_clean(vault):
+    write_stat_thread(vault, "Workouts", [("pushups", "int", "sum"), ("run-km", "decimal", "sum")])
+    write_stat_log(vault, "2026-10-05", "STAT: pushups 25 <!--2026-10-05T07:00:00-->",
+                   "STAT: run-km 5.2 <!--2026-10-05T18:00:00-->", "STAT: pushups -3 <!--2026-10-05T19:00:00-->")
+    assert_clean(vault.run(cli="lint"))
+
+
+def test_a_bad_stat_declaration_is_reported(vault):
+    p = write_stat_thread(vault, "Workouts", [("pushups", "bool", "avg"), ("Push Ups", "int", "sum"),
+                                              ("steps", "int", "sum"), ("steps", "int", "last")])
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:0: stats[0]: type 'bool' not in ['int', 'decimal']",
+        f"{p}:0: stats[0]: agg 'avg' not in ['sum', 'last', 'max']",
+        f"{p}:0: stats[1]: name 'Push Ups' must be lowercase letters, digits and '-'",
+        f"{p}:0: stats[3]: duplicate name 'steps'",
+    ]
+
+
+def test_a_stat_declaration_missing_a_field_is_reported(vault):
+    p = vault.write_thread("Processes", "Workouts")
+    p.write_text(p.read_text().replace("---\n\n#", "stats:\n  - name: pushups\n    type: int\n---\n\n#"))
+    assert violations(vault.run(cli="lint")) == [f"{p}:0: stats[0]: missing agg"]
+
+
+def test_a_stat_name_declared_on_two_threads_is_reported_at_both(vault):
+    a = write_stat_thread(vault, "Workouts", [("steps", "int", "last")])
+    b = write_stat_thread(vault, "Money", [("steps", "int", "sum")])
+    assert sorted(violations(vault.run(cli="lint"))) == sorted([
+        f"{a}:0: stat name 'steps' duplicated at {b}:0",
+        f"{b}:0: stat name 'steps' duplicated at {a}:0",
+    ])
+
+
+def test_bad_stat_lines_are_reported(vault):
+    write_stat_thread(vault, "Workouts", [("pushups", "int", "sum")])
+    write_stat_thread(vault, "Money", [("spend-zar", "decimal", "sum")])
+    log = write_stat_log(vault, "2026-10-05",
+                         "STAT: situps 3 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 2.5 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 5 <!--2026-10-04T07:00:00-->",
+                         "STAT: spend-zar 5 <!--2026-10-05T07:00:00-->",
+                         "STAT: pushups 5")
+    found = violations(vault.run(cli="lint"))
+    assert found[:4] == [
+        f"{log}:7: stat_line: stat 'situps' is not declared (see `stats list`); did you mean pushups?",
+        f"{log}:8: stat_line: value '2.5' for 'pushups' must be a whole number",
+        f"{log}:9: stat_line: timestamp '2026-10-04T07:00:00' is not on the log's date 2026-10-05",
+        f"{log}:10: stat_line: stat 'spend-zar' is declared on Processes/Money, not Processes/Workouts",
+    ]
+    assert found[4].startswith(f"{log}:11: line does not conform to stat_line shape")
+    assert len(found) == 5
+
+
+def test_a_stat_line_outside_a_log_is_reported(vault):
+    write_stat_thread(vault, "Workouts", [("pushups", "int", "sum")])
+    note = vault.write_note("2026-10-05-07-00-00", "STAT: pushups 25 <!--2026-10-05T07:00:00-->",
+                            threads=["Processes/Workouts"])
+    assert violations(vault.run(cli="lint")) == [
+        f"{note}:9: stat_line: STAT lines belong in a thread's logs"]
+
+
+@pytest.mark.parametrize("key, item", [("stats", "- name: steps"), ("cadences", "- key: tax")])
+def test_a_flush_left_list_item_in_frontmatter_is_reported(vault, key, item):
+    """Valid YAML, but neither reader takes it: the item was dropped and
+    lint said nothing."""
+    p = vault.write_thread("Processes", "Workouts")
+    p.write_text(p.read_text().replace("---\n\n#", f"{key}:\n{item}\n  type: int\n---\n\n#"))
+    assert violations(vault.run(cli="lint")) == [
+        f"{p}:7: frontmatter line is not read: {item!r}; indent list items under their key"]

@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-21 - `buffer flush` moves the due date of a task re-added with a new one
+
+Story: `stories/2026-10-21-flush-updates-due.md`. Re-adding an open task
+with a different due date used to make a second task. It now reschedules
+the one that is there.
+
+- **Behaviour change:** a buffered ACTION that matches an open `TASK:` in everything but `due` sets that task's due date in place (uuid and entry kept) and prints `due updated: <uuid>  <abs path:line>  <description>  due:<old|-> -> <new>` on stdout. No log line is written and nothing is ingested for it. Exit 0, printed under `--quiet`.
+- **No due date given leaves the task's alone:** such an ACTION is `already a task:`, where before it made a new task.
+- **Several due-only matches change nothing:** the ACTION is not added and `ambiguous: <thread>  <description>  matches <uuid>, <uuid>` is printed. An exact match among them is still `already a task:`.
+- **ACTIONs in one flush that differ only by due collapse** to the latest due date given (by buffer timestamp); the rest print `already buffered:`.
+- **`tasks.identity` no longer includes `due`;** `open_tasks()` returns every open anchor for an identity, so flush can tell one match from several.
+- **`task-workflow`** relays `due updated:` and asks which task is meant on `ambiguous:`.
+
 ## 2026-10-18 - No real vault data in the repo: the rule written down
 
 The docs and tests had been written with names from the real vault. They are

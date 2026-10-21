@@ -46,6 +46,16 @@ If flush prints `already a task: abcd1234` instead, the task was
 already open and nothing was added. Relay it as
 `Already a task: abcd1234.`
 
+If flush prints `due updated: abcd1234 … due:2026-05-15 -> 2026-05-22`,
+the task was already open with another due date, and flush moved it.
+Nothing was added. Relay it as
+`Already a task: abcd1234. Due date moved from 2026-05-15 to 2026-05-22.`
+
+If flush prints `ambiguous: <thread>  <description>  matches abcd1234, ef567890`,
+several open tasks differ from it only by due date. Nothing was added or
+changed. Relay the uuids and ask which one the owner means; then
+`tasks set-due` that one.
+
 ### Worked examples
 
 Today is Friday 2026-05-08.

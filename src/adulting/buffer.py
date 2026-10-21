@@ -536,30 +536,65 @@ def log_line(e):
 
 
 def skip_duplicates(entries, tasks):
-    """(kept, skipped): the entries to flush, and a line for each ACTION
-    left out because it is already an open task, or repeats an ACTION
-    earlier in this flush. Identity is that of the log line the ACTION
-    would become, so it is what the ingest would have made of it."""
+    """(kept, reported, updates): the entries to flush, a line for each
+    ACTION left out, and the (anchor, due) of each open task whose due date
+    an ACTION moves. Identity is that of the log line the ACTION would
+    become, so it is what the ingest would have made of it.
+
+    ACTIONs that differ only by due date are one task. Within the buffer
+    they collapse to the latest due date given. Against an open task, the
+    same due date is `already a task`, a new one moves the task's, and none
+    leaves it as it was. An ACTION that matches several open tasks is not
+    added and changes none of them."""
     if not any(e['type'] == 'ACTION' for e in entries):
-        return entries, []
+        return entries, [], []
+    actions, groups = {}, {}
+    for i, e in enumerate(entries):
+        if e['type'] == 'ACTION':
+            action = V.parse_action(log_line(e))
+            key = tasks.action_identity(e['thread'], action)
+            actions[i] = (key, action)
+            groups.setdefault(key, []).append(i)
+    # The entry a group comes to: the first with the latest due date given,
+    # or the first of all when none gives one.
+    chosen = {}
+    for key, idxs in groups.items():
+        dated = [i for i in idxs if actions[i][1].attrs.get('due')]
+        due = actions[max(dated, key=lambda i: entries[i]['ts'])][1].attrs['due'] if dated else None
+        chosen[key] = next(i for i in idxs if actions[i][1].attrs.get('due') == due)
+
     open_tasks = tasks.open_tasks()
-    kept, skipped, seen = [], [], set()
-    for e in entries:
-        if e['type'] != 'ACTION':
+    kept, reported, updates = [], [], []
+    for i, e in enumerate(entries):
+        if i not in actions:
             kept.append(e)
             continue
-        action = V.parse_action(log_line(e))
-        key = tasks.action_identity(e['thread'], action)
-        if key in open_tasks:
-            a = open_tasks[key]
-            skipped.append(f"already a task: {a.uuid}  {V.where(a.path, a.line_no)}  "
-                           f"{tasks.short(action.body)}")
-        elif key in seen:
-            skipped.append(f"already buffered: {e['thread']}  {tasks.short(action.body)}")
-        else:
-            seen.add(key)
+        key, action = actions[i]
+        desc = tasks.short(action.body)
+        if i != chosen[key]:
+            reported.append(f"already buffered: {e['thread']}  {desc}")
+            continue
+        due = action.attrs.get('due')
+        twins = open_tasks.get(key, [])
+        same = [a for a in twins if a.due == due]
+        if same:
+            a = same[0]
+        elif not twins:
             kept.append(e)
-    return kept, skipped
+            continue
+        elif len(twins) > 1:
+            reported.append(f"ambiguous: {e['thread']}  {desc}  matches "
+                            f"{', '.join(a.uuid for a in twins)}")
+            continue
+        else:
+            a = twins[0]
+            if due:
+                updates.append((a, due))
+                reported.append(f"due updated: {a.uuid}  {V.where(a.path, a.line_no)}  {desc}  "
+                                f"due:{a.due or '-'} -> {due}")
+                continue
+        reported.append(f"already a task: {a.uuid}  {V.where(a.path, a.line_no)}  {desc}")
+    return kept, reported, updates
 
 
 def cmd_flush(args):
@@ -569,7 +604,8 @@ def cmd_flush(args):
 
     An ACTION that is already an open task, or that repeats one earlier in
     the buffer, is not written: it is reported on stdout as a result, beside
-    the ingest's own lines, and the flush still succeeds.
+    the ingest's own lines, and the flush still succeeds. One that differs
+    from an open task only by due date moves the task's due date instead.
 
     If tend finds a problem, nothing is written and the buffer is left as
     tend left it. Past that point it is not atomic: the log files are
@@ -588,7 +624,9 @@ def cmd_flush(args):
         return 0
 
     from adulting import tasks  # here, not at the top: tasks imports buffer
-    entries, skipped = skip_duplicates(entries, tasks)
+    entries, skipped, updates = skip_duplicates(entries, tasks)
+    for anchor, due in updates:
+        tasks.mutate_anchor(anchor, due=due)
 
     by_group = {}
     for e in entries:
@@ -705,7 +743,12 @@ def main():
                                      "ACTIONs into tasks; there is no need to run `tasks` after. An ACTION that "
                                      "is already an open task is skipped and reported as "
                                      "`already a task: <uuid>  <path:line>  <description>`; "
-                                     "a repeat within the buffer as `already buffered`.")
+                                     "a repeat within the buffer as `already buffered`. One that "
+                                     "differs from an open task only by due date moves that task's "
+                                     "due date instead, reported as `due updated: <uuid>  <path:line>  "
+                                     "<description>  due:<old> -> <new>`; giving no due date leaves "
+                                     "the task's as it was. One that matches several open tasks "
+                                     "changes none and is reported as `ambiguous`.")
     p.set_defaults(func=cmd_flush)
 
     args = V.parse_command(parser)

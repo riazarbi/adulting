@@ -297,11 +297,13 @@ def short(body):
 
 # ---------- identity ----------
 
-def identity(thread, assignee, body, priority, due, scheduled, depends):
-    """What makes two tasks the same task: everything but the uuid and the
-    dates it was entered and ended, compared exactly. Depends is a set, so
-    its order does not count."""
-    return (thread, assignee or None, body, priority or None, due or None,
+def identity(thread, assignee, body, priority, scheduled, depends):
+    """What makes two tasks the same task, but for the due date: everything
+    but the uuid and the dates it was due, entered and ended, compared
+    exactly. Depends is a set, so its order does not count. Two tasks with
+    one identity and the same due date are duplicates; with different due
+    dates, one is the other rescheduled."""
+    return (thread, assignee or None, body, priority or None,
             scheduled or None, frozenset(depends))
 
 
@@ -309,14 +311,15 @@ def action_identity(thread, action):
     """The identity of the task an ACTION would become in a log of this
     thread."""
     return identity(thread, action.assignee, action.body,
-                    action.attrs.get('priority'), action.attrs.get('due'),
-                    action.attrs.get('scheduled'), action.attrs.get('depends', []))
+                    action.attrs.get('priority'), action.attrs.get('scheduled'),
+                    action.attrs.get('depends', []))
 
 
 def open_tasks():
-    """{identity: anchor} for every open TASK in a file with exactly one
-    thread. A task in a note with several threads is not the task of any
-    one of them, so it is left out; so is a file that cannot be read."""
+    """{identity: [anchor, ...]} for every open TASK in a file with exactly
+    one thread, in the order they are found. A task in a note with several
+    threads is not the task of any one of them, so it is left out; so is a
+    file that cannot be read."""
     found = {}
     for path in discover_source_files():
         text = V.read_utf8(path)
@@ -329,7 +332,7 @@ def open_tasks():
             a = parse_anchor(line, path, i)
             if a and a.kind == 'TASK':
                 found.setdefault(identity(threads[0], a.assignee, a.body, a.priority,
-                                          a.due, a.scheduled, a.depends), a)
+                                          a.scheduled, a.depends), []).append(a)
     return found
 
 

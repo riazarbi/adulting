@@ -360,7 +360,7 @@ The staging queue between a capture and a thread's log. `~/vault/buffer.md` hold
 Every `add*` takes `--date` to file the entry under the day it happened rather than today.
 
 - **`UNKNOWN` lines block a flush.** A raw capture has to be given a thread before it can be filed: `buffer rm` it, then add it again with the right `add-*`.
-- **Flush is idempotent for tasks.** An ACTION identical to an open task is dropped with `already a task: <uuid>`, and repeats within one flush collapse with `already buffered`. Whoever adds a task does not have to read the vault first.
+- **Flush is idempotent for tasks.** An ACTION identical to an open task is dropped with `already a task: <uuid>`, and repeats within one flush collapse with `already buffered`. One that differs from an open task only by due date moves the task's due date (`due updated: <uuid> … due:<old> -> <new>`); one with no due date leaves the task's alone; one that matches several open tasks changes none (`ambiguous:`). Whoever adds a task does not have to read the vault first.
 - **Don't edit `buffer.md` by hand.** The commands keep it in the shape `tend` and `flush` expect.
 
 A `REF:` target is a thread (`<Kind>/<Name>`), its `hours` or `payments` file (`<Kind>/<Name>/hours`), a daily log (`<Kind>/<Name>/logs/<date>`), a note stem, or a person (`people/<Name>`).

@@ -383,11 +383,10 @@ def test_the_rest_of_the_buffer_is_flushed_around_a_skip(tasked):
     TWIN.replace("(Remy Dorn) ", ""),
     TWIN.replace(" priority:H", ""),
     TWIN.replace("priority:H", "priority:M"),
-    TWIN.replace(" due:2026-09-20", ""),
     TWIN.replace("scheduled:2026-09-15", "scheduled:2026-09-16"),
     TWIN.replace(" depends:cccccccc", ""),
     TWIN.replace("[[Projects/SQR]]", "[[Topics/Workouts]]"),
-], ids=["case", "spacing", "assignee", "no priority", "priority", "due", "scheduled",
+], ids=["case", "spacing", "assignee", "no priority", "priority", "scheduled",
         "depends", "thread"])
 def test_an_action_that_differs_in_anything_compared_becomes_a_task(tasked, twin):
     r = flush_of(tasked, twin)
@@ -433,6 +432,95 @@ def test_an_unflushed_action_in_a_log_is_not_a_task(buffer_vault):
     r = flush_of(buffer_vault, "- [[Projects/SQR]] ACTION: Draft scope <!--2026-09-10T15:00:00-->\n")
     assert "already" not in r.stdout
     assert "Ingested: 2.  Failed: 0." in r.stdout
+
+
+# ---------- flush moves the due date of a task that differs only by it ----------
+
+def test_an_action_with_a_new_due_date_moves_the_tasks(tasked):
+    before = tasked.read(TASK_LOG)
+    r = flush_of(tasked, TWIN.replace("due:2026-09-20", "due:2026-09-27"))
+    assert (r.returncode, r.stderr) == (0, "")
+    assert r.stdout == (
+        "flushed 0 entries into 0 log file(s); buffer cleared.\n"
+        f"due updated: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope  "
+        "due:2026-09-20 -> 2026-09-27\n"
+        "Ingested: 0.  Failed: 0.\n")
+    assert tasked.read(TASK_LOG) == before.replace("due:2026-09-20", "due:2026-09-27")
+    assert not (tasked.home / "threads/Projects/SQR/logs/2026-09-10.md").exists()
+    assert buffer_text(tasked) == ""
+
+
+def test_a_due_date_is_given_to_a_task_without_one(tasked):
+    tasked.write(TASK_LOG, tasked.read(TASK_LOG).replace("due:2026-09-20 ", ""))
+    r = flush_of(tasked, TWIN, quiet=True)
+    assert r.stdout == (f"due updated: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope  "
+                        "due:- -> 2026-09-20\n"
+                        "Ingested: 0.  Failed: 0.\n")
+    assert "entry:2026-09-01 due:2026-09-20 scheduled" in tasked.read(TASK_LOG)
+
+
+def test_an_action_without_a_due_date_leaves_the_tasks(tasked):
+    before = tasked.read(TASK_LOG)
+    r = flush_of(tasked, TWIN.replace(" due:2026-09-20", ""))
+    assert f"already a task: aaaaaaaa  {tasked.home / TASK_LOG}:4  Draft scope\n" in r.stdout
+    assert "Ingested: 0." in r.stdout
+    assert tasked.read(TASK_LOG) == before
+
+
+def with_second_twin(vault, due):
+    second = TASK_LINE.replace("aaaaaaaa", "dddddddd").replace("due:2026-09-20", due)
+    vault.write(TASK_LOG, vault.read(TASK_LOG) + second + "\n")
+    return vault.read(TASK_LOG)
+
+
+def test_an_action_matching_several_tasks_changes_none(tasked):
+    before = with_second_twin(tasked, "due:2026-09-21")
+    r = flush_of(tasked, TWIN.replace("due:2026-09-20", "due:2026-09-27"))
+    assert (r.returncode, r.stderr) == (0, "")
+    assert r.stdout == (
+        "flushed 0 entries into 0 log file(s); buffer cleared.\n"
+        "ambiguous: Projects/SQR  Draft scope  matches aaaaaaaa, dddddddd\n"
+        "Ingested: 0.  Failed: 0.\n")
+    assert tasked.read(TASK_LOG) == before
+
+
+def test_an_exact_twin_among_several_is_already_a_task(tasked):
+    before = with_second_twin(tasked, "due:2026-09-21")
+    r = flush_of(tasked, TWIN.replace("due:2026-09-20", "due:2026-09-21"))
+    assert f"already a task: dddddddd  {tasked.home / TASK_LOG}:5  Draft scope\n" in r.stdout
+    assert tasked.read(TASK_LOG) == before
+
+
+EARLY = "- [[Projects/SQR]] ACTION: Draft scope <!--2026-09-10T15:00:00 due:2026-09-20-->\n"
+LATE = "- [[Projects/SQR]] ACTION: Draft scope <!--2026-09-12T08:00:00 due:2026-09-27-->\n"
+UNDATED = "- [[Projects/SQR]] ACTION: Draft scope <!--2026-09-13T08:00:00-->\n"
+
+
+def test_actions_differing_only_by_due_collapse_to_the_latest_due(buffer_vault):
+    r = flush_of(buffer_vault, LATE, EARLY, UNDATED)
+    assert (r.returncode, r.stderr) == (0, "")
+    out = r.stdout.splitlines()
+    log = buffer_vault.home / "threads/Projects/SQR/logs/2026-09-12.md"
+    assert out[:4] == [
+        f"flushed 1 entry -> {log}",
+        "flushed 1 entries into 1 log file(s); buffer cleared.",
+        "already buffered: Projects/SQR  Draft scope",
+        "already buffered: Projects/SQR  Draft scope"]
+    assert out[5:] == ["Ingested: 1.  Failed: 0."]
+    assert "due:2026-09-27-->" in buffer_vault.read("threads/Projects/SQR/logs/2026-09-12.md")
+    assert not (buffer_vault.home / "threads/Projects/SQR/logs/2026-09-10.md").exists()
+
+
+def test_collapsed_actions_move_an_open_tasks_due_to_the_latest(buffer_vault):
+    task_log = "threads/Projects/SQR/logs/2026-09-01.md"
+    buffer_vault.write(task_log, '---\nthread: "[[Projects/SQR]]"\n---\n'
+                       "TASK: Draft scope <!--aaaaaaaa entry:2026-09-01 due:2026-09-15-->  \n")
+    r = flush_of(buffer_vault, EARLY, LATE)
+    assert r.stdout.splitlines()[1:3] == [
+        "already buffered: Projects/SQR  Draft scope",
+        f"due updated: aaaaaaaa  {buffer_vault.home / task_log}:4  Draft scope  "
+        "due:2026-09-15 -> 2026-09-27"]
+    assert "due:2026-09-27-->" in buffer_vault.read(task_log)
 
 
 # ---------- nothing prompts ----------

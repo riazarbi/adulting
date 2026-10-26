@@ -1,5 +1,5 @@
 {
   "command": "lint",
-  "description": "Validate vault files against the schemas.\n\nUsage: [--schemas DIR] [--quiet] [PATHS ...]\n\nArgs:\n  PATHS  files to validate; none = walk the whole vault\n\nFlags:\n  --schemas DIR  schemas directory (default: the schemas bundled with the package)\n  --quiet        suppress per-violation output; exit code only\n\nExamples:\n  []\n  [\"--quiet\"]\n  [\"threads/Projects/Northwind.md\"]\n\nNotes:\n  Read-only.\n  Violations print as <absolute-path>:<line>: <message>. Files that are not valid UTF-8 are reported here as 'file is not valid UTF-8'; other commands skip them silently.\n  Exit 0: clean. Exit 1: violations found. Exit 2: no schemas loaded.\n",
+  "description": "Validate vault files against the schemas.\n\nUsage: lint [PATH ...] [--quiet] [--schemas DIR]\n\nArgs:\n  PATH: zero or more files to validate. With none, lint walks the whole vault.\n\nFlags:\n  --quiet  no per-violation output; exit code only\n  --schemas DIR  schemas directory (default: the schemas bundled with the package). Do not pass it\n\nExamples:\n  []\n  [\"--quiet\"]\n\nNotes:\n  Read-only.\n  Each violation prints as <absolute path>:<line>: <message>. Files that are not valid UTF-8 are reported here and skipped by every other command.\n  Exit 0: clean. Exit 1: violations found. Exit 2: no schemas loaded.\n",
   "read_only": true
 }

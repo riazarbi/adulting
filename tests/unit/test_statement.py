@@ -263,3 +263,82 @@ def test_a_charge_ages_into_the_bucket_its_age_falls_in(days, bucket):
     st = S.build("T", "ZAR", [entry(as_of - datetime.timedelta(days=days), 60, 100)], [], as_of)
     assert st["aging"] == {**{b: Decimal("0.00") for b in S.AGING_BUCKETS},
                            bucket: Decimal("100.00")}
+
+
+# ---- opening ----
+
+
+def account():
+    """Charges in May and June, a payment in each; as at the end of June."""
+    return ([entry(D(2026, 5, 4), 60, 1000), entry(D(2026, 6, 1), 120, 1000),
+             entry(D(2026, 6, 20), 60, 1000)],
+            [payment(D(2026, 5, 20), 400), payment(D(2026, 6, 25), 1000)])
+
+
+def test_opening_changes_neither_the_balance_nor_the_aging():
+    """It compacts the view; the client is asked for the same money."""
+    entries, payments = account()
+    whole = S.build("T", "ZAR", entries, payments, D(2026, 6, 30))
+    opened = S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1))
+    assert opened["balance"] == whole["balance"] == Decimal("2600.00")
+    assert opened["aging"] == whole["aging"]
+
+
+def test_opening_brings_earlier_records_forward_as_one_line():
+    entries, payments = account()
+    st = S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1))
+    first = st["lines"][0]
+    assert (first["on"], first["description"], first["balance"]) == (
+        D(2026, 5, 31), "Balance brought forward", Decimal("600.00"))
+    assert (first["charge"], first["payment"], first["hours"]) == (None, None, None)
+    assert st["brought_forward"] == Decimal("600.00")
+
+
+def test_a_record_on_the_opening_day_is_shown_not_brought_forward():
+    entries, payments = account()
+    st = S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1))
+    assert [ln["on"] for ln in st["lines"]] == [
+        D(2026, 5, 31), D(2026, 6, 1), D(2026, 6, 20), D(2026, 6, 25)]
+    assert st["lines"][1]["balance"] == Decimal("2600.00")
+
+
+def test_opening_totals_are_the_periods():
+    entries, payments = account()
+    st = S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1))
+    assert (st["charges"], st["payments"], st["hours_total"]) == (
+        Decimal("3000.00"), Decimal("1000.00"), Decimal("3.00"))
+
+
+def test_nothing_before_the_opening_brings_forward_zero():
+    st = S.build("T", "ZAR", [entry(D(2026, 6, 2), 60, 1000)], [],
+                 D(2026, 6, 30), D(2026, 6, 1))
+    assert st["lines"][0]["balance"] == Decimal("0.00")
+    assert st["brought_forward"] == Decimal("0.00")
+
+
+def test_check_refuses_a_brought_forward_that_does_not_add_up(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["payments"])
+    entries, payments = account()
+    st = S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1))
+    with pytest.raises(SystemExit):
+        S.check({**st, "brought_forward": Decimal("500.00")})
+    assert capsys.readouterr().err == (
+        "payments: error: statement check failed: brought forward 500.00 + charges "
+        "3000.00 - payments 1000.00 != balance 2600.00\n")
+
+
+def test_markdown_prints_the_period_opening_balance_and_brought_forward_line():
+    entries, payments = account()
+    md = P.markdown(S.build("T", "ZAR", entries, payments, D(2026, 6, 30), D(2026, 6, 1)),
+                    {"name": "R", "lines": []}, {"name": "C", "lines": []}, complete_banking())
+    assert "**Period:** 2026-06-01 to 2026-06-30  \n**As at:** 2026-06-30" in md
+    assert "| Opening balance | ZAR 600.00 |" in md
+    assert "| 2026-05-31 | Balance brought forward | | | | | 600.00 |" in md
+    assert "| | **Balance due** | **3.00** | | **3,000.00** | **1,000.00** | **2,600.00** |" in md
+
+
+def test_markdown_without_opening_has_no_period_or_opening_balance():
+    entries, payments = account()
+    md = P.markdown(S.build("T", "ZAR", entries, payments, D(2026, 6, 30)),
+                    {"name": "R", "lines": []}, {"name": "C", "lines": []}, complete_banking())
+    assert "Period" not in md and "Opening balance" not in md and "brought forward" not in md

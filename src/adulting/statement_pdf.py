@@ -106,6 +106,8 @@ def markdown(st, supplier, client, bank):
                       [party_lines(supplier), party_lines(client)])
     out.append('')
     out.append(f"**Account:** {esc(st['thread'])}  ")
+    if st['opening']:
+        out.append(f"**Period:** {st['opening'].strftime('%Y-%m-%d')} to {as_of}  ")
     out.append(f"**As at:** {as_of}")
     out.append('')
 
@@ -115,6 +117,8 @@ def markdown(st, supplier, client, bank):
     out.append('| | |')
     out.append('|:--------------------------------------------------'
                '|-----------------------------:|')
+    if st['opening']:
+        out.append(f"| Opening balance | {money(st['brought_forward'], ccy)} |")
     out.append(f"| Hours billed | {st['hours_billable']:.2f} |")
     if st['minutes_written_off']:
         out.append(f"| Hours written off | {st['hours_written_off']:.2f} |")
@@ -132,6 +136,10 @@ def markdown(st, supplier, client, bank):
     out.append('|:-------------|:-----------------------------------|--------:'
                '|----------:|------------:|------------:|------------:|')
     for ln in st['lines']:
+        if ln.get('brought_forward'):
+            out.append(f"| {ln['on'].strftime('%Y-%m-%d')} | {ln['description']} | "
+                       f"| | | | {ln['balance']:,.2f} |")
+            continue
         hours = f"{ln['hours']:.2f}" if ln['hours'] is not None else ''
         rate = f"{ln['rate']:,.2f}" if ln['rate'] is not None else ''
         charge = f"{ln['charge']:,.2f}" if ln['charge'] is not None else ''

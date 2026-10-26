@@ -10,6 +10,7 @@ arithmetic and its self-checks are that code's; the shape follows this repo —
 plain functions over dicts, no annotations, `vault.die` on bad data.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 from adulting import vault as V
@@ -30,8 +31,9 @@ def charge_of(minutes, rate):
     return (Decimal(minutes) / Decimal(60) * Decimal(rate)).quantize(V.CENT)
 
 
-def running(entries, payments):
-    """Charges and payments merged into one chronological run of the balance.
+def running(entries, payments, opening=Decimal('0.00')):
+    """Charges and payments merged into one chronological run of the balance,
+    starting from `opening`.
 
     Entries are dicts with `on` (date), `description`, `minutes`, `rate`;
     payments with `on`, `amount`, `account`.
@@ -45,7 +47,7 @@ def running(entries, payments):
     events.sort(key=lambda ev: (ev[0], ev[1]))
 
     lines = []
-    balance = Decimal('0.00')
+    balance = opening
     for on, kind, event in events:
         if kind == 0:
             amount = charge_of(event['minutes'], event['rate'])
@@ -109,16 +111,47 @@ def aging(entries, payments, as_of):
 
 # ---------- assembly ----------
 
-def build(thread, currency, entries, payments, as_of):
+def brought_forward(opening, balance):
+    """The one line that stands for everything before `opening`."""
+    return {
+        'on': opening - timedelta(days=1),
+        'description': 'Balance brought forward',
+        'hours': None,
+        'rate': None,
+        'charge': None,
+        'payment': None,
+        'balance': balance,
+        'brought_forward': True,
+    }
+
+
+def build(thread, currency, entries, payments, as_of, opening=None):
     """Assemble the statement. `as_of` is a date; `entries`/`payments` are the
-    dicts described in `running`."""
+    dicts described in `running`.
+
+    `opening`, a date, compacts the view only: records before it become one
+    brought-forward line, and the figures are the period's from there on. The
+    balance due and the aging are the same with or without it."""
     # A statement is the account AS IT STOOD on `as_of`: work logged after that
     # date has not happened yet as far as this document is concerned. Without
     # this, `--as-of` ages future charges into `current` and overstates the debt.
     entries = [e for e in entries if e['on'] <= as_of]
     payments = [p for p in payments if p['on'] <= as_of]
 
-    lines = running(entries, payments)
+    # Aging sees the whole account; only the ledger and its totals are cut.
+    all_entries, all_payments = entries, payments
+    forward = Decimal('0.00')
+    if opening:
+        forward = (sum((charge_of(e['minutes'], e['rate']) for e in entries
+                        if e['on'] < opening), Decimal('0.00'))
+                   - sum((Decimal(p['amount']) for p in payments
+                          if p['on'] < opening), Decimal('0.00')))
+        entries = [e for e in entries if e['on'] >= opening]
+        payments = [p for p in payments if p['on'] >= opening]
+
+    lines = running(entries, payments, forward)
+    if opening:
+        lines.insert(0, brought_forward(opening, forward))
     charges = sum((charge_of(e['minutes'], e['rate']) for e in entries), Decimal('0.00'))
     paid = sum((Decimal(p['amount']) for p in payments), Decimal('0.00'))
     minutes = sum(e['minutes'] for e in entries)
@@ -128,10 +161,12 @@ def build(thread, currency, entries, payments, as_of):
         'thread': thread,
         'currency': currency,
         'as_of': as_of,
+        'opening': opening,
         'lines': lines,
+        'brought_forward': forward,
         'charges': charges,
         'payments': paid,
-        'balance': charges - paid,
+        'balance': forward + charges - paid,
         'minutes_total': minutes,
         'minutes_billable': billable,
         'minutes_written_off': minutes - billable,
@@ -141,7 +176,7 @@ def build(thread, currency, entries, payments, as_of):
                                if Decimal(e['rate']) > 0), Decimal('0.00')),
         'hours_written_off': sum((hours_of(e['minutes']) for e in entries
                                   if Decimal(e['rate']) <= 0), Decimal('0.00')),
-        'aging': aging(entries, payments, as_of),
+        'aging': aging(all_entries, all_payments, as_of),
     }
     check(statement)
     return statement
@@ -171,3 +206,8 @@ def check(statement):
     if worked != statement['hours_total']:
         V.die(f"statement check failed: lines hours {worked} "
               f"!= hours {statement['hours_total']}")
+    forward = statement.get('brought_forward', Decimal('0.00'))
+    if forward + statement['charges'] - statement['payments'] != statement['balance']:
+        V.die(f"statement check failed: brought forward {forward} + charges "
+              f"{statement['charges']} - payments {statement['payments']} "
+              f"!= balance {statement['balance']}")

@@ -207,10 +207,11 @@ def _as_of(raw):
     return datetime.strptime(raw, '%Y-%m-%d').date() if raw else date.today()
 
 
-def one_thread_statement(thread_arg, as_of, since=None, until=None):
+def one_thread_statement(thread_arg, as_of, since=None, until=None, opening=None):
     """The statement for one thread, built by `statement.build`. The window
     is the text view's: both walk the records the same way, so a windowed
-    `--pdf` shows the lines the text view shows."""
+    `--pdf` shows the lines the text view shows. `opening` only compacts the
+    ledger; see `statement.build`."""
     kind, name, tpath = V.resolve_target(thread_arg)
     ref = V.thread_ref(kind, name)
     currency = V.resolve_currency(tpath, ref, None)
@@ -237,22 +238,30 @@ def one_thread_statement(thread_arg, as_of, since=None, until=None):
                      'amount': V.cents(amount_of(pm)),
                      'account': pm.get('account', '')})
 
-    st = S.build(ref, currency, entries, paid, as_of)
+    st = S.build(ref, currency, entries, paid, as_of, opening)
     st['thread_path'] = tpath
     return st
 
 
 def cmd_pdf(args):
     """A statement document is per client, so --pdf needs exactly one thread."""
-    st = one_thread_statement(args.thread, _as_of(args.as_of), args.since, args.until)
-    if not st['lines']:
+    as_of = _as_of(args.as_of)
+    opening = _as_of(args.opening) if args.opening else None
+    if opening and opening > as_of:
+        V.die(f"--opening {opening} is after --as-of {as_of}")
+    st = one_thread_statement(args.thread, as_of, args.since, args.until, opening)
+    activity = [ln for ln in st['lines'] if not ln.get('brought_forward')]
+    # A quiet period with money still owed is a reminder worth sending.
+    if not activity and not st['brought_forward']:
         V.die(f"nothing to state for {st['thread']!r} as at {st['as_of']}")
     out, bank = P.render(st, args.pdf)
     if not bank['complete']:
         sys.stdout.flush()
         V.warn("banking details incomplete in .adulting/config.yaml — "
                "the statement says so instead of printing a payment table")
-    print(f"{out}: {len(st['lines'])} lines, {st['hours_total']:.2f} h, "
+    forward = (f"brought forward {V.fmt_money(st['brought_forward'], st['currency'])}, "
+               if opening else '')
+    print(f"{out}: {len(activity)} lines, {st['hours_total']:.2f} h, {forward}"
           f"charges {V.fmt_money(st['charges'], st['currency'])}, "
           f"paid {V.fmt_money(st['payments'], st['currency'])}, "
           f"balance {V.fmt_money(st['balance'], st['currency'])} "
@@ -261,6 +270,14 @@ def cmd_pdf(args):
 
 
 def cmd_statement(args):
+    if args.opening:
+        # The text view has no ledger to compact, and a window would make the
+        # brought-forward line a part of the balance under the name of all of it.
+        if not args.pdf:
+            V.die("--opening needs --pdf; only the PDF has a ledger to compact")
+        if args.since or args.until:
+            V.die("--opening cannot be combined with --since or --until; "
+                  "--as-of sets the end")
     if args.pdf:
         if not args.thread:
             V.die("--pdf needs --thread; a statement is per client")
@@ -340,6 +357,9 @@ def main():
     V.add_window_flags(p)
     p.add_argument('--as-of', metavar='YYYY-MM-DD', type=V.iso_date,
                    help="Statement date; drives aging (default: today).")
+    p.add_argument('--opening', metavar='YYYY-MM-DD', type=V.iso_date,
+                   help="First day the PDF ledger shows; earlier charges and payments "
+                        "become one balance-brought-forward line. Needs --pdf.")
     p.add_argument('--pdf', help="Render a PDF to this path. Requires --thread.")
     p.set_defaults(func=cmd_statement)
 

@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-10-26 - `payments statement --opening`: a statement that starts on a date
+
+Story: `stories/2026-10-26-statement-opening-balance.md`. A PDF statement
+listed every charge and payment the thread ever had. It can now open on a
+date, with what came before carried in one line.
+
+- **New flag `--opening YYYY-MM-DD`** on `payments statement --pdf`. Records before it become a `Balance brought forward` line dated the day before; records on it are shown. The line prints at `0.00` when nothing came before.
+- **View only:** the balance due and the aging are unchanged by it. The summary adds `Opening balance` and a `Period:` line; hours, charges and payments are the period's. The report line adds `brought forward <amount>` and counts only the period's lines.
+- **A quiet period renders** when something was brought forward. Nothing brought forward and no activity is still `nothing to state`.
+- **Refused:** without `--pdf`, with `--since` or `--until`, and after `--as-of`.
+- **`statement.check`** also asserts `brought forward + charges − payments = balance`.
+- **`billing-workflow`** (story `stories/2026-10-26-billing-skill-opening.md`): a month's PDF statement adds `--opening <month start>`, and the agent relays the brought-forward figure beside the balance.
+
 ## 2026-10-21 - `buffer flush` moves the due date of a task re-added with a new one
 
 Story: `stories/2026-10-21-flush-updates-due.md`. Re-adding an open task

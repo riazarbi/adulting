@@ -385,6 +385,53 @@ def test_a_failed_render_leaves_no_stale_file(vault):
     assert not out.exists()
 
 
+@pytest.mark.parametrize("extra, message", [
+    ((), "--opening needs --pdf; only the PDF has a ledger to compact"),
+    (("--pdf", "x.pdf", "--since", "2026-05-01"),
+     "--opening cannot be combined with --since or --until; --as-of sets the end"),
+    (("--pdf", "x.pdf", "--until", "2026-06-30"),
+     "--opening cannot be combined with --since or --until; --as-of sets the end"),
+    (("--pdf", "x.pdf", "--as-of", "2026-06-30"),
+     "--opening 2026-07-01 is after --as-of 2026-06-30"),
+])
+def test_opening_refusals(vault, extra, message):
+    saro(vault)
+    vault.run("log", "SARO Partners", "work", "-m", "60", "-r", "100",
+              "-d", "2026-06-01", "-t", "09:00", cli="hours")
+    r = vault.run("statement", "--thread", "SARO Partners", "--opening", "2026-07-01",
+                  *extra, cli="payments", cwd=vault.home)
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == f"payments: error: {message}\n"
+    assert not (vault.home / "x.pdf").exists()
+
+
+def test_opening_with_nothing_owed_and_nothing_since_is_nothing_to_state(vault):
+    saro(vault)
+    vault.run("log", "SARO Partners", "work", "-m", "60", "-r", "100",
+              "-d", "2026-05-01", "-t", "09:00", cli="hours")
+    vault.run("log", "SARO Partners", "100", "-d", "2026-05-02", cli="payments")
+    r = vault.run("statement", "--thread", "SARO Partners", "--opening", "2026-06-01",
+                  "--as-of", "2026-06-30", "--pdf", str(vault.home / "x.pdf"), cli="payments")
+    assert (r.returncode, r.stdout) == (1, "")
+    assert r.stderr == "payments: error: nothing to state for 'Projects/SARO Partners' as at 2026-06-30\n"
+
+
+@needs_pdf
+def test_pdf_with_opening_reports_the_period_and_what_came_forward(vault):
+    """A quiet period with money still owed renders: it is a reminder."""
+    saro(vault)
+    vault.run("log", "SARO Partners", "work", "-m", "120", "-r", "2500",
+              "-d", "2026-05-04", "-t", "09:00", cli="hours")
+    vault.run("log", "SARO Partners", "1000", "-d", "2026-05-20", cli="payments")
+    out = vault.home / "statement.pdf"
+    r = vault.run("statement", "--thread", "SARO Partners", "--opening", "2026-06-01",
+                  "--as-of", "2026-06-30", "--pdf", str(out), cli="payments")
+    assert r.returncode == 0, r.stderr
+    assert out.read_bytes()[:5] == b"%PDF-"
+    assert r.stdout == (f"{out}: 0 lines, 0.00 h, brought forward 4000 ZAR, "
+                        "charges 0 ZAR, paid 0 ZAR, balance 4000 ZAR as at 2026-06-30\n")
+
+
 def test_a_pdf_folder_that_cannot_be_made_is_an_error_not_a_traceback(vault):
     saro(vault)
     vault.run("log", "SARO Partners", "work", "-m", "60", "-r", "100",

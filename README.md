@@ -270,7 +270,7 @@ Money received, per thread. One file per thread at `~/vault/threads/<Kind>/<Thre
 | `payments log <thread> <amount>` | Record a receipt |
 | `payments list [thread] [--since] [--until] [--json]` | List payments |
 | `payments statement [--thread] [--since] [--until] [--as-of] [--json]` | Billed vs received vs outstanding, by thread **and currency** |
-| `payments statement --thread T --pdf out.pdf [--as-of D]` | Render a statement of account as a PDF |
+| `payments statement --thread T --pdf out.pdf [--as-of D] [--opening D]` | Render a statement of account as a PDF |
 | `payments show <id> [--json]` | One payment |
 | `payments edit <id> [--amount/-c/-d/-t/-a/-n]` | Change one field |
 | `payments rm <id> -y` | Delete a payment; refuses without `-y` |
@@ -292,6 +292,8 @@ payments statement --thread "Contoso Partners" --as-of 2026-08-31 --pdf statemen
 Renders a one-client statement: parties, summary, a dated ledger of every charge and payment with a running balance, aging buckets (current / 30 / 60 / 90+), and banking details. Rendered with pandoc + xelatex — the same toolchain `notes pdf` uses, so it needs no Python packages beyond the standard library.
 
 `--as-of` is the statement date and drives aging: work logged after it has not happened yet as far as the document is concerned, so `--as-of` never ages future charges into `current`. It applies to the text view too, so the two always agree.
+
+`--opening` sets the first day the ledger shows. Every charge and payment before it collapses into one *Balance brought forward* line, dated the day before, and the summary gains an opening balance; hours, charges and payments are then the period's. It changes the view only: the balance due and the aging are the same with or without it. `--as-of` cuts the input, `--opening` compacts the output. Records dated on `--opening` are shown. A period with no activity still renders when something was brought forward, as a reminder. It needs `--pdf`, since the text view has no ledger, and it refuses `--since` and `--until`, which would make the brought-forward line part of the balance under the name of all of it.
 
 A statement is per client, so `--pdf` requires `--thread`. Charges round to whole cents at each line, so the printed lines always sum to the printed total, and the aging buckets always sum to the balance — both are asserted before anything is written.
 

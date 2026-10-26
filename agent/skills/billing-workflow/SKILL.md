@@ -53,7 +53,17 @@ Four steps. Propose them together; the first three are read-only.
    in front of a client, fix with `hours edit --description` — this
    is the one write in the sequence, so flag it in the proposal.
 4. `payments statement --thread ... --as-of <month end>` to render
-   the statement. Add `--pdf <path>` when he wants a file to send.
+   the statement. Add `--pdf <path>` when he wants a file to send,
+   and with it `--opening <month start>`: the ledger then shows the
+   month, and everything earlier is one "Balance brought forward"
+   line. The balance due is the same either way.
+
+`--opening` is for the PDF only, and never goes with `--since` or
+`--until` on the statement; those bound the `hours` calls in steps
+1 and 2. Leave it off when he asks for the full history, or for a
+client's first statement. When it is on, relay the brought-forward
+figure from the output beside the balance, so he sees what the month
+added to what was already owed.
 
 `--pdf` requires `--thread`, and the thread needs its `client_*`
 fields filled in. If the render fails for a missing `client_name`,

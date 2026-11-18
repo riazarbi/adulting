@@ -58,7 +58,7 @@ def test_matching_lines_drops_a_repeat_of_the_line_kept_before():
                             "AGREED:", "AGREED: ") == ["a", "b", "a"]
 
 
-def test_action_rows_mark_each_action_open_or_done():
+def test_action_rows_mark_each_action_open_done_or_dropped():
     rows = R.action_rows([
         "ACTION: (Bram) Get quotes <!--due:2026-10-01-->",
         "ACTION: (Bram) Get quotes",
@@ -67,6 +67,7 @@ def test_action_rows_mark_each_action_open_or_done():
         "DONE: Book the venue <!--aaaa0001 entry:2026-09-01 end:2026-09-05-->",
         "- [x] Old done task",
         "DONE: (Bram) Get quotes <!--aaaa0002 entry:2026-09-01 end:2026-09-06-->",
+        "DROPPED: Hire a band <!--aaaa0003 entry:2026-09-01 end:2026-09-07-->",
         "not an action",
     ], owner="Remy Dorn")
     assert rows == [
@@ -77,6 +78,7 @@ def test_action_rows_mark_each_action_open_or_done():
         "| Remy Dorn | Old done task | Done |",
         # The same task open and done in one note is listed both ways.
         "| Bram | Get quotes | Done |",
+        "| Remy Dorn | Hire a band | Dropped |",
     ]
 
 

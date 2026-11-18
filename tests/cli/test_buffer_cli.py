@@ -398,10 +398,12 @@ def test_an_action_that_differs_in_anything_compared_becomes_a_task(tasked, twin
 @pytest.mark.parametrize("change", [
     lambda v: v.write(TASK_LOG, v.read(TASK_LOG).replace("TASK:", "DONE:").replace(
         "entry:2026-09-01", "entry:2026-09-01 end:2026-09-02")),
+    lambda v: v.write(TASK_LOG, v.read(TASK_LOG).replace("TASK:", "DROPPED:").replace(
+        "entry:2026-09-01", "entry:2026-09-01 end:2026-09-02")),
     lambda v: v.write(TASK_LOG, v.read(TASK_LOG).replace(
         'thread: "[[Projects/SQR]]"', 'threads:\n  - "[[Projects/SQR]]"\n  - "[[Topics/Workouts]]"')),
     lambda v: (v.home / TASK_LOG).write_bytes(v.read(TASK_LOG).encode() + b"\xff\n"),
-], ids=["done twin", "several threads", "unreadable file"])
+], ids=["done twin", "dropped twin", "several threads", "unreadable file"])
 def test_a_twin_that_does_not_count_does_not_block(tasked, change):
     change(tasked)
     r = flush_of(tasked, TWIN)

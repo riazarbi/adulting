@@ -38,7 +38,7 @@ MINUTES_SUMMARY = (
     "\\newpage\n\n")
 
 CHECKBOX_ACTION_RE = re.compile(r'^-\s*\[[ x]\]\s*(?:[A-Z0-9]{5}\s+)?(?:\(([^)]+)\)\s+)?(.+?)\s*$')
-ACTION_RE = re.compile(r'^(?:ACTION|TASK|DONE):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
+ACTION_RE = re.compile(r'^(?:ACTION|TASK|DONE|DROPPED):\s*(?:\(([^)]+)\)\s*)?(.+?)\s*$')
 COMMENT_RE = re.compile(r'\s*<!--[^>]*-->\s*')
 DONE_BOX_RE = re.compile(r'^-\s*\[x\]')
 
@@ -225,9 +225,9 @@ def matching_lines(lines, needle, prefix):
 
 def action_rows(lines, owner):
     """One table row per distinct (assignee, task, status), from `- [ ]` /
-    `- [x]` checkboxes and ACTION/TASK/DONE lines. Every action is listed,
-    open or done, and says which. An action with no assignee is given to the
-    owner."""
+    `- [x]` checkboxes and ACTION/TASK/DONE/DROPPED lines. Every action is
+    listed, open, done or dropped, and says which. An action with no
+    assignee is given to the owner."""
     rows, seen = [], set()
     for line in lines:
         m = CHECKBOX_ACTION_RE.match(line) or ACTION_RE.match(line)
@@ -235,7 +235,12 @@ def action_rows(lines, owner):
             continue
         assignee = (m.group(1) or '').strip() or owner
         task = COMMENT_RE.sub(' ', m.group(2)).strip()
-        status = 'Done' if line.startswith('DONE:') or DONE_BOX_RE.match(line) else 'Open'
+        if line.startswith('DONE:') or DONE_BOX_RE.match(line):
+            status = 'Done'
+        elif line.startswith('DROPPED:'):
+            status = 'Dropped'
+        else:
+            status = 'Open'
         if (assignee, task, status) in seen:
             continue
         seen.add((assignee, task, status))

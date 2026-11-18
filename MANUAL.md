@@ -2,229 +2,230 @@
 
 ## Before you start
 
-All data lives in one directory, the vault. The default is `~/vault`. Set `ADULTING_HOME` to use a different directory:
+All data lives in one folder, the vault. The default is `~/vault`. To use another folder, set `ADULTING_HOME`:
 
 ```
 export ADULTING_HOME=<path-to-vault>
 ```
 
-Every command reads and writes only inside the vault.
+Every command reads and writes under that folder. Every path a command prints is absolute.
 
-The tools need Python 3.11 or newer. Some commands also need these external programs:
+The tools need these programs:
 
 | Program | Needed by |
 |---|---|
+| Python 3.11 or newer | every tool |
 | `git` | `commit` |
 | `pandoc` and a LaTeX engine (`xelatex`) | `notes pdf`, `notes minutes`, `notes agenda`, `payments statement --pdf` |
 
-Everything is stored as plain text: Markdown files with YAML frontmatter, plus JSON inside fenced blocks. You can read the files, grep them and back them up with your own tools. Vault-wide settings live in `.adulting/config.yaml`.
+Everything is plain text on disk: Markdown files with YAML frontmatter, plus JSON inside fenced blocks. You can read the files, grep them and back them up with your own tools.
 
 ## How the pieces fit
-
-Paths are relative to the vault root. `<Kind>` is `Projects`, `Processes` or `Topics`.
 
 | Object | What it is | Where it lives |
 |---|---|---|
 | Thread | A project, process or topic that organises everything else | `threads/<Kind>/<Name>.md` |
-| Note | A typed document: meeting, correspondence, report, research and so on | `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md` |
-| Log | One thread's activity for one day, written by `buffer flush` | `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md` |
+| Note | A typed document, such as a meeting record, correspondence or report | `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md` |
+| Log | One thread's activity for one day, one line per item | `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md` |
+| Person | A contact you track | `people/<Name>.md` |
 | Time entry | A session of work, billable or not | `threads/<Kind>/<Name>/hours.md` |
 | Payment | Money received against a thread | `threads/<Kind>/<Name>/payments.md` |
-| Action / task | An `ACTION:` line becomes a `TASK:` anchor, then `DONE:` | Inside the note or log that holds it |
-| Person | A contact you track | `people/<Name>.md` |
+| Action / task | An `ACTION:` line in a note or log, rewritten in place to a `TASK:` anchor | inside the note or log |
 | Buffer | The staging queue for quick captures | `buffer.md` |
+| Config | Vault-wide settings | `.adulting/config.yaml` |
 
-Everything that belongs to a thread lives in the thread's folder, beside the thread file.
+`<Kind>` is `Projects`, `Processes` or `Topics`. Everything that belongs to a thread lives in the thread's folder, next to its thread file.
 
 Relationships:
 
-- A note names one or more threads in `threads:`. It is filed under the first one.
-- A note's `people:` and a task's assignee link to person files. A person is never a thread.
-- A task lives in a note or log. There is no other task store.
-- A task can depend on other tasks by uuid.
-- `notes new`, `hours log` and `payments log` each put a `REF:` pointer in the buffer. After `buffer flush`, the pointer appears in that day's thread log.
-- A stat is declared in a thread file. Its values are `STAT:` lines in that thread's logs.
-- `payments statement` compares billed hours with payments received.
+- A note names one or more threads in its `threads:` field. It is filed under the first one.
+- A note's `people:` entries and a task's assignee link to person files. A person is never a thread.
+- Tasks live in notes and logs. Those files are the only task store.
+- `buffer flush` turns buffer lines into a thread's daily logs.
+- `notes new`, `hours log` and `payments log` each add a `REF:` pointer to the buffer. After a flush, that pointer appears in the thread's log for the day the event happened.
+- A thread's `currency` and `rate` are the defaults for its time entries.
 
 ## Command reference
 
-No command prompts for input or opens an app, so every command is safe to run unattended. Every command and subcommand accepts `--help-json`. That option prints the command's arguments as JSON and exits 0. Every path a command prints is absolute. Wherever a command takes a thread, you can give it as `Kind/Name` (for example `Projects/Northwind`) or as a wikilink.
+No command prompts for input or opens an app. Any permanent delete needs `-y`. Every command and subcommand accepts `--help-json`.
 
 ### tasks
 
-Turns `ACTION:` lines into tracked `TASK:` anchors and edits those anchors in place.
+Turns `ACTION:` lines into tracked `TASK:` anchors and changes those anchors.
 
 **When to use it**
 
 - You wrote `ACTION:` lines in a note and want them tracked.
-- You need to see what to do next, or what is overdue.
-- You finished a task, or its due date, priority or assignee changed.
+- You want to see what to do next, or what is overdue.
+- You finished or abandoned a task, or need to change its date, owner or priority.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| *(none)* | Same as `ingest`. Writes. | `tasks` |
-| `ingest` | Rewrites every `ACTION:` line in notes and logs as a `TASK:` anchor with a new uuid. Writes. | `tasks ingest --dry-run` |
-| `add` | Appends an `ACTION:` to the buffer. Same as `buffer add-action`. Writes. | `tasks add Projects/Northwind "(Sam Rivera) Send quarterly report" --due 2026-11-06 --priority H` |
-| `done` | Changes `TASK` to `DONE` in the source file and stamps `end:` with today's date. Writes. | `tasks done abcd1234` |
-| `set-description` | Rewrites the task text. Writes. | `tasks set-description abcd1234 "Send revised quarterly report"` |
-| `set-assignee` | Rewrites the `(Assignee)` prefix. Writes. | `tasks set-assignee abcd1234 "Sam Rivera"` |
-| `set-due` | Sets the due date. Writes. | `tasks set-due abcd1234 2026-11-13` |
-| `set-scheduled` | Sets the scheduled date. Writes. | `tasks set-scheduled abcd1234 2026-11-10` |
-| `set-priority` | Sets priority `H`, `M` or `L`. Writes. | `tasks set-priority abcd1234 H` |
-| `add-depends` | Makes the task wait on another task. Writes. | `tasks add-depends abcd1234 ef567890` |
-| `rm-depends` | Removes a dependency. Writes. | `tasks rm-depends abcd1234 ef56` |
-| `list` | Lists pending tasks, grouped by thread, then sorted by priority, due date and entry date. Read-only. | `tasks list --thread Projects/Northwind` |
-| `next` | Shows the top 5 pending tasks by priority, due date and entry date. Read-only. | `tasks next` |
-| `show` | Shows one task in detail. Read-only. | `tasks show abcd1234` |
+| *(none)* | Same as `ingest` | `tasks` |
+| `ingest` | Rewrites every `ACTION:` line in notes and logs into a `TASK:` anchor with a new 8-character uuid | `tasks ingest --dry-run` |
+| `add` | Adds an `ACTION:` line to the buffer. Same as `buffer add-action` | `tasks add Projects/Northwind "(Sam Rivera) Send the revised scope" --due 2026-11-30 --priority H` |
+| `done` | Changes `TASK` to `DONE` and stamps `end` with today's date | `tasks done abcd1234` |
+| `drop` | Changes `TASK` to `DROPPED` and stamps `end`. Lists open tasks that depend on it but does not change them | `tasks drop abcd1234` |
+| `set-description` | Replaces the task's text | `tasks set-description abcd1234 "Send the final scope"` |
+| `set-assignee` | Replaces the `(Assignee)` prefix | `tasks set-assignee abcd1234 "Sam Rivera"` |
+| `set-due` | Sets the due date | `tasks set-due abcd1234 2026-12-05` |
+| `set-scheduled` | Sets the scheduled date | `tasks set-scheduled abcd1234 2026-12-01` |
+| `set-priority` | Sets priority `H`, `M` or `L` | `tasks set-priority abcd1234 M` |
+| `add-depends` | Makes the task wait on another task | `tasks add-depends abcd1234 ef567890` |
+| `rm-depends` | Removes a dependency | `tasks rm-depends abcd1234 ef567890` |
+| `list` | Lists pending tasks, grouped by thread | `tasks list --overdue` |
+| `next` | Shows the top 5 pending tasks by priority, then due date, then entry date | `tasks next` |
+| `show` | Shows one task in detail | `tasks show abcd1234` |
+
+A uuid argument accepts any unique prefix. Get uuids from `tasks list`.
 
 **Options**
 
-Global: `--dry-run` and `--quiet` work with bare `tasks` and with `tasks ingest`.
-
 | Option | Effect |
 |---|---|
-| `--dry-run` | (bare / `ingest`) Shows what would be ingested. Writes nothing. |
-| `--quiet` | (bare / `ingest`) Hides the per-action output. |
-| `--due <YYYY-MM-DD>` | (`add`) Due date. |
-| `--scheduled <YYYY-MM-DD>` | (`add`) Scheduled date. |
-| `--priority <H\|M\|L>` | (`add`) Priority. (`list`) Shows only this priority. |
-| `--depends <uuid>` | (`add`) An 8-character task uuid that this task waits on. You can repeat it. |
-| `--thread <thread>` | (`list`) Shows only tasks whose source note carries this thread. |
-| `--assignee <person>` | (`list`) Shows only tasks assigned to this person. |
-| `--overdue` | (`list`) Shows only tasks whose due date is before today. |
-| `--json` | (`list`) Prints JSON. |
+| `--dry-run` | On bare `tasks` or `ingest`: shows what would be ingested and writes nothing |
+| `--quiet` | On bare `tasks` or `ingest`: suppresses per-action output |
+| `add --due <YYYY-MM-DD>` | Sets the due date |
+| `add --scheduled <YYYY-MM-DD>` | Sets the scheduled date |
+| `add --priority <H\|M\|L>` | Sets priority |
+| `add --depends <uuid>` | Adds a dependency. Repeatable |
+| `list --priority <H\|M\|L>` | Shows one priority only |
+| `list --thread <Kind/Name>` | Shows tasks from one thread only |
+| `list --assignee <person>` | Shows one person's tasks only |
+| `list --overdue` | Shows only tasks due before today |
+| `list --json` | Prints JSON |
 
 **Notes**
 
-- `ingest` and every mutating subcommand rewrite your note and log files in place.
-- Wherever a subcommand takes a uuid, you can give any unique prefix.
-- `tasks add` only writes to the buffer. The task appears after `buffer flush`.
-- Files that are not valid UTF-8 are skipped. `lint` reports them.
-- The command exits with code 1 when a uuid prefix is empty or matches no task. It also exits 1 if a date is not `YYYY-MM-DD`, a description is empty, an assignee has no `people/<Name>.md`, or a task would depend on itself.
+- `ingest` and every `set-*`, `done`, `drop`, `add-depends` and `rm-depends` rewrite lines in your note and log files in place.
+- `tasks add` only writes to the buffer. The task exists after `buffer flush`.
+- Do not edit `TASK:`, `DONE:` or `DROPPED:` lines by hand. Use these subcommands.
+- A file that is not valid UTF-8 is skipped. `lint` reports it.
+- Exit `1`: unknown or empty uuid prefix, bad date, empty description, an assignee with no `people/` file, or a task made to depend on itself.
 
 ### notes
 
-Creates, lists, prints, copies, deletes and renders notes, addressed by stem.
+Creates, finds, prints, copies, deletes and renders notes. You refer to each note by its stem.
 
 **When to use it**
 
-- You are starting a meeting, correspondence or research record.
-- You need a note's stem or path, or need to print a note.
-- You need minutes, an agenda or a PDF for a meeting.
+- You are starting a meeting record, correspondence log or report.
+- You need minutes, an agenda or a PDF of a note to send.
+- You need the path of the note you just created.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `new` | Creates a note and prints its path. Writes. | `notes new --type Meeting --topic "Quarterly review" --thread Projects/Northwind --person "Sam Rivera"` |
-| `list` | Lists notes, oldest first, with stem, date, type, threads and topic. | `notes list northwind` |
-| `cat` | Prints a note. | `notes cat 2026-09-10-14-30-00` |
-| `last` | Prints the path of the newest note. | `notes last` |
-| `copy` | Copies a note to a new timestamp and adds ` COPY` to the topic. Writes. | `notes copy 2026-09-10-14-30-00` |
-| `delete` | Deletes a note permanently. Needs `-y`. | `notes delete 2026-09-10-14-30-00 -y` |
-| `pdf` | Renders the note to Markdown and PDF, with callouts and an action table. | `notes pdf 2026-09-10-14-30-00` |
-| `minutes` | Renders meeting minutes: agreements, resolutions and action items. | `notes minutes 2026-09-10-14-30-00` |
-| `agenda` | Renders a meeting agenda: the note with its outcome sections emptied. | `notes agenda 2026-09-10-14-30-00` |
+| `new` | Creates a note and prints its path | `notes new --type Meeting --topic "Scope review" --thread Projects/Northwind --person "Sam Rivera"` |
+| `list` | Lists notes oldest first: stem, date, type, threads and topic | `notes list northwind` |
+| `cat` | Prints a note | `notes cat 2026-09-10-14-30-00` |
+| `last` | Prints the path of the newest note | `notes last` |
+| `copy` | Copies a note to a new timestamp and adds ` COPY` to its topic | `notes copy 2026-09-10-14-30-00` |
+| `delete` | Permanently deletes a note | `notes delete 2026-09-10-14-30-00 -y` |
+| `pdf` | Renders a note to Markdown and PDF, with callouts and an action table | `notes pdf 2026-09-10-14-30-00` |
+| `minutes` | Renders meeting minutes: agreements, resolutions and action items | `notes minutes 2026-09-10-14-30-00` |
+| `agenda` | Renders an agenda: the note with the outcome sections emptied | `notes agenda 2026-09-10-14-30-00 --out ~/Desktop` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--type <type>` | (`new`, required) One of `Meeting`, `Correspondence`, `Workshop`, `Report`, `Log`, `Research`, `Recipe`. |
-| `--topic <text>` | (`new`, required) What the note is about. |
-| `--thread <thread>` | (`new`, required) A thread. You can repeat it. The first thread decides where the note is filed. |
-| `--person <name>` | (`new`) An attendee. You can repeat it. Meeting and Correspondence notes only. |
-| `--counterparty <text>` | (`new`) The other party. Meeting notes only. |
-| `--location <text>` | (`new`) Where the meeting was held. Meeting notes only. |
-| `--json` | (`list`) Prints JSON. |
-| `--out <dir>` | (`pdf`, `minutes`, `agenda`) Output directory. The default is `~/Downloads`. |
-| `-y`, `--yes` | (`delete`) Required. Confirms the permanent delete. |
+| `new --type <type>` | Required. One of `Meeting`, `Correspondence`, `Workshop`, `Report`, `Log`, `Research`, `Recipe` |
+| `new --topic <text>` | Required. What the note is about |
+| `new --thread <Kind/Name>` | Required. Repeatable. The note is filed under the first thread |
+| `new --person <name>` | Meeting and Correspondence only. Repeatable. Linked when `people/<name>.md` exists |
+| `new --counterparty <text>` | Meeting only. The other party |
+| `new --location <text>` | Meeting only. Where the meeting was held |
+| `list <filter>` | Case-insensitive match in any column |
+| `list --json` | Prints JSON |
+| `delete -y` | Required to delete |
+| `--out <DIR>` | On `pdf`, `minutes`, `agenda`: output folder. The default is `~/Downloads` |
 
 **Notes**
 
-- Every subcommand except `new` first ingests `ACTION:` lines into tasks. This means `list`, `cat` and the other subcommands can rewrite note and log files.
-- A stem is a note's filename without `.md`, for example `2026-09-10-14-30-00`. Stems are unique across the vault.
-- Renders are written as `<stem>.md` and `<stem>.md.pdf`.
-- The command exits with code 1 if the topic is empty, a stem is malformed, or the vault has no notes. It also exits 1 if a meeting-only or person option is used on the wrong note type, or the PDF render fails.
+- Every subcommand except `new` first ingests `ACTION:` lines into tasks. This rewrites source files, even for `list` and `cat`.
+- Renders write `<stem>.md` and `<stem>.md.pdf`. They need `pandoc` and `xelatex`.
+- `new` creates the file. You write the body yourself.
+- Exit `1`: empty topic, an option used with the wrong note type, a malformed stem, no notes in the vault, or a failed PDF render.
 
 ### search
 
-Finds notes and logs and summarises thread activity. Read-only.
+Finds notes and logs and summarises activity. It returns absolute paths and metadata, never file bodies.
 
 **When to use it**
 
-- You need notes or logs for a thread, a date range or some text.
-- You want to see which threads were active in a period.
-- You want a timeline of everything that happened on a thread or on a day.
+- You need every Meeting note for a thread in a date range.
+- You want to know which threads were active this week.
+- You want one thread's full picture, or today's timeline.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `notes` | Finds notes by thread, type, date or text. | `search notes --thread Projects/Northwind --type Meeting` |
-| `logs` | Finds daily logs by thread, date or text. | `search logs --text pilot --since 2026-10-01` |
-| `activity` | Ranks threads by what happened in a date window. | `search activity --since 2026-10-01 --until 2026-10-31` |
-| `overview` | Shows the whole picture of one thread. | `search overview Projects/Northwind` |
-| `stream` | Merges every dated record into one timeline. | `search stream --today` |
+| `notes` | Finds notes by thread, type, date or text | `search notes --thread Projects/Northwind --type Meeting --since 2026-10-01` |
+| `logs` | Finds daily logs by thread, date or text | `search logs --text "revised scope"` |
+| `activity` | Ranks threads by activity in a date window | `search activity --since 2026-11-01` |
+| `overview` | Shows the whole picture of one thread | `search overview Projects/Northwind` |
+| `stream` | Merges every dated record into one timeline | `search stream --today` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--thread <thread>` | (`notes`, `logs`, `activity`, `stream`) Limits results to one thread. |
-| `--type <type>` | (`notes`) Note type, for example `Meeting`. Not case-sensitive. |
-| `--text <text>` | Literal text, not case-sensitive. `notes` searches topic and body. `logs` searches entry lines. `stream` searches thread and summary. |
-| `--since <YYYY-MM-DD>` | On or after this date. |
-| `--until <YYYY-MM-DD>` | On or before this date. |
-| `--limit <n>` | Maximum results. The default is 20 for `notes` and `logs`, 5 for `overview` and 100 for `stream`. `0` means all. |
-| `--kind <list>` | (`stream`) Comma-separated kinds: `note`, `log`, `task`, `done`, `hours`, `payment`, `thread`, `person`, `pending`. The default is all. |
-| `--today` | (`stream`) Today only. |
-| `--reverse` | (`stream`) Oldest first. The default is newest first. |
-| `--json` | Prints JSON. |
+| `--since <YYYY-MM-DD>` / `--until <YYYY-MM-DD>` | Date window, inclusive. All subcommands |
+| `--json` | Prints JSON. All subcommands |
+| `--thread <Kind/Name>` | One thread only. On `notes`, `logs`, `activity`, `stream` |
+| `--text <text>` | Case-insensitive literal. `notes` searches topic and body. `logs` searches entry lines. `stream` searches thread and summary |
+| `--type <type>` | On `notes`: one note type, case-insensitive |
+| `--limit <N>` | Maximum results. Defaults: 20 for `notes` and `logs`, 5 for `overview`, 100 for `stream`. `0` means all |
+| `stream --kind <list>` | Comma-separated: `note`, `log`, `task`, `done`, `dropped`, `hours`, `payment`, `thread`, `person`, `pending`. The default is all |
+| `stream --today` | Today only |
+| `stream --reverse` | Oldest first. The default is newest first |
 
 **Notes**
 
-- Results are paths and metadata, never note or log bodies. Use `notes cat` or your own reader to see the contents.
+- Read-only.
 - Dates are event dates: a note's frontmatter `timestamp`, not its filename. The filename is used only when the timestamp is missing or malformed.
-- `search` does not search the text of time entries.
-- The command exits with code 1 when `--kind` contains an unknown kind.
+- Time-entry descriptions are not searched by `notes` or `logs`. `activity` counts hours.
+- Exit `1`: unknown value in `--kind`.
 
 ### threads
 
-Creates and shows thread files.
+Creates, lists and shows thread files.
 
 **When to use it**
 
 - You are starting a new project, process or topic.
-- You need a thread's exact name or its frontmatter.
+- You need a thread's exact `Kind/Name` for another command.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `list` | Lists threads. Shows open threads only unless you add `--all`. Read-only. | `threads list north` |
-| `show` | Shows one thread file. Read-only. | `threads show Projects/Northwind` |
-| `new` | Creates a thread file. Writes. | `threads new --name Northwind --kind project --category professional --currency ZAR --rate 1500` |
+| `list` | Lists open threads. An optional query ranks them by fuzzy match | `threads list north` |
+| `show` | Shows one thread file | `threads show Projects/Northwind` |
+| `new` | Creates a thread file | `threads new --name Northwind --kind project --category professional --currency ZAR --rate 1500` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--all` | (`list`) Includes paused and closed threads. |
-| `--json` | (`list`, `show`) Prints JSON. |
-| `--name <name>` | (`new`, required) The thread name, which becomes the filename. |
-| `--kind <project\|process\|topic>` | (`new`, required) Decides which directory the thread goes in. |
-| `--category <professional\|personal\|voluntary>` | (`new`, required) Thread category. |
-| `--currency <ISO>` | (`new`) The default currency for `hours`. Setting it makes the thread billable. |
-| `--rate <n>` | (`new`) The default hourly rate for `hours`. Needs `--currency`. |
+| `list --all` | Includes paused and closed threads |
+| `--json` | Prints JSON. On `list` and `show` |
+| `new --name <name>` | Required. Becomes the filename |
+| `new --kind <project\|process\|topic>` | Required. Selects `Projects/`, `Processes/` or `Topics/` |
+| `new --category <professional\|personal\|voluntary>` | Required |
+| `new --currency <ISO>` | Default currency for `hours`. Makes the thread billable |
+| `new --rate <N>` | Default hourly rate for `hours`. Needs `--currency` |
 
 **Notes**
 
-- There is no delete command. To remove a thread, delete its file and its folder by hand.
+- There is no delete. To remove a thread, delete its file and its folder by hand.
 - To close a thread, set `status: closed` and `ended:` in its frontmatter. Nothing moves.
-- The command exits with code 1 if the name is empty, contains `/`, starts with `.` or already exists. It also exits 1 if `--rate` is given without `--currency`.
+- Exit `1`: empty name, a name containing `/` or starting with `.`, a thread that already exists, or `--rate` without `--currency`.
 
 ### people
 
@@ -232,222 +233,227 @@ Creates, lists, shows and deletes person files.
 
 **When to use it**
 
-- You want someone as a note attendee or task assignee.
-- You need a person's exact name as stored.
+- You want to assign tasks to someone or link them from notes.
+- You need a person's exact name as it is stored.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `list` | Lists people. Shows open people only unless you add `--all`. Read-only. | `people list sam` |
-| `show` | Shows one person file. Read-only. | `people show "Sam Rivera"` |
-| `new` | Creates a person file. Writes. | `people new --name "Sam Rivera" --category professional` |
-| `delete` | Deletes a person file permanently. Needs `-y`. | `people delete "Sam Rivera" -y` |
+| `list` | Lists open people. An optional query ranks them by fuzzy match | `people list sam` |
+| `show` | Shows one person file | `people show "Sam Rivera"` |
+| `new` | Creates a person file | `people new --name "Sam Rivera" --category professional` |
+| `delete` | Permanently deletes a person file | `people delete "Sam Rivera" -y` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--all` | (`list`) Includes closed people. |
-| `--json` | (`list`, `show`) Prints JSON. |
-| `--name <name>` | (`new`, required) Full name, which becomes the filename. |
-| `--category <professional\|personal\|voluntary>` | (`new`, required) Relationship category. |
-| `-y`, `--yes` | (`delete`) Required. Confirms the permanent delete. |
+| `list --all` | Includes closed people |
+| `--json` | Prints JSON. On `list` and `show` |
+| `new --name <name>` | Required. Full name. Becomes the filename |
+| `new --category <professional\|personal\|voluntary>` | Required |
+| `delete -y` | Required to delete |
 
 **Notes**
 
-- The command exits with code 1 if the name is empty, contains `/`, starts with `.` or already exists. It also exits 1 if the person is not found, or `delete` is run without `-y`.
+- Exit `1`: empty or invalid name, a person who already exists, a person not found, or `delete` without `-y`.
 
 ### hours
 
-Records time spent on threads, billable or not.
+Records time against a thread, billable or not.
 
 **When to use it**
 
 - You finished a session of client work.
-- You want to track unbilled time, such as exercise or admin.
-- You need totals for a period, by thread and currency.
+- You want to track unbilled personal time, such as exercise or admin.
+- You need totals by thread and currency before billing.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `log` | Adds a time entry. Writes. | `hours log Projects/Northwind "Pilot data review" -m 90` |
-| `list` | Lists entries. Read-only. | `hours list Projects/Northwind --since 2026-10-01` |
-| `report` | Totals time by thread and currency, with unbilled time totalled separately. Read-only. | `hours report --since 2026-10-01 --until 2026-10-31` |
-| `show` | Shows one entry. Read-only. | `hours show 1a2b3c4d` |
-| `edit` | Changes fields of one entry. Writes. | `hours edit 1a2b3c4d -m 120` |
-| `rm` | Deletes an entry permanently. Needs `-y`. | `hours rm 1a2b3c4d -y` |
+| `log` | Adds an entry | `hours log -m 90 Projects/Northwind Scope workshop` |
+| `list` | Lists entries | `hours list Projects/Northwind --since 2026-10-01` |
+| `report` | Shows totals by thread and currency. Unbilled time is totalled separately | `hours report --since 2026-10-01 --until 2026-10-31` |
+| `show` | Shows one entry | `hours show 1a2b3c4d` |
+| `edit` | Changes fields of one entry | `hours edit 1a2b3c4d -m 120` |
+| `rm` | Permanently deletes an entry | `hours rm 1a2b3c4d -y` |
+
+Entry ids are 8 characters. Get them from `hours list`.
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `-m`, `--minutes <n>` | (`log`) Duration in minutes. The default is 60. (`edit`) New duration. The start time stays the same. |
-| `-r`, `--rate <n>` | Hourly rate. `0` means unbillable. The entry also needs a currency. |
-| `-c`, `--currency <ISO>` | (`log`) Defaults to the thread's currency. With no currency from either, the entry is recorded as unbilled. (`edit`) New currency. |
-| `-d`, `--date <YYYY-MM-DD>` | (`log`) The date of the work. The default is today. (`edit`) Moves the entry to this day and keeps its duration. |
-| `-t`, `--time <HH:MM>` | (`log`) Start time. The default is now. (`edit`) Moves the start time and keeps the duration. |
-| `--description <text>` | (`edit`) New description. |
-| `--since`, `--until <YYYY-MM-DD>` | (`list`, `report`) Date window. |
-| `--thread <thread>` | (`report`) Shows only this thread. |
-| `--json` | (`list`, `report`, `show`) Prints JSON. |
-| `-y`, `--yes` | (`rm`) Required. Confirms the permanent delete. |
+| `log -m <minutes>` | Duration. The default is 60 |
+| `log -r <rate>` | Hourly rate. `0` means unbillable |
+| `log -c <ISO>` | Currency. Defaults to the thread's. Without either, the entry is unbilled |
+| `log -d <YYYY-MM-DD>` | Date. The default is today |
+| `log -t <HH:MM>` | Start time. The default is now |
+| `list <thread>` / `report --thread <thread>` | One thread only |
+| `--since` / `--until <YYYY-MM-DD>` | Date window. On `list` and `report` |
+| `--json` | Prints JSON. On `list`, `report`, `show` |
+| `edit --description <text>` | New description |
+| `edit -m <minutes>` | New duration. The start time stays the same |
+| `edit -r <rate>` / `edit -c <ISO>` | New rate or currency |
+| `edit -d <YYYY-MM-DD>` / `edit -t <HH:MM>` | Moves the entry. The duration stays the same |
+| `rm -y` | Required to delete |
 
 **Notes**
 
-- Keep the description short. It appears as a line item on the client's statement, and `search` does not index it.
-- Rate and currency are stored on each entry when you log it. Changing the thread's defaults later does not change entries you already logged.
-- `log` also puts a `REF:` in the buffer, dated on the day of the work.
-- The command exits with code 1 if the description is empty, `--minutes` is not positive, or a rate has no currency.
+- With `log`, put options before the thread. The description is every word after the thread.
+- The description is an invoice line item and appears on the client's statement. Keep it short. Put detail in a log line, because `search` does not index hours.
+- A thread with no currency is not billable. Its entries get rate 0 and no currency.
+- The thread's rate and currency are copied into each entry. Changing the thread's defaults later does not reprice old entries.
+- `log` adds a `REF:` pointer to the buffer, filed under the day the work happened.
+- Exit `1`: empty description, minutes not positive, or a rate with no currency.
 
 ### payments
 
-Records money received and compares it with what you billed.
+Records money received against a thread and compares it with what you billed.
 
 **When to use it**
 
 - A client paid you.
-- You need a statement of what was billed versus what was received, as text or as a PDF.
+- You need a billed-versus-received statement, or a PDF statement of account.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `log` | Records a payment received. Writes. | `payments log Projects/Northwind 12000.00 -a <account> -n October invoice` |
-| `list` | Lists payments. Read-only. | `payments list Projects/Northwind` |
-| `statement` | Shows billed versus received, by thread and currency. Writes a file only with `--pdf`. | `payments statement --thread Projects/Northwind --as-of 2026-10-31` |
-| `show` | Shows one payment. Read-only. | `payments show 9f8e7d6c` |
-| `edit` | Changes fields of one payment. Writes. | `payments edit 9f8e7d6c --amount 11500.00` |
-| `rm` | Deletes a payment permanently. Needs `-y`. | `payments rm 9f8e7d6c -y` |
+| `log` | Records a payment | `payments log -c ZAR -d 2026-11-03 -a Business Projects/Northwind 18000` |
+| `list` | Lists payments | `payments list Projects/Northwind` |
+| `statement` | Shows billed versus received, by thread and currency | `payments statement --thread Projects/Northwind` |
+| `show` | Shows one payment | `payments show 9f8e7d6c` |
+| `edit` | Changes fields of one payment | `payments edit 9f8e7d6c --amount 18500` |
+| `rm` | Permanently deletes a payment | `payments rm 9f8e7d6c -y` |
+
+Payment ids are 8 characters. Get them from `payments list`.
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `-c`, `--currency <ISO>` | (`log`) Defaults to the thread's currency. (`edit`) New currency. |
-| `-d`, `--date <YYYY-MM-DD>` | The date the money arrived. The default is today. |
-| `-t`, `--time <HH:MM>` | The time it arrived. The default is now. |
-| `-a`, `--account <text>` | The account the money landed in. |
-| `-n`, `--note <text>` | A free-text note. It can be several words. |
-| `--amount <n>` | (`edit`) New amount. |
-| `--thread <thread>` | (`statement`) Shows only this thread. |
-| `--since`, `--until <YYYY-MM-DD>` | (`list`, `statement`) Date window. |
-| `--as-of <YYYY-MM-DD>` | (`statement`) The statement date, which drives aging. The default is today. |
-| `--pdf <path>` | (`statement`) Writes a PDF to this path. Needs `--thread`. |
-| `--opening <YYYY-MM-DD>` | (`statement`) The first day the PDF ledger shows. Earlier entries become one balance-brought-forward line. Needs `--pdf`. |
-| `--json` | (`list`, `statement`, `show`) Prints JSON. |
-| `-y`, `--yes` | (`rm`) Required. Confirms the permanent delete. |
+| `log <amount>` | The amount received. Required in practice, and must be positive |
+| `-c <ISO>` | Currency. On `log`, it defaults to the thread's |
+| `-d <YYYY-MM-DD>` | Date received. On `log`, the default is today |
+| `-t <HH:MM>` | Time received. On `log`, the default is now |
+| `-a <account>` | The account the money landed in |
+| `-n <text>` | Free-text note. Put it last; it takes every word after it |
+| `edit --amount <amount>` | New amount |
+| `list <thread>` / `statement --thread <thread>` | One thread only |
+| `--since` / `--until <YYYY-MM-DD>` | Date window. On `list` and `statement` |
+| `--json` | Prints JSON. On `list`, `statement`, `show` |
+| `statement --as-of <YYYY-MM-DD>` | Statement date. It drives aging. The default is today |
+| `statement --pdf <path>` | Writes a PDF statement to `<path>`. Needs `--thread` |
+| `statement --opening <YYYY-MM-DD>` | First day the PDF ledger shows. Earlier items become one balance brought forward. Needs `--pdf` |
+| `rm -y` | Required to delete |
 
 **Notes**
 
-- `log` needs an amount, and the amount must be positive. A refund is not a negative payment.
-- Unbilled time does not appear on statements.
-- A PDF statement needs `client_name` in the thread's frontmatter.
-- `log` also puts a `REF:` in the buffer, dated on the day the money arrived.
-- The command exits with code 1 if the amount is missing or not positive. It also exits 1 if `--pdf` has no `--thread`, `--opening` has no `--pdf`, `--opening` is combined with `--since` or `--until`, or `--opening` is after `--as-of`.
+- A PDF statement needs `client_name` in the thread's frontmatter, plus `pandoc` and `xelatex`.
+- The payment reference on the statement is the thread name without its `Kind/` prefix.
+- `statement` ignores unbilled hours.
+- `log` adds a `REF:` pointer to the buffer, filed under the day the money was received.
+- Exit `1`: missing or non-positive amount, `--pdf` without `--thread`, `--opening` without `--pdf`, `--opening` with `--since` or `--until`, or `--opening` after `--as-of`.
 
 ### stats
 
-Logs numbers against declared stats and shows how they change over time.
+Declares numbers to measure on a thread, logs values and shows them over time.
 
 **When to use it**
 
-- You track a count or measurement, such as push-ups, steps, kilometres run or money spent.
-- You track whether an event happened. Use an `int` stat and log `1` each time.
+- You track a count or measure, such as push-ups, steps or kilometres run.
+- You track whether an event happened. Declare an `int` stat and log `1` each time.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `new` | Declares a stat in a thread's frontmatter. Writes. | `stats new pushups --thread Topics/Fitness --type int --agg sum` |
-| `list` | Lists declared stats. Read-only. | `stats list` |
-| `log` | Puts a value in the buffer. Writes. | `stats log pushups 25` |
-| `series` | Shows the value per day, week or month. Read-only. | `stats series pushups --by week` |
+| `new` | Declares a stat in a thread file's frontmatter | `stats new pushups --thread Topics/Fitness --type int --agg sum` |
+| `list` | Lists declared stats | `stats list` |
+| `log` | Adds a value to the buffer | `stats log pushups 25` |
+| `series` | Shows values per day, week or month, from logs and the unflushed buffer | `stats series pushups --by week` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--thread <thread>` | (`new`, required) The thread that owns the stat. |
-| `--type <int\|decimal>` | (`new`, required) `int` for whole numbers. `decimal` for everything else. |
-| `--agg <sum\|last\|max>` | (`new`, required) How a period's values combine: add them, take the latest, or take the largest. |
-| `-d`, `--date <YYYY-MM-DD>` | (`log`) The date of the value. The default is today. |
-| `-t`, `--time <HH:MM>` | (`log`) The time of the value. The default is now. |
-| `--by <day\|week\|month>` | (`series`) Period length. The default is `day`. Weeks start on Monday. |
-| `--since`, `--until <YYYY-MM-DD>` | (`series`) Date window. |
-| `--json` | (`list`, `series`) Prints JSON. |
+| `new --thread <Kind/Name>` | Required. The thread that owns the stat |
+| `new --type <int\|decimal>` | Required. `int` for whole numbers, `decimal` for the rest |
+| `new --agg <sum\|last\|max>` | Required. How a period's values combine: add them, take the latest, or take the largest |
+| `log -d <YYYY-MM-DD>` / `log -t <HH:MM>` | Date and time. The defaults are today and now |
+| `series --by <day\|week\|month>` | Period length. The default is `day`. Weeks start on Monday |
+| `series --since` / `--until <YYYY-MM-DD>` | Date window |
+| `--json` | Prints JSON. On `list` and `series` |
 
 **Notes**
 
-- A stat name uses lowercase letters, digits and `-`. It must be unique across the vault.
-- There is no rename or delete. To change a declaration, edit the thread's frontmatter. Values already logged are not rewritten.
-- `series` reads the logs and the buffer that has not been flushed yet. A period with no values shows `-`, not `0`.
-- Exit code 1 means nothing was written. Causes: the name is undeclared or declared twice; the value does not match the stat's type; a date or time is malformed; `new` received a bad name or thread; a logged value is invalid; or `--since` is after `--until`.
-- Exit code 2 is a usage error, such as a missing argument or an unknown `--type` or `--agg`.
+- Names use lowercase letters, digits and `-`, and are unique across the vault. Put a unit in the name if needed, such as `run-km`.
+- A `decimal` value is a plain number such as `12.50`, never `1e3`.
+- An empty period shows `-` (or `null` in JSON), not `0`.
+- There is no rename or delete. To change a declaration, edit the thread frontmatter. Values already logged are not rewritten.
+- Exit `1`: unknown or duplicate name, a value of the wrong type, a bad date or time, a thread that does not resolve, a bad logged value found by `series`, or `--since` after `--until`. Nothing is written.
+- Exit `2`: usage error, such as a missing argument or an unknown `--type` or `--agg`.
 
 ### buffer
 
-Captures items in a staging queue and files them into thread logs.
+Manages `buffer.md`, the staging queue that `flush` files into each thread's daily logs.
 
 **When to use it**
 
-- You want to record something now without writing a note.
-- You want to file the day's captures into thread logs.
-- You need to remove or fix a captured line.
+- You need to capture something fast, with or without a thread.
+- You want queued captures filed into logs and actions turned into tasks.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `add` | Appends an `UNKNOWN` raw capture. It blocks `flush` until you convert it. Writes. | `buffer add "ask Sam about pilot dates"` |
-| `add-text` | Appends a `TEXT:` observation. Writes. | `buffer add-text Projects/Northwind "Pilot slipped a week"` |
-| `add-ref` | Appends a `REF:` pointer to another vault file. Writes. | `buffer add-ref Projects/Northwind "people/Sam Rivera" "Intro call"` |
-| `add-action` | Appends an `ACTION:`. Writes. | `buffer add-action Projects/Northwind "(Sam Rivera) Confirm pilot dates" --due 2026-11-06` |
-| `list` | Shows the buffer with line numbers. Read-only. | `buffer list northwind` |
-| `rm` | Removes one line by its number. Writes. | `buffer rm 3` |
-| `tend` | Regroups entries by thread and date, and validates them. Safe to repeat. Writes. | `buffer tend` |
-| `flush` | Tends, writes each thread's logs, clears the buffer and ingests the flushed actions into tasks. Writes. | `buffer flush` |
+| `add` | Adds a raw `UNKNOWN:` entry with no thread | `buffer add "ask Sam about the invoice address"` |
+| `add-text` | Adds a `TEXT:` observation | `buffer add-text Projects/Northwind "Sam approved the revised scope"` |
+| `add-ref` | Adds a `REF:` pointer to another vault file | `buffer add-ref Projects/Northwind "people/Sam Rivera" "new contact"` |
+| `add-action` | Adds an `ACTION:` entry. Same as `tasks add` | `buffer add-action Projects/Northwind "(Sam Rivera) Confirm the start date" --due 2026-11-25` |
+| `list` | Shows the buffer with line numbers | `buffer list` |
+| `rm` | Removes one line by number | `buffer rm 3` |
+| `tend` | Regroups lines by thread and date, then validates | `buffer tend` |
+| `flush` | Runs `tend`, writes each thread's logs, clears the buffer, and ingests flushed actions into tasks | `buffer flush` |
 
 **Options**
 
-Global: `--quiet` goes before the subcommand and hides info output, for example `buffer --quiet flush`.
-
 | Option | Effect |
 |---|---|
-| `--date <YYYY-MM-DD>` | (`add`, `add-text`, `add-ref`, `add-action`) Files the entry under this day. Use the day the thing happened. |
-| `--due <YYYY-MM-DD>` | (`add-action`) Due date. |
-| `--scheduled <YYYY-MM-DD>` | (`add-action`) Scheduled date. |
-| `--priority <H\|M\|L>` | (`add-action`) Priority. |
-| `--depends <uuid>` | (`add-action`) An 8-character task uuid. You can repeat it. |
-| `--json` | (`list`) Prints JSON. |
+| `--quiet` | Global; put it before the subcommand. Suppresses info output: `buffer --quiet flush` |
+| `--date <YYYY-MM-DD>` | On `add`, `add-text`, `add-ref`, `add-action`: files the entry under the day it happened |
+| `add-action --due`, `--scheduled`, `--priority`, `--depends` | Same as `tasks add` |
+| `list <filter>` | Only lines containing this text, ignoring case |
+| `list --json` | Prints JSON |
 
 **Notes**
 
-- Change `buffer.md` only through these commands. Do not edit it by hand.
-- A `REF:` target can be one of:
-  - `<Kind>/<Name>`
-  - `<Kind>/<Name>/hours`
-  - `<Kind>/<Name>/payments`
-  - `<Kind>/<Name>/logs/<date>`
-  - a note stem
-  - `people/<Name>`
-- `flush` already ingests tasks, so you do not need to run `tasks` afterwards. It reports actions in these ways:
-  - `already a task`: the action matches an open task and is skipped.
-  - `already buffered`: the action repeats another buffer line.
-  - `due updated`: the action differs from an open task only by due date. That task's due date moves.
-  - `ambiguous`: the action matches several open tasks. Nothing changes.
-- The command exits with code 1 if a line number is not an integer, is out of range, or points to an empty line.
+- `UNKNOWN:` entries fail `tend` and block `flush`. Remove each one with `rm` and re-add it with the right `add-*` command.
+- A `REF:` target is `<Kind>/<Name>`, `<Kind>/<Name>/hours`, `<Kind>/<Name>/payments`, `<Kind>/<Name>/logs/<date>`, a note stem, or `people/<Name>`.
+- You do not need to run `tasks` after `flush`.
+- `flush` reports actions it did not add as new tasks:
+
+  | Report | Meaning |
+  |---|---|
+  | `already a task` | The action matches an open task and was skipped |
+  | `already buffered` | The action appears more than once in the buffer |
+  | `due updated` | The action differs from an open task only by due date, so that task's due date moved |
+  | `ambiguous` | The action matches several open tasks, so nothing changed |
+- Do not edit `buffer.md` by hand. Use these subcommands.
+- Exit `1`: line number is not an integer, is out of range or is empty, or validation fails.
 
 ### lint
 
-Checks vault files against the schemas in [Data formats](#data-formats). Read-only.
+Checks vault files against the schemas.
 
 **When to use it**
 
 - Before you commit.
-- After you edit vault files by hand.
-- When a command skipped a file and you want to know why.
+- After you edit frontmatter by hand.
+- When a file seems to be missing from listings.
 
 **Usage**
 
@@ -457,356 +463,367 @@ lint [<path> ...]
 
 | Argument | Meaning |
 |---|---|
-| `<path>` | Files to check. With no paths, `lint` checks the whole vault. |
+| `<path>` | Files to check. With none, it checks the whole vault |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--schemas <dir>` | Uses a different schemas directory. |
-| `--quiet` | Prints nothing. The exit code is the only result. |
+| `--schemas <dir>` | Uses another schemas directory |
+| `--quiet` | Prints nothing. Use the exit code only |
 
 **Notes**
 
-- Each violation prints as `<path>:<line>: <message>`, with an absolute path.
-- Exit code 0 means no violations. Exit code 1 means there are violations. Exit code 2 means no schemas could be loaded.
+- Read-only.
+- Errors print as `<path>:<line>: <message>`.
+- Exit `0`: clean. Exit `1`: violations found. Exit `2`: no schemas loaded.
 
 ### commit
 
-Reviews vault changes and commits them to git.
+Reviews uncommitted vault changes, then commits them with git.
 
 **When to use it**
 
 - At the end of a work session.
-- Before you make large changes, so you have a restore point.
+- Before and after a large edit, so you can see and record what changed.
 
 **Subcommands**
 
 | Subcommand | What it does | Example |
 |---|---|---|
-| `review` | Shows everything that changed since the last commit. Read-only. | `commit review` |
-| `save` | Stages every change in the vault and commits it. Writes. | `commit save --message "Northwind: October hours and payment"` |
+| `review` | Shows everything changed since the last commit. Read-only | `commit review` |
+| `save` | Stages every change in the vault and commits | `commit save --message "Northwind: scope review and October hours"` |
 
 **Options**
 
 | Option | Effect |
 |---|---|
-| `--max-file-lines <n>` | (`review`) Maximum diff lines shown per file. The default is 150. |
-| `--max-lines <n>` | (`review`) Maximum output lines in total. The default is 3000. |
-| `--message <text>` | (`save`, required) The commit subject, on a single line. |
-| `--body <text>` | (`save`) The commit body. It can span several lines. |
-| `--dry-run` | (`save`) Reports what would be staged and committed. Changes nothing. |
+| `review --max-file-lines <N>` | Maximum diff lines per file. The default is 150 |
+| `review --max-lines <N>` | Maximum lines overall. The default is 3000 |
+| `save --message <text>` | Required. A single-line subject |
+| `save --body <text>` | Commit body. It may span several lines |
+| `save --dry-run` | Reports what would be staged and committed. Changes nothing |
 
 **Notes**
 
-- `save` only ever adds a commit. It never amends, rebases, resets, checks out or pushes.
-- The vault directory must be the root of a git repository.
-- The command exits with code 1 if the message is empty or spans several lines, the vault is not a git repository, the vault is not the repository root, or a git command fails.
+- Run `review` first, then write the summary, then `save`.
+- `save` only adds commits. It never amends, rebases, resets, checks out or pushes.
+- Exit `1`: empty or multi-line `--message`, the vault is not a git repository, `ADULTING_HOME` is not the root of its repository, or a git command fails.
 
 ## Everyday procedures
 
 ### 1. Set up a new billable project
 
-1. `threads new --name Northwind --kind project --category professional --currency ZAR --rate 1500` creates the thread with billing defaults.
-2. `people new --name "Sam Rivera" --category professional` adds your client contact.
-3. Open `threads/Projects/Northwind.md` and add `client_name:` to the frontmatter. PDF statements need it.
-4. `threads show Projects/Northwind` confirms the frontmatter.
-5. `lint threads/Projects/Northwind.md` checks the thread file.
+1. `people new --name "Sam Rivera" --category professional` — create the client contact.
+2. `threads new --name Northwind --kind project --category professional --currency ZAR --rate 1500` — create the billable thread.
+3. In `threads/Projects/Northwind.md`, add `client_name: Northwind` to the frontmatter. A PDF statement needs it.
+4. `lint threads/Projects/Northwind.md` — check the thread file.
+5. `threads show Projects/Northwind` — confirm the currency, rate and client fields.
 
 ### 2. Capture a meeting and turn its actions into tracked tasks
 
-1. `notes new --type Meeting --topic "Quarterly review" --thread Projects/Northwind --person "Sam Rivera" --counterparty Northwind` creates the note and prints its path.
-2. Open that path and write one line per action, for example `ACTION: (Sam Rivera) Send quarterly report`.
-3. `tasks --dry-run` shows which actions will be ingested.
-4. `tasks` turns each `ACTION:` line into a `TASK:` anchor.
-5. `tasks list --thread Projects/Northwind` shows the new tasks and their uuids.
-6. `notes minutes <stem>` renders the minutes to `~/Downloads`.
+1. `notes new --type Meeting --topic "Scope review" --thread Projects/Northwind --person "Sam Rivera" --counterparty Northwind` — create the note and get its path.
+2. Edit that file. Write each action as one line, for example `ACTION: (Sam Rivera) Send the revised scope`.
+3. `tasks ingest` — turn the `ACTION:` lines into `TASK:` anchors.
+4. `tasks list --thread Projects/Northwind` — check the new tasks and their uuids.
+5. `notes minutes <stem>` — render the minutes to `~/Downloads`.
+6. `buffer flush` — file the note's `REF:` pointer into today's log.
 
 ### 3. Quick-capture through the day, then file it
 
-1. `buffer add "ask Sam about pilot dates"` captures a line when you have no time to choose a thread.
-2. `buffer add-text Projects/Northwind "Pilot slipped a week"` captures an observation on a thread.
-3. `tasks add Projects/Northwind "(Sam Rivera) Confirm pilot dates" --due 2026-11-06` captures an action.
-4. `buffer list` shows every capture with its line number.
-5. `buffer rm <line-number>` removes the `UNKNOWN` line. Re-add it with `buffer add-text` or `tasks add`.
-6. `buffer tend` validates the buffer. Fix anything it reports.
-7. `buffer flush` files everything into the thread logs and creates the tasks.
+1. `buffer add "ask Sam about the invoice address"` — capture without choosing a thread.
+2. `buffer add-text Projects/Northwind "Sam approved the revised scope"` — capture an observation on a known thread.
+3. `buffer list` — review the queue and find line numbers.
+4. `buffer rm <line-number>` — remove an `UNKNOWN:` line.
+5. `buffer add-action Projects/Northwind "(Sam Rivera) Confirm the invoice address"` — re-add it in the right form.
+6. `buffer tend` — validate. Fix anything it reports.
+7. `buffer flush` — write the logs and create the tasks.
 
 ### 4. Work the task list
 
-1. `tasks next` shows the top 5 tasks.
-2. `tasks list --overdue` shows tasks that are past their due date.
-3. `tasks show <uuid>` shows one task in full.
-4. `tasks set-due <uuid> 2026-11-13` moves a deadline.
-5. `tasks set-priority <uuid> H` raises a task's priority.
-6. `tasks done <uuid>` marks a task complete.
+1. `tasks next` — see the top five.
+2. `tasks list --overdue` — see what is late.
+3. `tasks show <uuid>` — read one task in detail.
+4. `tasks set-due <uuid> 2026-12-05` — move a date.
+5. `tasks done <uuid>` — close a finished task.
+6. `tasks drop <uuid>` — close an abandoned task. Then fix any dependents it lists.
 
 ### 5. Log a session of work
 
-1. `hours log Projects/Northwind "Pilot data review" -m 90` records 90 minutes at the thread's rate.
-2. `buffer add-text Projects/Northwind "Join logic on multi-repo commits still unresolved"` records what happened, so `search` can find it.
-3. `hours list Projects/Northwind --since 2026-10-26` checks the entry and shows its id.
-4. `hours edit <id> -m 120` corrects the duration if needed.
-5. `buffer flush` files the log line and the time-entry `REF:` into today's log.
+1. `hours log -m 90 Projects/Northwind Scope workshop` — record the time under a short invoice label.
+2. `buffer add-text Projects/Northwind "Agreed phase two starts after sign-off"` — record what happened, so it can be searched.
+3. `hours list Projects/Northwind --since 2026-11-01` — check the entry and get its id.
+4. `hours edit <id> -m 120` — correct the duration if needed.
+5. `buffer flush` — file both lines into the day's log.
 
 ### 6. Bill a client for a month's work
 
-1. `hours report --thread Projects/Northwind --since 2026-10-01 --until 2026-10-31` totals the month.
-2. `hours list Projects/Northwind --since 2026-10-01 --until 2026-10-31` shows the line items.
-3. `payments statement --thread Projects/Northwind --as-of 2026-10-31` shows billed versus received.
-4. `payments statement --thread Projects/Northwind --as-of 2026-10-31 --opening 2026-10-01 --pdf ~/Downloads/Northwind-statement.pdf` writes the PDF statement.
+1. `hours list Projects/Northwind --since 2026-10-01 --until 2026-10-31` — check every entry for the month.
+2. `hours edit <id> --description Scope workshop` — tidy any line item that will appear on the statement.
+3. `hours report --thread Projects/Northwind --since 2026-10-01 --until 2026-10-31` — get the month's totals.
+4. `payments statement --thread Projects/Northwind --as-of 2026-10-31` — check billed against received.
+5. `payments statement --thread Projects/Northwind --as-of 2026-10-31 --opening 2026-10-01 --pdf ~/Downloads/northwind-statement.pdf` — write the PDF statement of account.
 
 ### 7. Record a payment
 
-1. `payments log Projects/Northwind 12000.00 -d 2026-11-03 -a <account> -n October invoice` records the receipt.
-2. `payments list Projects/Northwind` confirms it and shows its id.
-3. `payments statement --thread Projects/Northwind` shows the new balance.
-4. `buffer flush` files the payment's `REF:` into that day's log.
+1. `payments log -c ZAR -d 2026-11-03 -a Business Projects/Northwind 18000` — record the receipt.
+2. `payments list Projects/Northwind` — confirm it and get its id.
+3. `payments statement --thread Projects/Northwind` — see the new balance.
+4. `buffer flush` — file the payment's `REF:` pointer into that day's log.
 
 ### 8. Check the vault and commit it
 
-1. `buffer flush` files any pending captures.
-2. `lint` checks the whole vault. Fix every violation it reports.
-3. `commit review` shows what changed since the last commit.
-4. `commit save --message "<summary>" --dry-run` shows what would be committed.
-5. `commit save --message "<summary>" --body "<detail>"` commits the changes.
+1. `buffer flush` — file anything still queued.
+2. `lint` — check the whole vault. Fix every reported line until it exits `0`.
+3. `commit review` — read what changed.
+4. `commit save --message "Northwind: October billing and November payment" --body "<detail>"` — commit everything.
 
 ## Data formats
 
-`lint` enforces every schema below. Paths are relative to the vault root.
+`lint` enforces every format below.
 
 ### `hours_file`
 
-The time entries for one thread. Path: `threads/<Kind>/<Name>/hours.md`. The body holds exactly one `simple-time-tracker` fenced block, containing JSON `{"entries": [...]}`.
+The time entries for one thread. Location: `threads/<Kind>/<Name>/hours.md`. The body holds exactly one `simple-time-tracker` fenced block containing JSON `{"entries": [...]}`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `thread` | yes | Wikilink to this file's own thread. It must resolve. |
-| `currency` | no | Three-letter ISO code. Omitted for unbilled threads. |
-| `entries[].name` | yes | Description of the work, used as an invoice line item. |
-| `entries[].startTime` | yes | ISO 8601 UTC, `YYYY-MM-DDTHH:MM:SS.mmmZ`. |
-| `entries[].endTime` | yes | Same form. Must not be earlier than `startTime`. Duration is `endTime` minus `startTime`. |
-| `entries[].id` | yes | 8 hex characters, unique across all hours and payments. |
-| `entries[].rate` | yes | Hourly charge as an integer. `0` means unbillable. |
-| `entries[].currency` | no | ISO 4217 code. Absent or null means unbilled. |
+| `thread` | yes | Wikilink to the thread whose folder holds this file |
+| `currency` | no | Three-letter uppercase ISO code. Omitted for unbilled threads |
+| entry `name` | yes | The description: an invoice line item |
+| entry `startTime` | yes | UTC start, `YYYY-MM-DDTHH:MM:SS.mmmZ` |
+| entry `endTime` | yes | UTC end, in the same form. Not before `startTime` |
+| entry `id` | yes | 8 hex characters, unique across hours and payments |
+| entry `rate` | yes | Hourly charge, a whole number. `0` means unbillable |
+| entry `currency` | no | Three-letter ISO code. Absent or null means unbilled |
+
+Duration is `endTime` minus `startTime`. There is no duration field.
 
 ### `log`
 
-One thread's activity for one day, written by `buffer flush`. Path: `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md`. Body lines are `TEXT:`, `REF:`, `ACTION:`, `TASK:`, `DONE:` or `STAT:`.
+One thread's activity for one day, written by `buffer flush`. Location: `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `thread` | yes | Wikilink to this log's own thread. |
-| `date` | yes | `YYYY-MM-DD`. |
-| `type` | yes | Always `Log`. |
+| `thread` | yes | Wikilink to the thread whose folder holds this log |
+| `date` | yes | The day, `YYYY-MM-DD` |
+| `type` | yes | Always `Log` |
+
+Body lines start with `TEXT:`, `REF:`, `ACTION:`, `TASK:`, `DONE:`, `DROPPED:` or `STAT:`.
 
 ### `note_correspondence`
 
-A record of emails, messages or letters. Path: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under the first thread listed.
+A note recording an email, message or letter exchange. Location: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under its first thread.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `topic` | yes | What the note is about. |
-| `type` | yes | `Correspondence`. |
-| `threads` | yes | List of thread wikilinks. Each must resolve. The first one decides where the note is filed. |
-| `timestamp` | yes | When the exchange happened, `YYYY-MM-DD-HH-MM-SS`. |
-| `people` | no | Participants: `[[people/<Name>]]` links, or plain names for people you do not track. |
+| `topic` | yes | What the note is about |
+| `type` | yes | `Correspondence` |
+| `threads` | yes | List of thread wikilinks. Each must resolve. The first sets the folder |
+| `timestamp` | yes | When it happened, `YYYY-MM-DD-HH-MM-SS` |
+| `people` | no | Participants: `[[people/<Name>]]` links or plain names |
 
-Body markers: `ACTION:`, `TASK:`, `AGREED:`, `RESOLVED:`, `!:` (callout).
+Body lines can start with `ACTION:`, `TASK:`, `AGREED:`, `RESOLVED:` or `!:` (callout).
 
 ### `note_meeting`
 
-A record of a meeting. Path: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under the first thread listed.
+A note recording a meeting. Location: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under its first thread.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `topic` | yes | What the meeting was about. |
-| `type` | yes | `Meeting`. |
-| `threads` | yes | List of thread wikilinks. Each must resolve. The first one decides where the note is filed. |
-| `timestamp` | yes | When the meeting happened, `YYYY-MM-DD-HH-MM-SS`. |
-| `counterparty` | no | The other party. |
-| `location` | no | Where it was held. |
-| `people` | no | Attendees: `[[people/<Name>]]` links, or plain names for people you do not track. |
+| `topic` | yes | What the meeting was about |
+| `type` | yes | `Meeting` |
+| `threads` | yes | List of thread wikilinks. Each must resolve. The first sets the folder |
+| `timestamp` | yes | When it happened, `YYYY-MM-DD-HH-MM-SS` |
+| `counterparty` | no | The other party |
+| `location` | no | Where it was held |
+| `people` | no | Attendees: `[[people/<Name>]]` links or plain names |
 
-Body markers: `ACTION:`, `TASK:`, `AGREED:` and `RESOLVED:` (shown in minutes), `!:` (callout, shown in the PDF).
+Body lines can start with `ACTION:`, `TASK:`, `AGREED:`, `RESOLVED:` or `!:`. `notes minutes` shows the agreements, resolutions and action items. `notes pdf` shows the callouts and an action table.
 
 ### `note_simple`
 
-A Workshop, Report, Log, Research or Recipe note. Path: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under the first thread listed.
+A note of type Workshop, Report, Log, Research or Recipe. Location: `threads/<Kind>/<Name>/notes/<YYYY-MM-DD-HH-MM-SS>.md`, under its first thread.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `topic` | yes | What the note is about. |
-| `type` | yes | `Workshop`, `Report`, `Log`, `Research` or `Recipe`. |
-| `threads` | yes | List of thread wikilinks. Each must resolve. The first one decides where the note is filed. |
-| `timestamp` | yes | When the event happened, `YYYY-MM-DD-HH-MM-SS`. |
-| `people` | no | `[[people/<Name>]]` links or plain names. |
+| `topic` | yes | What the note is about |
+| `type` | yes | `Workshop`, `Report`, `Log`, `Research` or `Recipe` |
+| `threads` | yes | List of thread wikilinks. Each must resolve. The first sets the folder |
+| `timestamp` | yes | When it happened, `YYYY-MM-DD-HH-MM-SS` |
+| `people` | no | `[[people/<Name>]]` links or plain names |
 
 ### `payments_file`
 
-The money received against one thread. Path: `threads/<Kind>/<Name>/payments.md`. The body holds exactly one `adulting-payments` fenced block, containing JSON `{"payments": [...]}`.
+The money received against one thread. Location: `threads/<Kind>/<Name>/payments.md`. The body holds exactly one `adulting-payments` fenced block containing JSON `{"payments": [...]}`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `thread` | yes | Wikilink to this file's own thread. It must resolve. |
-| `currency` | yes | Three-letter ISO code. |
-| `payments[].id` | yes | 8 hex characters, unique across all hours and payments. |
-| `payments[].received` | yes | When the money landed, ISO 8601 UTC `YYYY-MM-DDTHH:MM:SS.mmmZ`. |
-| `payments[].amount` | yes | Greater than 0. |
-| `payments[].currency` | yes | ISO 4217 code. |
-| `payments[].account` | no | The account the money landed in. |
-| `payments[].note` | no | Free text. |
+| `thread` | yes | Wikilink to the thread whose folder holds this file |
+| `currency` | yes | Three-letter uppercase ISO code |
+| payment `id` | yes | 8 hex characters, unique across hours and payments |
+| payment `received` | yes | UTC date and time received, `YYYY-MM-DDTHH:MM:SS.mmmZ` |
+| payment `amount` | yes | Greater than 0. Refunds are not negative payments |
+| payment `currency` | yes | Three-letter ISO code |
+| payment `account` | no | The account the money landed in |
+| payment `note` | no | Free text |
 
 ### `person`
 
-Someone you track. Path: `people/<Name>.md`. The body is free-form.
+A contact you track. Location: `people/<Name>.md`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `status` | yes | `open`, `paused` or `closed`. |
-| `category` | yes | `professional`, `personal` or `voluntary`. |
-| `started` | yes | `YYYY-MM-DD`. |
-| `ended` | no | `YYYY-MM-DD`. Required when `status` is `closed`. |
-| `cadences` | no | A list of `{key, frequency, description}`, the same as on threads. |
+| `status` | yes | `open`, `paused` or `closed` |
+| `category` | yes | `professional`, `personal` or `voluntary` |
+| `started` | yes | Start date, `YYYY-MM-DD` |
+| `ended` | no | End date. Required when `status` is `closed` |
+| `cadences` | no | List of `key`, `frequency`, `description` |
+
+The body is free-form.
 
 ### `stat_line`
 
-One value of a declared stat. It is a line in a log file, `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md`, shaped like `STAT: pushups 25 <!--2026-10-07T07:42:10-->`.
+One value of a declared stat, written by `buffer flush`. It appears as a line in a log, `threads/<Kind>/<Name>/logs/<YYYY-MM-DD>.md`. Example: `STAT: pushups 25 <!--2026-10-07T07:42:10-->`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `name` | yes | A stat declared on this log's own thread. |
-| `value` | yes | A number. It must be a whole number if the stat type is `int`. |
-| `ts` | yes | Local time, `YYYY-MM-DDTHH:MM:SS`. Its date must match the log's date. |
+| `name` | yes | A stat declared on this log's own thread |
+| `value` | yes | A number. Must be a whole number for an `int` stat |
+| `ts` | yes | Local time, `YYYY-MM-DDTHH:MM:SS`. Its date must match the log's date |
 
-`STAT:` lines belong only in logs.
+A `STAT:` line belongs only in a log.
 
 ### `task_anchor`
 
-One `TASK:` or `DONE:` line in a note or log. It is the only record of a task. Change it only with `tasks` subcommands. Example: `TASK: [#H] (Sam Rivera) Send quarterly report <!--abcd1234 entry:2026-05-27 due:2026-05-29-->`.
+One `TASK:`, `DONE:` or `DROPPED:` line, the record of a task's state. It appears as a line in a note or log. Example: `TASK: [#H] (Sam Rivera) Send quarterly report <!--abcd1234 entry:2026-05-27 due:2026-05-29-->`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `kind` | yes | `TASK` or `DONE`. |
-| `priority` | no | `H`, `M` or `L`, shown as `[#X]`. |
-| `assignee` | no | A person. Must resolve to `people/<Name>.md`. |
-| `body` | yes | The task text. |
-| `uuid` | yes | 8 hex characters, unique across the vault. |
-| `entry` | yes | Date the task was ingested. |
-| `end` | no | Completion date. Required for `DONE`. Must not be earlier than `entry`. |
-| `due` | no | Due date. |
-| `scheduled` | no | Scheduled date. |
-| `depends` | no | Comma-separated uuids of existing tasks. Dependencies must not form a cycle. |
+| `kind` | yes | `TASK` (open), `DONE` (finished) or `DROPPED` (abandoned) |
+| `priority` | no | `H`, `M` or `L`, shown as `[#X]` |
+| `assignee` | no | A person with a file in `people/` |
+| `body` | yes | The task text |
+| `uuid` | yes | 8 hex characters, unique across the vault |
+| `entry` | yes | Date ingested |
+| `end` | no | Date done or dropped. Required for `DONE` and `DROPPED`. Not before `entry` |
+| `due` | no | Due date |
+| `scheduled` | no | Scheduled date |
+| `depends` | no | Comma-separated uuids of other tasks. No cycles allowed |
+
+Change these lines only with `tasks` subcommands.
 
 ### `thread`
 
-A project, process or topic. Path: `threads/<Kind>/<Name>.md`.
+A project, process or topic. Location: `threads/<Kind>/<Name>.md`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `status` | yes | `open`, `paused` or `closed`. |
-| `kind` | yes | `project`, `process` or `topic`. |
-| `category` | yes | `professional`, `personal` or `voluntary`. |
-| `started` | yes | `YYYY-MM-DD`. |
-| `ended` | no | `YYYY-MM-DD`. Required when `status` is `closed`. |
-| `cadences` | no | A list of `{key, frequency, description}`. `frequency` is in days, and `key` is unique within the thread. |
-| `stats` | no | A list of `{name, type, agg}`, written by `stats new`. |
-| `currency` | no | Default currency for `hours`. Setting it makes the thread billable. |
-| `rate` | no | Default hourly rate (an integer). |
-| `client_name` | no | The billed party. Required for a PDF statement. |
-| `client_address` | no | Address lines separated by `\|`, for example `Unit 301\|2 Park Road\|Cape Town`. |
-| `client_vat` | no | The client's VAT number. |
-| `client_email` | no | The client's email address. |
+| `status` | yes | `open`, `paused` or `closed` |
+| `kind` | yes | `project`, `process` or `topic` |
+| `category` | yes | `professional`, `personal` or `voluntary` |
+| `started` | yes | Start date, `YYYY-MM-DD` |
+| `ended` | no | End date. Required when `status` is `closed` |
+| `cadences` | no | Recurring obligations: list of `key`, `frequency` (days), `description` |
+| `stats` | no | Declared stats: list of `name`, `type`, `agg`. Written by `stats new` |
+| `currency` | no | Default currency for `hours`. Three-letter uppercase ISO code |
+| `rate` | no | Default hourly rate for `hours`, a whole number |
+| `client_name` | no | The party billed. Needed for `payments statement --pdf` |
+| `client_address` | no | Address, with lines separated by `\|` |
+| `client_vat` | no | Client VAT number |
+| `client_email` | no | Client email |
 
 ### `thread_entry`
 
-A dated bullet at the top level of a thread file's body, such as `- 2024-05-17 — Made progress.`. Path: inside `threads/<Kind>/<Name>.md`. Indented sub-bullets are not checked.
+A dated bullet at the top level of a thread file's body, in `threads/<Kind>/<Name>.md`. Example: `- 2024-05-17 — Made progress on rblncr.` Indented sub-bullets are not checked.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `date` | yes | `YYYY-MM-DD`. |
-| `text` | yes | The entry text. It must not be empty. |
+| `date` | yes | `YYYY-MM-DD` |
+| `text` | yes | The entry, after ` — ` |
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `lint` reports `file is not valid UTF-8`; other commands silently miss a file | Commands skip files they cannot read as UTF-8 | Re-save the file as UTF-8, or remove it. |
-| `buffer flush` will not run; `tend` reports an `UNKNOWN` entry | `buffer add` entries are invalid by design | Run `buffer rm <line-number>`, then re-add the entry with `buffer add-text`, `buffer add-ref` or `tasks add`. |
-| `buffer flush` reports `ambiguous` | The action matches several open tasks | Change the existing tasks with `tasks set-*` instead. |
-| `--rate needs a currency` from `hours` or `threads new` | A rate needs a currency | Add `--currency <ISO>`, or set `currency` on the thread. |
-| `person ... does not resolve to people/...` | The assignee has no person file | Run `people new --name "<Name>" --category <category>`. |
-| `no task found with uuid prefix` | The prefix matches no task | Get the uuid from `tasks list`. |
-| `refusing to delete ... without -y` | The delete was not confirmed | Add `-y` to `people delete`, `notes delete`, `hours rm` or `payments rm`. |
-| `--pdf needs --thread` or `--opening needs --pdf` | A statement PDF covers one client, and only the PDF has an opening ledger | Add `--thread <thread>` or `--pdf <path>`. |
-| `PDF render failed` | `pandoc` or `xelatex` is missing or failed | Install `pandoc` and a LaTeX engine. |
-| `stats log` exits 1 | The stat is undeclared, or the value does not match its type | Check `stats list`. Declare the stat with `stats new`. Use a whole number for `int` stats. |
-| `not a git repository` or `is not the root of its git repository` from `commit` | The vault is not the root of a git repository | Make `ADULTING_HOME` the root of its own git repository. |
-| `lint` exits 2 | No schemas were loaded | Point `--schemas` at a valid schemas directory. |
+| `buffer tend` or `buffer flush` reports `UNKNOWN` lines and does not flush | Raw `buffer add` entries block a flush | `buffer list`, then `buffer rm <line-number>`, then re-add with `buffer add-text` or `buffer add-action` |
+| `buffer flush` reports `ambiguous` | The action matches several open tasks | Use `tasks list` to find the task, then change it with `tasks set-*` |
+| `hours log` or `hours edit` exits 1: `--rate needs a currency` | A rate was given with no currency | Add `-c <ISO>`, or set the thread's `currency` |
+| `notes new` exits 1: `--person is only for Meeting and Correspondence notes` | Wrong option for the note type | Remove `--person`, or change `--type` |
+| `notes pdf`, `minutes` or `agenda` exits 1: `PDF render failed` | `pandoc` or `xelatex` is missing or failed | Install `pandoc` and a LaTeX engine |
+| `payments statement` exits 1: `--pdf needs --thread` | A statement is for one client | Add `--thread <Kind/Name>` |
+| `payments statement` exits 1 because of `--opening` | `--opening` needs `--pdf` and cannot be used with `--since` or `--until` | Use `--opening` only with `--pdf`, and drop `--since` and `--until` |
+| `tasks set-assignee` exits 1: `does not resolve to people/...` | No person file exists for that name | `people new --name "<name>" --category <category>` |
+| `tasks done` exits 1: `no task found with uuid prefix` | The uuid prefix matches no task | `tasks list` and copy the uuid |
+| `stats log` exits 1 because the name is not declared | The stat is not declared on any thread | `stats list`, or `stats new <name> --thread <Kind/Name> --type <type> --agg <agg>` |
+| A file is missing from listings and searches | The file is not valid UTF-8, so it is skipped | Run `lint`. It reports `file is not valid UTF-8` |
+| `commit save` exits 1: `not a git repository`, or `ADULTING_HOME` is not the root of its repository | The vault is not the root of a git repository | Make the vault folder the root of its own git repository |
+| `lint` exits 2: `no schemas loaded` | The schemas directory is empty or wrong | Run `lint` without `--schemas`, or point `--schemas` at the right directory |
 
 ## Quick reference
 
 | Command | Does |
 |---|---|
-| `tasks` | Turns `ACTION:` lines into `TASK:` anchors. |
-| `tasks ingest` | Same as bare `tasks`. |
-| `tasks add` | Puts an action in the buffer. |
-| `tasks done` | Marks a task done. |
-| `tasks set-description` | Rewrites a task's text. |
-| `tasks set-assignee` | Changes a task's assignee. |
-| `tasks set-due` | Sets a due date. |
-| `tasks set-scheduled` | Sets a scheduled date. |
-| `tasks set-priority` | Sets priority H, M or L. |
-| `tasks add-depends` | Adds a dependency. |
-| `tasks rm-depends` | Removes a dependency. |
-| `tasks list` | Lists pending tasks. |
-| `tasks next` | Shows the top 5 pending tasks. |
-| `tasks show` | Shows one task. |
-| `notes new` | Creates a note and prints its path. |
-| `notes list` | Lists notes. |
-| `notes cat` | Prints a note. |
-| `notes last` | Prints the newest note's path. |
-| `notes copy` | Copies a note to a new timestamp. |
-| `notes delete` | Deletes a note permanently. |
-| `notes pdf` | Renders a note to Markdown and PDF. |
-| `notes minutes` | Renders meeting minutes. |
-| `notes agenda` | Renders a meeting agenda. |
-| `search notes` | Finds notes. |
-| `search logs` | Finds daily logs. |
-| `search activity` | Ranks threads by activity. |
-| `search overview` | Summarises one thread. |
-| `search stream` | Shows a merged timeline of records. |
-| `threads list` | Lists threads. |
-| `threads show` | Shows a thread file. |
-| `threads new` | Creates a thread. |
-| `people list` | Lists people. |
-| `people show` | Shows a person file. |
-| `people new` | Creates a person. |
-| `people delete` | Deletes a person permanently. |
-| `hours log` | Records a time entry. |
-| `hours list` | Lists time entries. |
-| `hours report` | Totals time by thread and currency. |
-| `hours show` | Shows one time entry. |
-| `hours edit` | Changes a time entry. |
-| `hours rm` | Deletes a time entry. |
-| `payments log` | Records a payment received. |
-| `payments list` | Lists payments. |
-| `payments statement` | Shows billed versus received; optionally writes a PDF. |
-| `payments show` | Shows one payment. |
-| `payments edit` | Changes a payment. |
-| `payments rm` | Deletes a payment. |
-| `stats new` | Declares a stat on a thread. |
-| `stats list` | Lists declared stats. |
-| `stats log` | Puts a stat value in the buffer. |
-| `stats series` | Shows a stat's values over time. |
-| `buffer add` | Captures a raw `UNKNOWN` line. |
-| `buffer add-text` | Captures an observation. |
-| `buffer add-ref` | Captures a pointer to a vault file. |
-| `buffer add-action` | Captures an action. |
-| `buffer list` | Shows the buffer with line numbers. |
-| `buffer rm` | Removes a buffer line. |
-| `buffer tend` | Regroups and validates the buffer. |
-| `buffer flush` | Files the buffer into logs and ingests tasks. |
-| `lint` | Checks vault files against the schemas. |
-| `commit review` | Shows uncommitted changes. |
-| `commit save` | Stages and commits all changes. |
+| `tasks` | Ingests `ACTION:` lines into `TASK:` anchors |
+| `tasks ingest` | Ingests `ACTION:` lines into `TASK:` anchors |
+| `tasks add` | Adds an `ACTION:` to the buffer |
+| `tasks done` | Marks a task done |
+| `tasks drop` | Marks a task dropped |
+| `tasks set-description` | Rewrites a task's text |
+| `tasks set-assignee` | Changes a task's assignee |
+| `tasks set-due` | Sets a task's due date |
+| `tasks set-scheduled` | Sets a task's scheduled date |
+| `tasks set-priority` | Sets a task's priority |
+| `tasks add-depends` | Adds a task dependency |
+| `tasks rm-depends` | Removes a task dependency |
+| `tasks list` | Lists pending tasks |
+| `tasks next` | Shows the top 5 pending tasks |
+| `tasks show` | Shows one task |
+| `notes new` | Creates a note |
+| `notes list` | Lists notes |
+| `notes cat` | Prints a note |
+| `notes last` | Prints the newest note's path |
+| `notes copy` | Copies a note to a new timestamp |
+| `notes delete` | Permanently deletes a note |
+| `notes pdf` | Renders a note to Markdown and PDF |
+| `notes minutes` | Renders meeting minutes |
+| `notes agenda` | Renders a meeting agenda |
+| `search notes` | Finds notes |
+| `search logs` | Finds daily logs |
+| `search activity` | Ranks threads by activity |
+| `search overview` | Shows one thread's whole picture |
+| `search stream` | Shows every dated record as one timeline |
+| `threads list` | Lists threads |
+| `threads show` | Shows a thread file |
+| `threads new` | Creates a thread |
+| `people list` | Lists people |
+| `people show` | Shows a person file |
+| `people new` | Creates a person |
+| `people delete` | Permanently deletes a person |
+| `hours log` | Records a time entry |
+| `hours list` | Lists time entries |
+| `hours report` | Totals time by thread and currency |
+| `hours show` | Shows one time entry |
+| `hours edit` | Changes a time entry |
+| `hours rm` | Permanently deletes a time entry |
+| `payments log` | Records a payment |
+| `payments list` | Lists payments |
+| `payments statement` | Shows billed versus received, or writes a PDF statement |
+| `payments show` | Shows one payment |
+| `payments edit` | Changes a payment |
+| `payments rm` | Permanently deletes a payment |
+| `stats new` | Declares a stat on a thread |
+| `stats list` | Lists declared stats |
+| `stats log` | Adds a stat value to the buffer |
+| `stats series` | Shows a stat over time |
+| `buffer add` | Adds a raw `UNKNOWN:` capture |
+| `buffer add-text` | Adds a `TEXT:` entry |
+| `buffer add-ref` | Adds a `REF:` entry |
+| `buffer add-action` | Adds an `ACTION:` entry |
+| `buffer list` | Shows the buffer with line numbers |
+| `buffer rm` | Removes one buffer line |
+| `buffer tend` | Regroups and validates the buffer |
+| `buffer flush` | Files the buffer into logs and creates tasks |
+| `lint` | Checks vault files against the schemas |
+| `commit review` | Shows uncommitted changes |
+| `commit save` | Stages and commits all vault changes |

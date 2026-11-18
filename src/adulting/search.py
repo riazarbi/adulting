@@ -42,7 +42,7 @@ from adulting import tasks as T
 from adulting import vault as V
 
 
-STREAM_KINDS = ('note', 'log', 'task', 'done', 'hours', 'payment',
+STREAM_KINDS = ('note', 'log', 'task', 'done', 'dropped', 'hours', 'payment',
                 'thread', 'person', 'pending')
 
 # REF lines pointing at these are the record's own pointer back into the
@@ -54,7 +54,7 @@ DEFAULT_LIMIT = 20
 DEFAULT_WINDOW_DAYS = 7
 
 # Body lines that count as a log entry.
-ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE|STAT):', re.M)
+ENTRY_RE = re.compile(r'^(REF|TEXT|ACTION|TASK|DONE|DROPPED|STAT):', re.M)
 LEADING_DATE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
 
 
@@ -164,7 +164,7 @@ def stream_documents():
                                   f"STAT: {stat['name']} {stat['value']}", r['path'],
                                   stat['ts'][11:16]))
     # A task anchor is two events: `entry:` when it was taken on and `end:`
-    # when it was finished, usually on different days.
+    # when it was finished or dropped, usually on different days.
     for r in note_records() + log_records():
         thread = ', '.join(r['threads']) or '-'
         for line in r['body'].splitlines():
@@ -174,7 +174,8 @@ def stream_documents():
             body = f"({a.assignee}) {a.body}" if a.assignee else a.body
             out.append(_event('task', a.entry, thread, body, r['path']))
             if a.end:
-                out.append(_event('done', a.end, thread, body, r['path']))
+                closed = 'dropped' if a.kind == 'DROPPED' else 'done'
+                out.append(_event(closed, a.end, thread, body, r['path']))
     return out
 
 
@@ -413,10 +414,11 @@ def cmd_overview(args):
         by_type[r['type'] or '-'] += 1
     entries = sum(r['entries'] for r in logs)
 
-    anchors = {'open': 0, 'done': 0}
+    anchors = {'open': 0, 'done': 0, 'dropped': 0}
     for r in notes + logs:
         anchors['open'] += len(re.findall(r'^TASK:', r['body'], re.M))
         anchors['done'] += len(re.findall(r'^DONE:', r['body'], re.M))
+        anchors['dropped'] += len(re.findall(r'^DROPPED:', r['body'], re.M))
 
     recent = sorted(notes + logs, key=lambda r: (r['date'], r['path']), reverse=True)
     if args.limit:  # 0 means all, as for every other --limit
@@ -427,6 +429,7 @@ def cmd_overview(args):
         'notes': len(notes), 'notes_by_type': dict(by_type),
         'logs': len(logs), 'entries': entries,
         'tasks_open': anchors['open'], 'tasks_done': anchors['done'],
+        'tasks_dropped': anchors['dropped'],
         'minutes': mins,
         'last': max([r['date'] for r in notes + logs], default=''),
         'recent': [{k: r[k] for k in ('path', 'date', 'type', 'topic')}
@@ -443,7 +446,8 @@ def cmd_overview(args):
     types = ', '.join(f"{k} {v}" for k, v in sorted(by_type.items())) or '-'
     print(f"  notes      {data['notes']:>4}   ({types})")
     print(f"  logs       {data['logs']:>4}   {entries} entries")
-    print(f"  tasks      {data['tasks_open']:>4} open, {data['tasks_done']} done")
+    print(f"  tasks      {data['tasks_open']:>4} open, {data['tasks_done']} done, "
+          f"{data['tasks_dropped']} dropped")
     print(f"  hours      {fmt_hours(mins):>4}")
     print(f"  last       {data['last'] or '-'}")
     if recent:

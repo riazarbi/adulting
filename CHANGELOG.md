@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-11-18 - `tasks drop`: close an abandoned task without marking it done
+
+Story: `stories/2026-11-18-tasks-drop.md`. A task could only leave the open
+list as `DONE:`, so an abandoned one either stayed open or was recorded as
+finished. It can now be dropped.
+
+- **New subcommand `tasks drop <uuid>`:** rewrites `TASK:` to `DROPPED:` in place and stamps `end:<today>`; prints `dropped: <uuid>  <body>`. Then prints `still depended on by: <uuid>  <body>` for each open task whose `depends:` names it, and changes none of them.
+- **Refusals:** `drop` on a `DONE:` task (`<uuid> is done`) and `done` on a `DROPPED:` one (`<uuid> was dropped`), exit 1. Dropping twice is `already dropped`, exit 0.
+- **New anchor kind `DROPPED:`** in the `task_anchor` and `log` schemas; lint requires `end` on it as on `DONE:`.
+- **`search stream`** emits a `dropped` event at `end` (new `--kind` value) instead of `done`. **`search overview`** prints and returns `tasks_dropped`.
+- **Meeting notes** (`notes pdf` / `minutes`) list a dropped action as `Dropped`.
+- **Unchanged:** `tasks list`/`next` already show open tasks only, and flush dedup matches open tasks only, so re-adding a dropped task makes a new one.
+- **`task-workflow`** (story `stories/2026-11-18-task-skill-drop.md`): proposes `drop`, not `done`, when the owner says a task is off; asks when it's unclear which; proposes a `buffer add-text` for a reason worth keeping; relays `still depended on by:` and asks what to do with each.
+
 ## 2026-10-26 - `payments statement --opening`: a statement that starts on a date
 
 Story: `stories/2026-10-26-statement-opening-balance.md`. A PDF statement

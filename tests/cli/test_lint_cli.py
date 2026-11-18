@@ -260,7 +260,7 @@ def _shape_violation(path):
     return f"{path}:9: line does not conform to task_anchor shape /{SHAPE}/"
 
 
-SHAPE = (r"^(?P<kind>TASK|DONE):\s+(?:\[#(?P<priority>[^\]]+)\]\s+)?(?:\((?P<assignee>[^)]+)\)\s+)?"
+SHAPE = (r"^(?P<kind>TASK|DONE|DROPPED):\s+(?:\[#(?P<priority>[^\]]+)\]\s+)?(?:\((?P<assignee>[^)]+)\)\s+)?"
          r"(?P<body>.+?)\s+<!--\s*(?P<uuid>[a-f0-9]{8})\s+entry:(?P<entry>\d{4}-\d{2}-\d{2})"
          r"(?:\s+end:(?P<end>\d{4}-\d{2}-\d{2}))?(?:\s+due:(?P<due>\d{4}-\d{2}-\d{2}))?"
          r"(?:\s+scheduled:(?P<scheduled>\d{4}-\d{2}-\d{2}))?(?:\s+depends:(?P<depends>[a-f0-9,]+))?"
@@ -322,6 +322,14 @@ def test_done_without_end_flagged(vault):
         "DONE: Bad anchor <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
     assert violations(vault.run(cli="lint")) == [
         f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor: kind=DONE requires 'end'",
+    ]
+
+
+def test_dropped_without_end_flagged(vault):
+    anchor_note(vault,
+        "DROPPED: Bad anchor <!--abcd1234 entry:2026-05-27-->", stem="2026-05-27-09-15-22")
+    assert violations(vault.run(cli="lint")) == [
+        f"{vault.home}/threads/Projects/SQR/notes/2026-05-27-09-15-22.md:9: task_anchor: kind=DROPPED requires 'end'",
     ]
 
 

@@ -22,9 +22,9 @@ def seed_note(vault, stem, *anchor_lines, threads=("Projects/SQR",)):
 
 
 def anchor_lines(vault, relpath):
-    """Every TASK:/DONE: line in the file, in order."""
+    """Every TASK:/DONE:/DROPPED: line in the file, in order."""
     return [ln for ln in vault.lines(relpath)
-            if ln.startswith("TASK:") or ln.startswith("DONE:")]
+            if ln.startswith(("TASK:", "DONE:", "DROPPED:"))]
 
 
 def first_anchor(vault, relpath):
@@ -448,6 +448,77 @@ def test_done_flips_kind_and_stamps_end(vault):
     assert r.stdout == "done: abcd1234  Send report\n"
     assert first_anchor(vault, "threads/Projects/SQR/notes/2026-05-27-09-15-22.md") == (
         f"DONE: Send report <!--abcd1234 entry:2026-05-20 end:{date.today().isoformat()}-->  ")
+
+
+# ---------- drop ----------
+
+NOTE = "threads/Projects/SQR/notes/2026-05-27-09-15-22.md"
+
+
+def test_drop_flips_kind_stamps_end_and_keeps_the_rest(vault):
+    setup_vault(vault)
+    seed_note(vault, "2026-05-27-09-15-22",
+        "TEXT: before",
+        "TASK: [#H] (Remy Dorn) Send report <!--abcd1234 entry:2026-05-20 due:2026-06-01-->",
+        "TEXT: after")
+    r = vault.run("drop", "abcd", cli="tasks")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "dropped: abcd1234  Send report\n", "")
+    lines = vault.lines(NOTE)
+    i = lines.index("TEXT: before")
+    assert lines[i + 1:i + 3] == [
+        f"DROPPED: [#H] (Remy Dorn) Send report <!--abcd1234 entry:2026-05-20 "
+        f"end:{date.today().isoformat()} due:2026-06-01-->  ",
+        "TEXT: after"]
+
+
+def test_drop_lists_open_dependents_and_leaves_them_alone(board):
+    """dddd0001 depends on aaaa0001; the done task aaaa0002 would be listed
+    too if drop did not look at open tasks only."""
+    board.run("add-depends", "aaaa0002", "aaaa0001", cli="tasks")
+    board.run("add-depends", "aaaa0003", "aaaa0001", cli="tasks")
+    before = board.read("threads/Topics/zeta/logs/2026-09-13.md")
+    r = board.run("drop", "aaaa0001", cli="tasks")
+    assert (r.returncode, r.stderr) == (0, "")
+    assert r.stdout == (
+        "dropped: aaaa0001  Existing\n"
+        "still depended on by: dddd0001  Draft the scope note\n"
+        "still depended on by: aaaa0003  second log task\n")
+    assert board.read("threads/Topics/zeta/logs/2026-09-13.md") == before
+    assert "depends:aaaa0001" in first_anchor(
+        board, "threads/Projects/SQR/notes/2026-09-10-14-30-00.md")
+
+
+def test_dropped_tasks_leave_list_and_next(board):
+    board.run("drop", "aaaa0001", cli="tasks")
+    listed = json.loads(board.run("list", "--json", cli="tasks").stdout)
+    assert "aaaa0001" not in [row["uuid"] for row in listed]
+    assert "aaaa0001" not in board.run("next", cli="tasks").stdout
+    assert "kind:        DROPPED\n" in board.run("show", "aaaa0001", cli="tasks").stdout
+
+
+def test_drop_twice_is_a_no_op(vault):
+    setup_vault(vault)
+    seed_note(vault, "2026-05-27-09-15-22", "TASK: t <!--abcd1234 entry:2026-05-20-->")
+    vault.run("drop", "abcd1234", cli="tasks")
+    before = vault.read(NOTE)
+    r = vault.run("drop", "abcd1234", cli="tasks")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "abcd1234 already dropped\n", "")
+    assert vault.read(NOTE) == before
+
+
+@pytest.mark.parametrize("line, argv, message", [
+    ("DONE: t <!--abcd1234 entry:2026-05-20 end:2026-05-21-->", ["drop", "abcd1234"],
+     "tasks: error: abcd1234 is done"),
+    ("DROPPED: t <!--abcd1234 entry:2026-05-20 end:2026-05-21-->", ["done", "abcd1234"],
+     "tasks: error: abcd1234 was dropped"),
+], ids=["drop a done task", "finish a dropped task"])
+def test_done_and_dropped_do_not_turn_into_each_other(vault, line, argv, message):
+    setup_vault(vault)
+    seed_note(vault, "2026-05-27-09-15-22", line)
+    before = vault.read(NOTE)
+    r = vault.run(*argv, cli="tasks")
+    assert (r.returncode, r.stdout, r.stderr) == (1, "", message + "\n")
+    assert vault.read(NOTE) == before
 
 
 def test_rm_depends_unknown_target_fails(vault):

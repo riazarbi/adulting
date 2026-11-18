@@ -9,7 +9,7 @@ Scripts to help me organise my day-to-day life. Everything stores plain-text sta
 - **Person** — a contact you track. People live in `~/vault/people/` and are link targets — never threads themselves.
 - **Time entry** — a billable (or unbillable) session of work on a thread. Entries live in the thread's `hours.md` as JSON inside a ```simple-time-tracker fence, so Obsidian's Super Simple Time Tracker format renders them natively.
 - **Payment** — money received against a thread. Records live in the thread's `payments.md`, same shape as hours.
-- **Log** — a per-thread, per-day file at `~/vault/threads/<Kind>/<Name>/logs/<date>.md`, written by `buffer flush`. Its body is a list of statements: `TEXT:` observations, `REF:` pointers to other vault files, and the `TASK:`/`DONE:` anchors that `tasks` manages.
+- **Log** — a per-thread, per-day file at `~/vault/threads/<Kind>/<Name>/logs/<date>.md`, written by `buffer flush`. Its body is a list of statements: `TEXT:` observations, `REF:` pointers to other vault files, and the `TASK:`/`DONE:`/`DROPPED:` anchors that `tasks` manages.
 - **Action** — a task. Notes and logs contain `ACTION:` lines that the `tasks` bridge ingests by rewriting them in place to `TASK:` anchors with an 8-char uuid and inline attrs (`entry`, `due`, `scheduled`, `priority`, `depends`). Source files are the only store — there is no backend.
 - **Stat** — a number tracked over time: push-ups, steps, money spent. A stat is declared once in a thread file's frontmatter (`stats:`), and each value lands in that thread's log as a `STAT:` line. An event is an `int` stat logged as `1`.
 - **Buffer** — `~/vault/buffer.md`, the staging queue for quick captures. `buffer add-*`, `tasks add`, `stats log` and the `REF:` pointers other commands drop all go here first; `buffer flush` files them into the threads' daily logs.
@@ -128,6 +128,7 @@ Markdown note taker. Notes live in their first thread's folder, `~/vault/threads
 | `ACTION:`   | Action item — ingested by `tasks` and rewritten to a `TASK:` anchor    |
 | `TASK:`     | Anchored open action (managed by `tasks`; don't write by hand)         |
 | `DONE:`     | Anchored completed action (set by `tasks done`)                        |
+| `DROPPED:`  | Anchored abandoned action (set by `tasks drop`)                        |
 | `AGREED:`   | Formal agreement — surfaced in `notes minutes`                         |
 | `RESOLVED:` | Formal resolution — surfaced in `notes minutes`                        |
 | `!:`        | Important callout — surfaced in `notes pdf` summary                    |
@@ -187,12 +188,14 @@ Bridge from `ACTION:` lines in notes and logs into anchored `TASK:` lines, plus 
 | `tasks --dry-run`        | Show what would be ingested without writing                                                 |
 | `tasks --quiet`          | Suppress per-action output                                                                  |
 | `tasks add <thread> <text>` | Buffer a structured `ACTION:` (same as `buffer add-action`); it becomes a task on `buffer flush` |
-| `tasks <subcommand>`     | See `tasks --help` for `done`, `set-{description,assignee,due,scheduled,priority}`, `add-depends`, `rm-depends`, `list`, `next`, `show` |
+| `tasks <subcommand>`     | See `tasks --help` for `done`, `drop`, `set-{description,assignee,due,scheduled,priority}`, `add-depends`, `rm-depends`, `list`, `next`, `show` |
 
 Anchor shape on disk (validated by the `task_anchor` schema):
 ```
 TASK: [#H] (Assignee) <body> <!--<uuid8> entry:YYYY-MM-DD [end:…] [due:…] [scheduled:…] [depends:<u8>,…]-->
 ```
+
+`tasks done` closes a task as finished (`DONE:`); `tasks drop` closes one that was abandoned (`DROPPED:`), so it doesn't count as done. Both stamp `end:<today>` and leave the line where it is. `drop` lists any open task whose `depends:` names the dropped one (`still depended on by: <uuid>  <body>`) and changes none of them; `rm-depends` or drop those yourself. Re-adding a dropped task makes a new one.
 
 Validation rules at ingest:
 - Each thread the file names (a note's `threads:` list, a log's `thread:`) must resolve to an existing thread file.
@@ -444,7 +447,7 @@ The visible top level (what Obsidian shows in its sidebar) is only user content:
 | `thread.md`                   | Thread files, `threads/<Kind>/<Name>.md`                        |
 | `person.md`                   | Person files in `people/`                                       |
 | `thread_entry.md`             | Bullet entries within thread bodies (legacy; rare today)        |
-| `task_anchor.md`              | `TASK:`/`DONE:` lines in notes and logs (uuid, attrs, depends)  |
+| `task_anchor.md`              | `TASK:`/`DONE:`/`DROPPED:` lines in notes and logs (uuid, attrs, depends) |
 | `stat_line.md`                | `STAT:` lines in a thread's logs (declared name, typed value, timestamp on the log's date) |
 | `hours_file.md`               | A thread's `hours.md` (tracker block, entry objects)            |
 | `payments_file.md`            | A thread's `payments.md` (payments block, payment objects)      |

@@ -1,6 +1,6 @@
 ---
 name: task-workflow
-description: Handles the lifecycle of an action item — adding one, modifying an existing one, querying the list, and reporting completion. Activate when an inbox message is an action item, a task modification, a task query, or a completed-action report.
+description: Handles the lifecycle of an action item — adding one, modifying an existing one, querying the list, reporting completion, and dropping one that was abandoned. Activate when an inbox message is an action item, a task modification, a task query, a completed-action report, or says a task is no longer happening.
 ---
 
 # Skill: task workflow
@@ -78,7 +78,8 @@ filtered by thread. Then use the matching `set-*` subcommand.
 Two cases need judgement:
 
 - **"Not yet, look at it later"** — there is no hold attribute. Use
-  `set-scheduled`; the task drops out of `next` until that date.
+  `set-scheduled`; the task drops out of `next` until that date. This is
+  not `drop`: the task is still going to happen.
 - **"Blocked on something else"** — add the blocking task first,
   then `add-depends` the blocked one on it. Propose both, execute in
   order.
@@ -102,3 +103,31 @@ adding a new record — it keeps the original history intact.
 
 Only if nothing matches: add the task, then mark it done. Two steps,
 one proposal.
+
+## Dropping a task
+
+`drop` closes a task that is not going to happen. `done` closes one that
+did. Never use `done` for an abandoned task: the record would say it
+happened.
+
+Drop when the owner says the task is off: "forget it", "cancel the
+Northwind scope", "not doing that any more", "no longer needed", the
+other party pulled out. If it is unclear whether it was done or abandoned
+("that's off my plate"), ask. The two records say opposite things.
+
+Find the uuid as for completion: by prefix if given, else `tasks list`
+filtered by thread. If nothing matches, there is nothing to drop; say so.
+Never add a task only to drop it.
+
+`drop` records no reason. If the owner gives one worth keeping ("they
+went with another firm"), propose a `buffer add-text` to the task's
+thread alongside the drop, and run both on one confirm.
+
+Relay it as `Dropped abcd1234.` If the output has
+`still depended on by: ef567890  Invoice Northwind for scoping` lines,
+those tasks were left alone. List them and ask, for each one, whether to
+`rm-depends` it from the dropped task or drop it too. Change nothing
+until the owner answers.
+
+`drop` refuses a done task (`is done`) and `done` refuses a dropped one
+(`was dropped`). Relay the error; the CLI cannot reverse either.

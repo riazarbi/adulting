@@ -670,8 +670,8 @@ def _task_anchor_per_line(captures):
     end = captures.get('end')
     assignee = captures.get('assignee')
 
-    if kind == 'DONE' and not end:
-        yield "task_anchor: kind=DONE requires 'end'"
+    if kind in ('DONE', 'DROPPED') and not end:
+        yield f"task_anchor: kind={kind} requires 'end'"
     if end and entry and end < entry:
         yield f"task_anchor: end {end!r} precedes entry {entry!r}"
     if assignee:

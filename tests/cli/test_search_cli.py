@@ -252,7 +252,7 @@ def test_overview_text(search_vault):
         "\n"
         "  notes         1   (Meeting 1)\n"
         "  logs          1   4 entries\n"
-        "  tasks         1 open, 0 done\n"
+        "  tasks         1 open, 0 done, 0 dropped\n"
         "  hours         -\n"
         "  last       2026-08-28\n"
         "\n"
@@ -273,7 +273,7 @@ def test_overview_hours_for_a_billed_thread(search_vault):
     r = search_vault.run("overview", "Alpha", "--json", cli="search")
     assert json.loads(r.stdout) == {
         "thread": "Projects/Alpha", "notes": 1, "notes_by_type": {"Meeting": 1},
-        "logs": 0, "entries": 0, "tasks_open": 1, "tasks_done": 0, "minutes": 150,
+        "logs": 0, "entries": 0, "tasks_open": 1, "tasks_done": 0, "tasks_dropped": 0, "minutes": 150,
         "last": "2026-08-27",
         "recent": [{"path": path(search_vault, AGENDA), "date": "2026-08-27",
                     "type": "Meeting", "topic": "Agenda"}]}
@@ -369,7 +369,7 @@ def test_stream_unknown_kind_message(search_vault):
     r = search_vault.run("stream", "--kind", "note,bogus,nope", cli="search")
     assert r.returncode == 1
     assert r.stderr == ("search: error: unknown kind(s) bogus, nope; choose from note, log, "
-                        "task, done, hours, payment, thread, person, pending\n")
+                        "task, done, dropped, hours, payment, thread, person, pending\n")
 
 
 def test_one_anchor_yields_two_events_on_different_days(stocked):
@@ -382,6 +382,15 @@ def test_one_anchor_yields_two_events_on_different_days(stocked):
                          "--kind", "task,done", "--json", cli="search").stdout)
     by_kind = {r["kind"]: r["date"] for r in rows}
     assert by_kind == {"task": "2026-06-02", "done": "2026-09-10"}, rows
+
+
+def test_a_dropped_anchor_ends_in_a_dropped_event_not_a_done_one(stocked):
+    _log_with(stocked, "Processes", "SQR", "2026-06-02",
+              "DROPPED: Sew the button <!--e845abea entry:2026-06-02 end:2026-09-10-->")
+    rows = json.loads(stocked.run("stream", "--since", "2026-01-01",
+                         "--kind", "task,done,dropped", "--json", cli="search").stdout)
+    by_kind = {r["kind"]: r["date"] for r in rows}
+    assert by_kind == {"task": "2026-06-02", "dropped": "2026-09-10"}, rows
 
 
 def test_hours_appear_once_before_and_after_flush(stocked):

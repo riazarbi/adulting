@@ -16,6 +16,7 @@ No-arg invocation (used as a pre-pass by `notes`):
 Subcommands:
   add <thread> <text>            buffer-append a structured ACTION
   done <uuid>                    flip source TASK->DONE; stamp end:<today>
+  drop <uuid>                    flip source TASK->DROPPED (abandoned); stamp end:<today>
   set-description <uuid> <text>  rewrite body
   set-assignee <uuid> <person>   rewrite (Assignee) prefix
   set-due <uuid> <YYYY-MM-DD>    set due date
@@ -43,7 +44,7 @@ from adulting import vault as V
 # Mirror of schemas/task_anchor.md `shape`. The two regexes are kept in
 # lockstep — if you change one, change the other.
 ANCHOR_RE = re.compile(
-    r'^(?P<kind>TASK|DONE):\s+'
+    r'^(?P<kind>TASK|DONE|DROPPED):\s+'
     r'(?:\[#(?P<priority>[^\]]+)\]\s+)?'
     r'(?:\((?P<assignee>[^)]+)\)\s+)?'
     r'(?P<body>.+?)\s+'
@@ -65,7 +66,7 @@ PRIORITY_ORDER = {'H': 0, 'M': 1, 'L': 2}
 # annotations in the code base.
 @dataclass
 class Anchor:
-    kind: str               # 'TASK' or 'DONE'
+    kind: str               # 'TASK', 'DONE' or 'DROPPED'
     priority: str | None    # 'H'/'M'/'L' or None
     assignee: str | None
     body: str
@@ -379,9 +380,30 @@ def cmd_done(args):
     if anchor.kind == 'DONE':
         print(f"{anchor.uuid} already done")
         return 0
+    if anchor.kind == 'DROPPED':
+        V.die(f"{anchor.uuid} was dropped")
     today = V.today()
     new = mutate_anchor(anchor, kind='DONE', end=today)
     print(f"done: {new.uuid}  {new.body[:60]}")
+    return 0
+
+
+# ---------- subcommand: drop ----------
+
+def cmd_drop(args):
+    """Close a task without saying it was done: TASK -> DROPPED, end:<today>.
+    Open tasks that depend on it are listed, and left as they are."""
+    anchor = find_anchor(args.uuid)
+    if anchor.kind == 'DROPPED':
+        print(f"{anchor.uuid} already dropped")
+        return 0
+    if anchor.kind == 'DONE':
+        V.die(f"{anchor.uuid} is done")
+    new = mutate_anchor(anchor, kind='DROPPED', end=V.today())
+    print(f"dropped: {new.uuid}  {new.body[:60]}")
+    for a in walk_anchors():
+        if a.kind == 'TASK' and new.uuid in a.depends:
+            print(f"still depended on by: {a.uuid}  {a.body[:60]}")
     return 0
 
 
@@ -630,6 +652,13 @@ def main():
         help="Mark a task complete; rewrites source TASK->DONE and stamps end.")
     p.add_argument('uuid', help=UUID_HELP)
     p.set_defaults(func=cmd_done)
+
+    p = sub.add_parser('drop',
+        help="Close an abandoned task without marking it done; rewrites "
+             "source TASK->DROPPED, stamps end, and lists open tasks that "
+             "still depend on it (they are not changed).")
+    p.add_argument('uuid', help=UUID_HELP)
+    p.set_defaults(func=cmd_drop)
 
     p = sub.add_parser('set-description', help="Rewrite source body.")
     p.add_argument('uuid', help=UUID_HELP)

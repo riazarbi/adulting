@@ -985,6 +985,108 @@ def person_exists(name):
     return vault_file(f"people/{name}.md") is not None
 
 
+def person_names():
+    """Every declared person: the stems of people/*.md, sorted."""
+    folder = vault_home() / 'people'
+    if not folder.is_dir():
+        return []
+    return sorted(f.stem for f in folder.iterdir()
+                  if f.suffix == '.md' and not f.name.startswith('.') and f.is_file())
+
+
+def find_person(arg):
+    """The declared person `arg` names, or a ValueError saying why not.
+
+    Takes 'Jordan Blake', 'people/Jordan Blake' or '[[people/Jordan Blake]]'.
+    An exact stem wins, then a case-insensitive one. Otherwise the name must
+    be the only one that starts with, abbreviates or contains `arg`: a guess
+    between two people is refused, and so is a name with no person file,
+    which is what `--text` is for."""
+    arg = unwiki(arg or '').strip()
+    if arg.startswith('people/'):
+        arg = arg[len('people/'):].strip()
+    names = person_names()
+    if arg in names:
+        return arg
+    same = [n for n in names if n.lower() == arg.lower()]
+    if len(same) == 1:
+        return same[0]
+    # The heuristic rungs of fuzzy_score only: its difflib floor would
+    # match strangers to someone.
+    cands = [n for n in names if arg and fuzzy_score(arg, n) >= 0.6]
+    if len(cands) == 1:
+        return cands[0]
+    if cands:
+        more = f", and {len(cands) - 10} more" if len(cands) > 10 else ''
+        raise ValueError(f"ambiguous person {arg!r}; matches: {', '.join(cands[:10])}{more}")
+    raise ValueError(f"person not found: {arg!r} has no file in people/ "
+                     f"(use --text for a name without one)")
+
+
+def resolve_person(arg):
+    """find_person for a command: stop with the error if there is one."""
+    try:
+        return find_person(arg)
+    except ValueError as e:
+        die(str(e))
+
+
+# How a record refers to a person, strongest first. A record that refers to
+# someone more than one way reports the strongest. The README states the rule.
+PERSON_VIA = ('link', 'assignee', 'attendee', 'text')
+
+ANY_WIKILINK_RE = re.compile(r'\[\[[^\]]*\]\]')
+ANCHOR_HEAD_RE = re.compile(r'^(?:ACTION|TASK|DONE|DROPPED):\s*(?:\[#[^\]]+\]\s+)?\(([^)]*)\)')
+
+
+class PersonMatcher:
+    """Finds references to one declared person.
+
+    link      `[[people/X]]` anywhere, `[[people/X|alias]]` included
+    assignee  `(X)` heading an ACTION, TASK, DONE or DROPPED line
+    attendee  a plain `X` in a note's `people:` list
+    text      X's full name in the text, whole words, any case, outside links
+
+    Links and assignees are spelt exactly, as `lint` requires them to be.
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.link_re = re.compile(r'\[\[people/' + re.escape(name) + r'(?:[|#][^\]]*)?\]\]')
+        words = r'\s+'.join(re.escape(w) for w in name.split())
+        self.text_re = re.compile(r'(?<!\w)' + words + r'(?!\w)', re.IGNORECASE)
+
+    def line(self, line):
+        """How one line refers to the person, or None."""
+        if self.link_re.search(line):
+            return 'link'
+        head = ANCHOR_HEAD_RE.match(line.strip())
+        if head and head.group(1).strip() == self.name:
+            return 'assignee'
+        if self.text_re.search(ANY_WIKILINK_RE.sub(' ', line)):
+            return 'text'
+        return None
+
+    def attendee(self, entry):
+        """How one item of a note's `people:` list refers to the person."""
+        entry = str(entry or '').strip()
+        if self.link_re.search(entry):
+            return 'link'
+        if entry.lower() == self.name.lower():
+            return 'attendee'
+        return None
+
+    def record(self, body, people=()):
+        """(via, line) for the strongest reference in a note or log, or None.
+        `line` is where it was found: the first line that refers that way."""
+        found = [(self.attendee(p), f"people: {str(p).strip()}") for p in people or ()]
+        found += [(self.line(line), line.strip()) for line in body.splitlines()]
+        found = [(via, line) for via, line in found if via]
+        if not found:
+            return None
+        return min(found, key=lambda f: PERSON_VIA.index(f[0]))
+
+
 PRIORITIES = ('H', 'M', 'L')
 
 ASSIGNEE_PREFIX_RE = re.compile(r'^\((?P<assignee>[^)]*)\)\s*(?P<rest>.*)$')

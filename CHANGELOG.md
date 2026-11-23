@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-11-23 - `search --person` and `search person`: people as a filter dimension
+
+Story: `stories/2026-11-23-search-person.md`. Everything about a person is
+spread across the vault, and `search` could only find it as a substring.
+Person is now a filter dimension beside thread.
+
+- **One rule for a reference** (`vault.PersonMatcher`): a `link` (`[[people/X]]`, aliased included), an `assignee` (`(X)` on an action or anchor line), an `attendee` (a plain string in `people:`), or the full name as `text` outside links. The strongest is reported as `via`.
+- **New flag `--person NAME`** on `search notes`, `logs`, `activity` and `stream`, combining with `--thread` and the rest. Rows and events gain `via`. On `notes`/`logs` the snippet is the line that names the person, unless `--text` is given. `stream` matches line by line, pending buffer lines included. `activity --person` counts only the log lines that name the person, and no hours.
+- **New subcommand `search person NAME`:** first and last seen, notes by type, logs and log lines, tasks assigned (open, done, dropped), threads with counts, and recent items with `via` and the matching line. `--limit`, `--since`, `--until`, `--json` as on `overview`.
+- **Names resolve to a declared person:** an exact or case-insensitive stem, or the one name that starts with, abbreviates or contains it. Two candidates is `ambiguous person`; no file is `person not found` (use `--text`). A misspelling is not guessed.
+- **`recall`** (story `stories/2026-11-23-recall-skill-person.md`): routes person questions to `search person` and `--person`, passing the name as given; asks when a name is ambiguous; falls back to `--text` when a name has no person file; treats `via: text` as a mention, not attendance.
+- **Unchanged:** without `--person`, every subcommand's output is as before. `stream` takes about 0.13s on a real vault either way; `--person` adds about 0.04s.
+
 ## 2026-11-18 - `tasks drop`: close an abandoned task without marking it done
 
 Story: `stories/2026-11-18-tasks-drop.md`. A task could only leave the open

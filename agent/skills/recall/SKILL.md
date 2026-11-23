@@ -1,6 +1,6 @@
 ---
 name: recall
-description: Answers questions about what is in the vault — what happened on a thread, what was decided at a meeting, where something was mentioned, where attention has been going. Activate when the owner asks a question whose answer lives in their notes and logs rather than in his task list. For "what should I do next" use task-workflow; for hours and money use time-workflow and billing-workflow; for tracked numbers ("how many push-ups this month") use stats-workflow.
+description: Answers questions about what is in the vault — what happened on a thread, what was decided at a meeting, where something was mentioned, where attention has been going, what has been going on with a person and when they last came up. Activate when the owner asks a question whose answer lives in their notes and logs rather than in his task list. For "what should I do next" use task-workflow; for hours and money use time-workflow and billing-workflow; for tracked numbers ("how many push-ups this month") use stats-workflow.
 ---
 
 # Skill: recall
@@ -21,6 +21,11 @@ Read-only throughout. No confirm step — answer the question.
 | "where are we with Northwind", "everything on Northwind" | `search overview Northwind` |
 | "what happened today", "did that get logged" | `search stream --today` |
 | "what's happened on Northwind lately" | `search stream --thread Northwind` |
+| "everything with Jordan", "where are we with Jordan Blake" | `search person "Jordan Blake"` |
+| "when did I last meet Dana" | `search notes --person "Dana Kim" --type Meeting --limit 1` |
+| "what did Jordan and I discuss on Northwind" | `search notes --thread Northwind --person "Jordan Blake"` |
+| "what's happened with Priya lately" | `search stream --person Priya` |
+| "what is Omar meant to be doing" | not here — `task-workflow`, `tasks list --assignee` |
 | "what did we say about the lease on Northwind" | the thread's folder — see below |
 | "how many push-ups this week" | not here — `stats-workflow` |
 
@@ -31,6 +36,34 @@ Read-only throughout. No confirm step — answer the question.
 landed. It merges every dated record — notes, log lines, tasks opened and
 closed, hours, payments — into one chronology, and marks anything still
 sitting in the buffer as `pending`.
+
+## People
+
+`--person` and `search person` take the name as the owner said it: a full
+name, any case, or a unique part of one, such as a first name only one
+person has. Don't call `people list` first.
+
+- **Ambiguous.** The error lists the candidates. If the conversation
+  settles which one (the thread in question, an earlier message), use
+  them. Otherwise ask, naming the candidates.
+- **Not found.** The name has no person file. Say so, then fall back to
+  `search notes --text` and `search logs --text`. Don't propose creating
+  the person — this skill is read-only.
+
+Each result says how it refers to the person, as `via`:
+
+- `link`, `assignee`, `attendee` — the record is about them: they were
+  linked, owe the task, or were in the meeting.
+- `text` — their full name appears in it. A mention, not attendance.
+
+For "did I meet Dana", only a meeting note with Dana as a `link` or
+`attendee` is evidence. First names and nicknames alone never match as
+`text`. If the notes might use one, a `--text` search on it can find
+more — and say it was a looser search.
+
+`search person` gives first and last seen, the threads they come up on,
+tasks assigned to them, and the most recent records. It is pointers and
+counts, so the rule below still holds.
 
 ## Search, then read
 

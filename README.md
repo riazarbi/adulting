@@ -393,11 +393,25 @@ Read-only views over notes and logs: finding records, and summarising what happe
 
 | Command | What it does |
 |---|---|
-| `search notes` | Notes by `--thread`, `--type`, `--since`/`--until` or `--text` |
-| `search logs` | Daily logs by thread, date or text |
+| `search notes` | Notes by `--thread`, `--person`, `--type`, `--since`/`--until` or `--text` |
+| `search logs` | Daily logs by thread, person, date or text |
 | `search activity` | Threads ranked by what happened in a period — notes, logs and hours together |
 | `search overview <thread>` | The whole picture of one thread |
+| `search person <name>` | The whole picture of one person: where they come up, on which threads, and the tasks assigned to them |
 | `search stream` | Every dated record merged into one chronology, the unflushed buffer included |
+
+Thread and person are attributes of a record, not folders, so `--thread` and `--person` filter on them and combine: `--thread Northwind --person "Jordan Blake"` is Jordan on Northwind.
+
+A record refers to a person in one of four ways, strongest first. A record that refers to someone in more than one way reports the strongest, as `via`:
+
+| via | Matches |
+|---|---|
+| `link` | `[[people/Jordan Blake]]` anywhere, `[[people/Jordan Blake\|Jordan]]` included |
+| `assignee` | `(Jordan Blake)` heading an `ACTION:`, `TASK:`, `DONE:` or `DROPPED:` line |
+| `attendee` | a plain `Jordan Blake` in a note's `people:` list |
+| `text` | the full name in the text, whole words, any case, outside links |
+
+The person must be declared: `--person` takes a full name or a unique part of one, and resolves it against `people/`. A name with no person file is `person not found`; search for it with `--text`. First names and nicknames alone do not match as `text`. `activity --person` does not count hours, which never name anyone.
 
 Results are absolute paths plus metadata, never file bodies. Dates are event dates — a note's frontmatter `timestamp`, not its filename. Hours descriptions are not searched (see [Notes, logs and hours](#notes-logs-and-hours)).
 

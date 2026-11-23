@@ -13,7 +13,7 @@ SURFACE = {
               ["ingest", "add", "done", "drop", "set-description", "set-assignee", "set-due", "set-scheduled",
                "set-priority", "add-depends", "rm-depends", "list", "next", "show"]),
     "notes": (["--help-json"], ["new", "list", "cat", "last", "copy", "delete", "pdf", "minutes", "agenda"]),
-    "search": (["--help-json"], ["notes", "logs", "activity", "overview", "stream"]),
+    "search": (["--help-json"], ["notes", "logs", "activity", "overview", "person", "stream"]),
     "threads": (["--help-json"], ["list", "show", "new"]),
     "people": (["--help-json"], ["list", "show", "new", "delete"]),
     "hours": (["--help-json"], ["log", "list", "report", "show", "edit", "rm"]),

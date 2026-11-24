@@ -21,7 +21,7 @@ geometry:
 
 ## Minuted Agreements
 
-Something without frontmatter
+Something without frontmatter  
 
 --------------------------------------------------------------------
 

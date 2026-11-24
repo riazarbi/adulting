@@ -53,9 +53,25 @@ def test_cut_and_fill_sections():
 def test_matching_lines_drops_a_repeat_of_the_line_kept_before():
     """Unmatched lines between two equal matches do not keep them apart."""
     assert R.matching_lines(["AGREED: a", "AGREED: a", "x", "AGREED: a", "no match"],
-                            "AGREED:", "AGREED: ") == ["a"]
+                            "AGREED:", "AGREED: ") == ["a  "]
     assert R.matching_lines(["AGREED: a", "AGREED: b", "AGREED: a"],
-                            "AGREED:", "AGREED: ") == ["a", "b", "a"]
+                            "AGREED:", "AGREED: ") == ["a  ", "b  ", "a  "]
+
+
+def test_matching_lines_end_in_a_hard_break():
+    """Each kept line ends in exactly two spaces, so markdown keeps it on its
+    own line; without them pandoc runs the resolutions into one paragraph.
+    A line that already had trailing spaces counts as the same line, and a
+    line left empty stays empty."""
+    assert R.matching_lines(["RESOLVED: a", "RESOLVED: a  ", "RESOLVED: b\t", "RESOLVED: "],
+                            "RESOLVED:", "RESOLVED: ") == ["a  ", "b  ", ""]
+
+
+def test_minutes_put_each_resolution_on_its_own_line():
+    note = ("---\ntopic: t\ntype: Meeting\n---\n\n# Content\n"
+            "RESOLVED: Levy increases by 5%\nRESOLVED: Roof survey approved\n")
+    rendered = R.minutes_markdown(note, owner="Remy Dorn")
+    assert "\nLevy increases by 5%  \nRoof survey approved  \n" in rendered
 
 
 def test_action_rows_mark_each_action_open_done_or_dropped():
@@ -196,7 +212,7 @@ def test_pdf_markdown():
     # `## Minuted Agreements` heading along with the rest of that section.
     body = R.pdf_markdown(KICKOFF, "Remy Dorn").split(PREAMBLE, 1)[1]
     assert body == (
-        f"\n# Summary\n\nBudget is tight\n\n{HR}\n\n## Resolutions\n\n{HR}\n\n"
+        f"\n# Summary\n\nBudget is tight  \n\n{HR}\n\n## Resolutions\n\n{HR}\n\n"
         f"\\newpage\n## Action Items\n\n{ACTIONS}\n{HR}\n\n\\newpage\n\n"
         + CONTENT + "### Empty\n\n")
 
@@ -206,8 +222,8 @@ def test_minutes_markdown():
     action with no assignee is the owner's."""
     body = R.minutes_markdown(KICKOFF, "Remy Dorn").split(PREAMBLE, 1)[1]
     assert body == (
-        f"\n# Summary\n\n## Minuted Agreements\n\nShip in May\n\n{HR}\n\n"
-        f"## Resolutions\n\nHire a PM\n\n{HR}\n\n"
+        f"\n# Summary\n\n## Minuted Agreements\n\nShip in May  \n\n{HR}\n\n"
+        f"## Resolutions\n\nHire a PM  \n\n{HR}\n\n"
         f"\\newpage\n## Action Items\n\n{ACTIONS}\n{HR}\n\n\\newpage\n\n"
         + CONTENT + "### Empty\n\n")
 

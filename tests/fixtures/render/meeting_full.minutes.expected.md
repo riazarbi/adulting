@@ -30,14 +30,14 @@ geometry:
 
 ## Minuted Agreements
 
-Replace the gutters
-Get three quotes
+Replace the gutters  
+Get three quotes  
 
 --------------------------------------------------------------------
 
 ## Resolutions
 
-Levy increases by 5%
+Levy increases by 5%  
 
 --------------------------------------------------------------------
 

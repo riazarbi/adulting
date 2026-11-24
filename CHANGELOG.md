@@ -2,6 +2,16 @@
 
 Dated entries, newest first. Each header is a unit of work; bullets capture the detail.
 
+## 2026-11-24 - `notes minutes`: one resolution per line
+
+Two `RESOLVED:` lines rendered as one run-on paragraph in the PDF unless
+the note happened to end each in two spaces: the lines were copied into
+the Summary bare, and markdown joins consecutive lines.
+
+- **Every gathered line ends in a hard break** (two spaces), whatever trailing whitespace the note gave it: Resolutions and Minuted Agreements in `notes minutes`, the `!:` callouts in `notes pdf`. The note itself is not changed.
+- **`RESOLVED: x` and `RESOLVED: x  ` are now the same line** for the repeat check, since trailing whitespace no longer counts.
+- **Fixtures regenerated on purpose:** the four `*.minutes.expected.md` files that gather a line now end it in two spaces; nothing else in them changed.
+
 ## 2026-11-23 - `search --person` and `search person`: people as a filter dimension
 
 Story: `stories/2026-11-23-search-person.md`. Everything about a person is

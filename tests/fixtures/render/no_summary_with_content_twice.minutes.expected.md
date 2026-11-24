@@ -27,7 +27,7 @@ No minutes agreements were made.
 
 ## Resolutions
 
-A resolution
+A resolution  
 
 --------------------------------------------------------------------
 

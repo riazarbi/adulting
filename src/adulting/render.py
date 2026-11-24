@@ -212,12 +212,16 @@ def fill_sections(lines, inserts):
 
 def matching_lines(lines, needle, prefix):
     """The lines containing `needle`, the first `prefix` removed from each.
-    A line equal to the one kept before it is dropped, even when unmatched
-    lines came between them."""
+    Each line with text ends in a markdown hard break (two spaces), whatever
+    trailing whitespace the note gave it, so consecutive lines are not run
+    into one paragraph. A line equal to the one kept before it is dropped,
+    even when unmatched lines came between them."""
     out = []
     for line in lines:
         if needle in line:
-            line = line.replace(prefix, '', 1)
+            line = line.replace(prefix, '', 1).rstrip(SPACE)
+            if line:
+                line += '  '
             if not out or out[-1] != line:
                 out.append(line)
     return out

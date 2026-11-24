@@ -22,7 +22,7 @@ geometry:
 
 ## Minuted Agreements
 
-Adopt the budget
+Adopt the budget  
 
 --------------------------------------------------------------------
 
